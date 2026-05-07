@@ -26,6 +26,7 @@
       </header>
 
       <MessageList />
+      <TypingIndicator />
       <MessageInput />
     </main>
 
@@ -50,6 +51,7 @@ import MessageList from '../components/MessageList.vue';
 import MessageInput from '../components/MessageInput.vue';
 import MemberList from '../components/MemberList.vue';
 import NetworkForm from '../components/NetworkForm.vue';
+import TypingIndicator from '../components/TypingIndicator.vue';
 
 const auth = useAuthStore();
 const networks = useNetworksStore();

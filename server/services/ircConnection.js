@@ -7,6 +7,7 @@ export class IrcConnection {
     this.network = network;
     this.onEvent = onEvent;
     this.client = new IRC.Client();
+    this.client.requestCap('message-tags');
     this.state = 'disconnected';
     this.channels = new Map();
     this.backlog = new Map();
@@ -20,6 +21,15 @@ export class IrcConnection {
       if (log.length > BACKLOG_PER_TARGET) log.shift();
       this.backlog.set(event.target, log);
     }
+    this.onEvent({
+      ...event,
+      userId: this.network.user_id,
+      networkId: this.network.id,
+      time: event.time || new Date().toISOString(),
+    });
+  }
+
+  publishEphemeral(event) {
     this.onEvent({
       ...event,
       userId: this.network.user_id,
@@ -139,6 +149,22 @@ export class IrcConnection {
     c.on('irc error', (event) => {
       this.publish({ type: 'error', text: event.error || event.reason || 'IRC error', raw: event });
     });
+
+    c.on('tagmsg', (event) => {
+      const me = c.user?.nick;
+      const isSelf = !!event.nick && event.nick === me;
+      if (isSelf) return;
+      const typing = event.tags && event.tags['+typing'];
+      if (!typing) return;
+      const targetIsChannel = event.target && event.target.startsWith('#');
+      const target = targetIsChannel ? event.target : event.nick;
+      this.publishEphemeral({
+        type: 'typing',
+        target,
+        nick: event.nick,
+        state: typing,
+      });
+    });
   }
 
   upsertChannel(name) {
@@ -170,6 +196,9 @@ export class IrcConnection {
   say(target, text) { this.client.say(target, text); }
   action(target, text) { this.client.action(target, text); }
   raw(line) { this.client.raw(line); }
+  sendTyping(target, state) {
+    this.client.tagmsg(target, { '+typing': state });
+  }
 
   disconnect(reason = 'caint shutting down') {
     this.client.quit(reason);

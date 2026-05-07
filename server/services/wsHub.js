@@ -126,6 +126,9 @@ export function attachWsHub(httpServer, sessionSecret) {
       case 'raw':
         ircManager.getConnection(userId, msg.networkId)?.raw(msg.line);
         break;
+      case 'typing':
+        ircManager.typing(userId, msg.networkId, msg.target, msg.state);
+        break;
       default:
         send(ws, { kind: 'error', text: `unknown message type: ${msg.type}` });
     }

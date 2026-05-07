@@ -11,7 +11,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { useNetworksStore } from '../stores/networks.js';
 import { socketSend } from '../composables/useSocket.js';
 
@@ -27,6 +27,79 @@ const placeholder = computed(() => {
   return `Message ${active.value.target} (try /help)`;
 });
 
+let typingState = null;
+let lastActiveSentAt = 0;
+let inactivityTimer = null;
+let typingTarget = null;
+
+function sendTyping(networkId, target, state) {
+  socketSend({ type: 'typing', networkId, target, state });
+}
+
+function clearInactivityTimer() {
+  if (inactivityTimer) {
+    clearTimeout(inactivityTimer);
+    inactivityTimer = null;
+  }
+}
+
+function endTypingTo(target) {
+  if (!target) return;
+  if (typingState && typingTarget && typingTarget.target === target.target && typingTarget.networkId === target.networkId) {
+    sendTyping(target.networkId, target.target, 'done');
+  }
+  typingState = null;
+  typingTarget = null;
+  clearInactivityTimer();
+}
+
+function onInput() {
+  if (!sendable.value) return;
+  const { networkId, target } = active.value;
+  const trimmed = text.value.trim();
+
+  if (trimmed === '' || text.value.startsWith('/')) {
+    if (typingState) {
+      sendTyping(networkId, target, 'done');
+      typingState = null;
+      typingTarget = null;
+    }
+    clearInactivityTimer();
+    return;
+  }
+
+  const now = Date.now();
+  if (typingState !== 'active' || now - lastActiveSentAt > 3000) {
+    sendTyping(networkId, target, 'active');
+    typingState = 'active';
+    typingTarget = { networkId, target };
+    lastActiveSentAt = now;
+  }
+
+  clearInactivityTimer();
+  const tNet = networkId;
+  const tTarget = target;
+  inactivityTimer = setTimeout(() => {
+    if (typingState === 'active' && text.value.trim() !== '') {
+      sendTyping(tNet, tTarget, 'paused');
+      typingState = 'paused';
+    }
+    inactivityTimer = null;
+  }, 3000);
+}
+
+watch(text, onInput);
+
+watch(active, (newActive, oldActive) => {
+  if (oldActive && (!newActive || oldActive.target !== newActive.target || oldActive.networkId !== newActive.networkId)) {
+    endTypingTo(oldActive);
+  }
+});
+
+onBeforeUnmount(() => {
+  if (active.value) endTypingTo(active.value);
+});
+
 function submit() {
   const raw = text.value;
   if (!raw.trim() || !active.value) return;
@@ -36,6 +109,9 @@ function submit() {
     handleCommand(raw, networkId, target);
   } else if (sendable.value) {
     socketSend({ type: 'send', networkId, target, text: raw });
+    typingState = null;
+    typingTarget = null;
+    clearInactivityTimer();
   } else {
     return;
   }

@@ -60,6 +60,9 @@ function applyEvent(event) {
     case 'channel-parted':
       buffers.drop(event.networkId, event.target);
       break;
+    case 'typing':
+      buffers.setTyping(event.networkId, event.target, event.nick, event.state);
+      break;
     case 'motd':
     case 'error':
       buffers.pushMessage({ ...event, target: event.target || `:server:${event.networkId}` });

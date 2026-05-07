@@ -114,6 +114,15 @@ class IrcManager extends EventEmitter {
     return true;
   }
 
+  typing(userId, networkId, target, state) {
+    const conn = this.getConnection(userId, networkId);
+    if (!conn) return false;
+    if (!target || target.startsWith(':server:')) return false;
+    if (!['active', 'paused', 'done'].includes(state)) return false;
+    conn.sendTyping(target, state);
+    return true;
+  }
+
   shutdown() {
     for (const userMap of this.byUser.values()) {
       for (const conn of userMap.values()) {
