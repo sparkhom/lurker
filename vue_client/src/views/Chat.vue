@@ -4,7 +4,6 @@
       <div class="sidebar-head">
         <span class="logo">caint</span>
         <span class="status" :class="{ on: connected, off: !connected }">{{ connected ? '●' : '○' }}</span>
-        <button class="link" @click="showHighlights = true" title="Highlights">★</button>
         <button class="link" @click="showNetworkForm = true" title="Add network">+</button>
       </div>
       <BufferList />
@@ -36,7 +35,6 @@
     </aside>
 
     <NetworkForm v-if="showNetworkForm" @close="showNetworkForm = false" />
-    <HighlightsPanel v-if="showHighlights" @close="showHighlights = false" />
   </div>
 </template>
 
@@ -54,7 +52,6 @@ import MessageInput from '../components/MessageInput.vue';
 import MemberList from '../components/MemberList.vue';
 import NetworkForm from '../components/NetworkForm.vue';
 import TypingIndicator from '../components/TypingIndicator.vue';
-import HighlightsPanel from '../components/HighlightsPanel.vue';
 
 const auth = useAuthStore();
 const networks = useNetworksStore();
@@ -63,7 +60,6 @@ const router = useRouter();
 const { connected } = useSocket();
 
 const showNetworkForm = ref(false);
-const showHighlights = ref(false);
 const { activeKey } = storeToRefs(networks);
 
 const active = computed(() => networks.activeBuffer);

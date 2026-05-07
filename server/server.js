@@ -8,7 +8,6 @@ import { fileURLToPath } from 'url';
 
 import authRouter from './routes/auth.js';
 import networksRouter from './routes/networks.js';
-import highlightsRouter from './routes/highlights.js';
 import ircManager from './services/ircManager.js';
 import { attachWsHub } from './services/wsHub.js';
 import { purgeExpiredSessions } from './db/sessions.js';
@@ -32,7 +31,6 @@ app.use(cookieParser(SESSION_SECRET));
 
 app.use('/api/auth', authRouter);
 app.use('/api/networks', networksRouter);
-app.use('/api/highlights', highlightsRouter);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });

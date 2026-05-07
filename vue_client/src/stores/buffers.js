@@ -32,7 +32,6 @@ function ensureBuffer(state, networkId, target) {
       members: [],
       topic: null,
       unread: 0,
-      mention: false,
       typing: {},
       oldestId: null,
       hasMore: true,
@@ -116,16 +115,12 @@ export const useBuffersStore = defineStore('buffers', {
     },
     markRead(networkId, target) {
       const buf = this.buffers[key(networkId, target)];
-      if (buf) {
-        buf.unread = 0;
-        buf.mention = false;
-      }
+      if (buf) buf.unread = 0;
     },
-    markUnread(networkId, target, isMention = false) {
+    markUnread(networkId, target) {
       const buf = this.buffers[key(networkId, target)];
       if (!buf) return;
       buf.unread += 1;
-      if (isMention) buf.mention = true;
     },
     setTyping(networkId, target, nick, state) {
       if (!nick) return;

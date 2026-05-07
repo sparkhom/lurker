@@ -15,7 +15,6 @@ function wsUrl() {
 function applyEvent(event) {
   const networks = useNetworksStore();
   const buffers = useBuffersStore();
-  const me = networks.states[event.networkId]?.nick;
 
   switch (event.type) {
     case 'state':
@@ -26,7 +25,7 @@ function applyEvent(event) {
     case 'notice':
       buffers.pushMessage(event);
       if (!event.self && networks.activeKey !== `${event.networkId}::${event.target}`) {
-        buffers.markUnread(event.networkId, event.target, !!event.mention);
+        buffers.markUnread(event.networkId, event.target);
       }
       break;
     case 'join':

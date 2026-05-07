@@ -13,7 +13,6 @@
           :class="{
             active: isActive(net.id, buf.target),
             unread: buf.unread > 0,
-            mention: buf.mention,
             server: isServerBuffer(buf),
           }"
           @click="select(net.id, buf.target)"
@@ -159,7 +158,6 @@ function toggleNet(_) {
   border-left-color: var(--accent);
 }
 .channels li.unread .label { font-weight: 600; }
-.channels li.mention .label { color: var(--accent); }
 .channels li.server .label { color: var(--fg-muted); font-style: italic; }
 .bullet { color: var(--fg-muted); width: 12px; }
 .label { flex: 1; }

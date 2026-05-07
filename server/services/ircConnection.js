@@ -3,24 +3,6 @@ import { insertMessage } from '../db/messages.js';
 
 const PERSIST_TYPES = new Set(['message', 'action', 'notice', 'topic']);
 
-function isWordChar(c) {
-  return c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c === '_';
-}
-
-function nickMentioned(text, nick) {
-  if (!text || !nick) return false;
-  const t = text.toLowerCase();
-  const n = nick.toLowerCase();
-  let i = 0;
-  while ((i = t.indexOf(n, i)) !== -1) {
-    const before = i === 0 ? '' : t[i - 1];
-    const after = i + n.length >= t.length ? '' : t[i + n.length];
-    if (!isWordChar(before) && !isWordChar(after)) return true;
-    i += n.length;
-  }
-  return false;
-}
-
 export class IrcConnection {
   constructor({ network, onEvent }) {
     this.network = network;
@@ -48,8 +30,6 @@ export class IrcConnection {
     };
 
     if (this.shouldPersist(event)) {
-      const me = this.client.user?.nick;
-      const mention = !event.self && nickMentioned(event.text, me);
       const id = insertMessage({
         networkId: this.network.id,
         target: event.target,
@@ -59,10 +39,8 @@ export class IrcConnection {
         text: event.text,
         kind: event.kind,
         self: event.self,
-        mention,
       });
       enriched.id = id;
-      enriched.mention = mention;
     }
 
     this.onEvent(enriched);

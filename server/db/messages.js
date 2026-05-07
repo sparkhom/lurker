@@ -1,8 +1,8 @@
 import db from './index.js';
 
 const insertStmt = db.prepare(`
-  INSERT INTO messages (network_id, target, time, type, nick, text, kind, self, mention)
-  VALUES (@networkId, @target, @time, @type, @nick, @text, @kind, @self, @mention)
+  INSERT INTO messages (network_id, target, time, type, nick, text, kind, self)
+  VALUES (@networkId, @target, @time, @type, @nick, @text, @kind, @self)
 `);
 
 export function insertMessage(row) {
@@ -15,7 +15,6 @@ export function insertMessage(row) {
     text: row.text ?? null,
     kind: row.kind ?? null,
     self: row.self ? 1 : 0,
-    mention: row.mention ? 1 : 0,
   });
   return result.lastInsertRowid;
 }
@@ -31,7 +30,6 @@ function rowToEvent(row) {
     text: row.text,
     kind: row.kind,
     self: !!row.self,
-    mention: !!row.mention,
   };
 }
 
@@ -50,20 +48,6 @@ export function listRecentForBuffers(networkId, targets, perBuffer = 50) {
     out[t] = listMessages(networkId, t, { limit: perBuffer });
   }
   return out;
-}
-
-export function listMentionsForUser(userId, { before, limit = 50 } = {}) {
-  const sql = before
-    ? `SELECT m.* FROM messages m
-       JOIN networks n ON n.id = m.network_id
-       WHERE n.user_id = ? AND m.mention = 1 AND m.id < ?
-       ORDER BY m.id DESC LIMIT ?`
-    : `SELECT m.* FROM messages m
-       JOIN networks n ON n.id = m.network_id
-       WHERE n.user_id = ? AND m.mention = 1
-       ORDER BY m.id DESC LIMIT ?`;
-  const params = before ? [userId, before, limit] : [userId, limit];
-  return db.prepare(sql).all(...params).map(rowToEvent);
 }
 
 export function countOlder(networkId, target, beforeId) {

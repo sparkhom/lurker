@@ -48,7 +48,6 @@ function lineClass(m) {
   return {
     [`type-${m.type}`]: true,
     self: m.self,
-    mention: !!m.mention,
   };
 }
 
@@ -122,13 +121,6 @@ watch(() => networks.activeKey, async () => {
   padding: 1px 0;
 }
 .line:hover { background: var(--bg-alt); }
-.line.mention {
-  background: rgba(189, 147, 249, 0.08);
-  border-left: 2px solid var(--accent);
-  margin-left: -16px;
-  padding-left: 14px;
-}
-.line.mention:hover { background: rgba(189, 147, 249, 0.16); }
 .time { color: var(--fg-muted); font-size: 12px; }
 .loading {
   text-align: center;
