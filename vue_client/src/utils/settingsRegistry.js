@@ -85,8 +85,27 @@ export const REGISTRY = Object.freeze([
   {
     key: 'look.color.border',
     type: 'color',
-    default: '#2c2a2e',
+    default: '#38353b',
     description: 'Subtle horizontal/vertical separators between regions.',
+  },
+
+  // ─── Alternating message rows ─────────────────────────────────────────
+  {
+    key: 'look.color.message.alt_bg',
+    type: 'color',
+    default: 'var(--bg)',
+    description:
+      'Background applied to every other message line in chat buffers, ' +
+      'for visual separation. Set equal to look.color.bg to disable striping.',
+  },
+  {
+    key: 'look.color.message.alt_fg',
+    type: 'color',
+    default: '#c4c4c4',
+    description:
+      'Foreground applied to every other message line in chat buffers. ' +
+      'Defaults to a slightly dimmed foreground. Nick colors and ' +
+      'inline-highlighted segments still override this.',
   },
 
   // ─── Member-list mode prefixes ────────────────────────────────────────
@@ -169,7 +188,7 @@ export const REGISTRY = Object.freeze([
   {
     key: 'look.buffer.time_format',
     type: 'string',
-    default: 'HH:mm',
+    default: 'HH:mm:ss',
     description:
       'Time format for the per-message timestamp column in chat buffers. ' +
       'Tokens: YYYY MM DD HH mm ss. Empty string hides the column.',

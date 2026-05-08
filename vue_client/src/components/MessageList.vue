@@ -7,7 +7,7 @@
       v-for="(m, i) in messages"
       :key="m.id ?? `live:${i}`"
       class="line"
-      :class="lineClass(m)"
+      :class="lineClass(m, i)"
     >
       <span class="time">{{ time(m.time) }}</span>
       <span class="prefix" :class="prefixClass(m)" :style="prefixStyle(m)">{{ prefixText(m) }}</span>
@@ -84,10 +84,11 @@ function time(iso) {
   return formatTimestamp(iso, tsFormat.value);
 }
 
-function lineClass(m) {
+function lineClass(m, i) {
   return {
     [`type-${m.type}`]: true,
     self: m.self,
+    alt: i % 2 === 1,
   };
 }
 
@@ -261,6 +262,7 @@ watch(() => networks.activeKey, async () => {
   grid-template-columns: subgrid;
   align-items: baseline;
 }
+.line.alt { background: var(--alt-bg); color: var(--alt-fg); }
 .line:hover { background: var(--bg-soft); }
 
 .time {
