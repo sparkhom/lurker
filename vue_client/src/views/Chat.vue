@@ -156,7 +156,6 @@ async function signOut() {
 .topic {
   grid-area: topic;
   padding: 0 12px 1ch;
-  border-bottom: 1px solid var(--border);
   display: flex;
   align-items: baseline;
   gap: 1ch;

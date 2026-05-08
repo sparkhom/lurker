@@ -1,13 +1,17 @@
 <template>
-  <div ref="scroller" class="message-list" @scroll="onScroll">
-    <div v-if="buffer?.loadingHistory" class="notice">loading older messages…</div>
-    <div v-else-if="!buffer?.hasMore && messages.length" class="notice">— start of history —</div>
+  <div ref="scroller" class="message-list" @scroll="onScroll" @wheel="onWheel">
+    <!-- No "loading older…" notice. It would appear/disappear above the
+         user's view during a history fetch, shifting scrollTop and either
+         throwing off the prepend anchor math or (with browser anchoring)
+         leaving scrollTop near the top so maybeRequestHistory cascades. -->
+    <div v-if="!buffer?.hasMore && messages.length" class="notice">— start of history —</div>
     <p v-if="!messages.length" class="notice empty">No messages yet.</p>
     <div
       v-for="(m, i) in messages"
       :key="m.id ?? `live:${i}`"
       class="line"
       :class="lineClass(m, i)"
+      :data-msg-id="m.id ?? null"
     >
       <span class="time">{{ time(m.time) }}</span>
       <span class="prefix" :class="prefixClass(m)" :style="prefixStyle(m)">{{ prefixText(m) }}</span>
@@ -172,11 +176,31 @@ function maybeRequestHistory() {
   });
 }
 
+// Debounce timer for maybeRequestHistory. Trackpad scroll inertia keeps
+// firing scroll events after our prepend math sets scrollTop high; if we
+// fired the request synchronously each time scrollTop dipped past 80, the
+// inertia would carry past our set, the dip would be detected again, and
+// another fetch would cascade. We wait until scroll stabilizes before
+// deciding the user is genuinely at the top.
+let pendingHistoryTimer = null;
+
 function onScroll() {
   const el = scroller.value;
   if (!el) return;
   stickToBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 30;
-  maybeRequestHistory();
+  if (pendingHistoryTimer) clearTimeout(pendingHistoryTimer);
+  pendingHistoryTimer = setTimeout(() => {
+    pendingHistoryTimer = null;
+    maybeRequestHistory();
+  }, 150);
+}
+
+// Disengage stick-to-bottom synchronously on any upward wheel input.
+// Without this, a live message can arrive between the user's wheel and the
+// scroll event firing, the watcher resumes on nextTick before onScroll has
+// run, and reads a stale stickToBottom=true — snapping the user back.
+function onWheel(e) {
+  if (e.deltaY < 0) stickToBottom.value = false;
 }
 
 function scrollToBottom() {
@@ -185,14 +209,10 @@ function scrollToBottom() {
   el.scrollTop = el.scrollHeight;
 }
 
-// Watch length, first-id, and last-id. pushMessage mutates the array via
-// .push(), which a `watch(messages)` with deep:false would never see — Vue
-// only re-evaluates when a tracked dep changes, and push() doesn't change
-// the array's reference. Tracking length covers live pushes; tracking
-// first/last ids lets us tell a prepend (older history loaded on top) from
-// a wholesale replace (fresh backlog after a re-snapshot), which need
-// opposite scroll behavior.
-let preloadHeight = 0;
+// Watch the messages array shape so we can react to:
+//   - prepend (older history): pin the OLD first row's viewport position.
+//   - replace (wholesale snapshot): snap to bottom.
+//   - live push: snap to bottom IF the user is already pinned there.
 watch(
   [
     () => messages.value.length,
@@ -206,17 +226,28 @@ watch(
     const grew = newLen > prevLen;
     const firstChanged = prevLen > 0 && newFirstId !== oldFirstId;
     const lastChanged = prevLen > 0 && newLastId !== oldLastId;
-    // Pure prepend: older messages stitched on top, newest tail unchanged.
-    // Preserve the user's scroll position relative to the previous content.
-    if (firstChanged && !lastChanged && grew) {
-      preloadHeight = el.scrollHeight;
+    // Pure prepend: anchor by element ID so re-flow from changing column
+    // widths or differing message heights doesn't drift the math. With the
+    // loading notice gone from the template, the OLD DOM and NEW DOM share
+    // the same set of [data-msg-id] elements with stable identity above
+    // and below the prepend boundary.
+    if (firstChanged && !lastChanged && grew && oldFirstId != null) {
+      const anchor = el.querySelector(`[data-msg-id="${oldFirstId}"]`);
+      const anchorOldTop = anchor ? anchor.offsetTop : null;
+      const oldScrollTop = el.scrollTop;
+      const oldScrollHeight = el.scrollHeight;
       await nextTick();
-      el.scrollTop = el.scrollHeight - preloadHeight + el.scrollTop;
+      const anchorNew = anchorOldTop != null
+        ? el.querySelector(`[data-msg-id="${oldFirstId}"]`)
+        : null;
+      if (anchorNew) {
+        el.scrollTop = anchorNew.offsetTop - (anchorOldTop - oldScrollTop);
+      } else {
+        el.scrollTop = el.scrollHeight - oldScrollHeight + oldScrollTop;
+      }
       return;
     }
     // Wholesale replace (fresh backlog from a re-snapshot): both ends shifted.
-    // Snap to bottom regardless of prior scroll position so the user sees
-    // current state instead of a random offset into the new content.
     const replaced = firstChanged && lastChanged;
     await nextTick();
     if (replaced) {
@@ -246,6 +277,18 @@ watch(() => networks.activeKey, async () => {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* Disable browser scroll anchoring — when older history prepends with the
+     loading-notice transition, the browser is unreliable about picking a
+     stable anchor element (especially near the top of the buffer where
+     there are few elements to choose from), and we end up with scrollTop
+     near zero, which re-triggers maybeRequestHistory and cascades. The
+     prepend watcher in <script setup> handles position preservation
+     manually with a known-stable anchor (the OLD first message). */
+  overflow-anchor: none;
+  /* Inset shadow draws on top of children's backgrounds, so the divider
+     against the topic header can't be visually eaten by .alt row paint
+     the way a plain border-top can on fractional-DPR displays. */
+  box-shadow: inset 0 1px 0 var(--border);
   padding: 4px 12px;
   display: grid;
   grid-template-columns: max-content max-content minmax(0, 1fr);
