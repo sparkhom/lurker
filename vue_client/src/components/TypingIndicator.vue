@@ -12,10 +12,11 @@
 import { computed } from 'vue';
 import { useNetworksStore } from '../stores/networks.js';
 import { useBuffersStore } from '../stores/buffers.js';
-import { nickColor } from '../utils/nickColor.js';
+import { useNickColors } from '../composables/useNickColors.js';
 
 const networks = useNetworksStore();
 const buffers = useBuffersStore();
+const nickColors = useNickColors();
 
 const buffer = computed(() => (networks.activeKey ? buffers.byKey(networks.activeKey) : null));
 
@@ -26,7 +27,7 @@ const nicks = computed(() => {
 });
 
 function nickSeg(nick) {
-  return { text: nick, color: nickColor(nick) };
+  return { text: nick, color: nickColors.color(nick) };
 }
 
 const segments = computed(() => {

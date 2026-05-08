@@ -1,44 +1,14 @@
 // Deterministic nick coloring. Mirrors weechat's gui_nick_find_color:
-// trim stop chars, lowercase, djb2-32 hash, modulo a fixed palette.
+// trim stop chars, lowercase, hash, modulo a palette.
 //
-// Palette is the user's weechat chat_nick_colors list
-// (73,74,107,109,110,114,139,150,167,174,176,179,183,204,208,210,215,221,67,68,75,111,117)
-// translated from xterm 256 indexes to hex. Order is preserved so the
-// hash → color mapping matches what they see in their weechat client.
+// Palette and stop-chars come from settings (look.nick.colors,
+// look.nick.color_stop_chars); see vue_client/src/utils/settingsRegistry.js.
 
-export const NICK_COLOR_PALETTE = [
-  '#5fafaf', // 73
-  '#5fafd7', // 74
-  '#87af5f', // 107
-  '#87afaf', // 109
-  '#87afd7', // 110
-  '#87d787', // 114
-  '#af87af', // 139
-  '#afd787', // 150
-  '#d75f5f', // 167
-  '#d78787', // 174
-  '#d787d7', // 176
-  '#d7af5f', // 179
-  '#d7afff', // 183
-  '#ff5f87', // 204
-  '#ff8700', // 208
-  '#ff8787', // 210
-  '#ffaf5f', // 215
-  '#ffd75f', // 221
-  '#5f87af', // 67
-  '#5f87d7', // 68
-  '#5fafff', // 75
-  '#87afff', // 111
-  '#87d7ff', // 117
-];
-
-const STOP_CHARS = '_|';
-
-function trimForColor(nick) {
+function trimForColor(nick, stopChars) {
   let out = '';
   let seenOther = false;
   for (const ch of nick) {
-    const isStop = STOP_CHARS.includes(ch);
+    const isStop = stopChars.includes(ch);
     if (isStop && seenOther) break;
     if (!isStop) seenOther = true;
     out += ch;
@@ -56,11 +26,12 @@ function djb2(str) {
   return h;
 }
 
-export function nickColor(nick) {
+export function nickColor(nick, { palette, stopChars }) {
   if (!nick) return null;
-  const normalized = trimForColor(nick).toLowerCase();
+  if (!palette || palette.length === 0) return null;
+  const normalized = trimForColor(nick, stopChars || '').toLowerCase();
   if (!normalized) return null;
-  return NICK_COLOR_PALETTE[djb2(normalized) % NICK_COLOR_PALETTE.length];
+  return palette[djb2(normalized) % palette.length];
 }
 
 // Chars that can appear inside an IRC nick (RFC 2812 plus the usual extensions).
@@ -74,8 +45,8 @@ function escapeRegex(s) {
 
 // Split `text` into [{text, color?, self?}] segments, coloring any occurrence
 // of a nick from `nickSet`. Comparison is case-insensitive; the matched casing
-// is preserved in the rendered text.
-export function splitTextByNicks(text, nickSet, selfLower = null) {
+// is preserved in the rendered text. `colorFn` is `(nick) => string|null`.
+export function splitTextByNicks(text, nickSet, selfLower, colorFn) {
   if (!text) return [{ text: '' }];
   if (!nickSet || nickSet.size === 0) return [{ text }];
 
@@ -100,7 +71,7 @@ export function splitTextByNicks(text, nickSet, selfLower = null) {
     const isSelf = selfLower && lower === selfLower;
     out.push({
       text: matched,
-      color: isSelf ? null : nickColor(matched),
+      color: isSelf ? null : (colorFn ? colorFn(matched) : null),
       self: !!isSelf,
     });
     lastIdx = start + matched.length;

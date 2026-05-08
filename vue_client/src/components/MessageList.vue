@@ -6,7 +6,7 @@
     <div v-for="(m, i) in messages" :key="m.id ?? `live:${i}`" class="line" :class="lineClass(m)">
       <span class="time">{{ time(m.time) }}</span>
       <span v-if="m.type === 'message'" class="nick" :class="{ self: m.self }" :style="nickStyle(m)">&lt;{{ m.nick }}&gt;</span>
-      <span v-else-if="m.type === 'action'" class="nick action" :class="{ self: m.self }" :style="nickStyle(m)">* {{ m.nick }}</span>
+      <span v-else-if="m.type === 'action'" class="nick action" :class="{ self: m.self, italic: actionItalic }" :style="nickStyle(m)">* {{ m.nick }}</span>
       <span v-else-if="m.type === 'notice'" class="nick" :class="{ self: m.self }" :style="nickStyle(m)">-{{ m.nick }}-</span>
       <span v-else-if="m.type === 'join'" class="meta">→ <NickRef :nick="m.nick" /> joined</span>
       <span v-else-if="m.type === 'part'" class="meta">← <NickRef :nick="m.nick" /> left{{ m.text ? ' (' + m.text + ')' : '' }}</span>
@@ -17,7 +17,7 @@
       <span v-else-if="m.type === 'topic'" class="meta">topic by <NickRef :nick="m.nick" />:</span>
       <span v-else-if="m.type === 'motd'" class="meta">[motd]</span>
       <span v-else-if="m.type === 'error'" class="meta error">[error]</span>
-      <span class="text"><template v-for="(seg, j) in textSegments(m)" :key="j"><span v-if="seg.color" :style="{ color: seg.color }">{{ seg.text }}</span><span v-else-if="seg.self" class="self-mention">{{ seg.text }}</span><template v-else>{{ seg.text }}</template></template></span>
+      <span class="text"><template v-for="(seg, j) in textSegments(m)" :key="j"><span v-if="seg.color" :style="{ color: seg.color }">{{ seg.text }}</span><span v-else-if="seg.self" :style="{ color: selfColor }">{{ seg.text }}</span><template v-else>{{ seg.text }}</template></template></span>
     </div>
   </div>
 </template>
@@ -26,12 +26,20 @@
 import { ref, computed, watch, nextTick } from 'vue';
 import { useNetworksStore } from '../stores/networks.js';
 import { useBuffersStore } from '../stores/buffers.js';
+import { useSettingsStore } from '../stores/settings.js';
 import { socketSend } from '../composables/useSocket.js';
-import { nickColor, splitTextByNicks } from '../utils/nickColor.js';
+import { useNickColors } from '../composables/useNickColors.js';
+import { formatTimestamp } from '../utils/timestamp.js';
 import NickRef from './NickRef.vue';
 
 const networks = useNetworksStore();
 const buffers = useBuffersStore();
+const settings = useSettingsStore();
+const nicks = useNickColors();
+
+const actionItalic = computed(() => !!settings.effective('look.action.italic'));
+const selfColor = computed(() => settings.effective('look.nick.self_color'));
+const tsFormat = computed(() => settings.effective('look.timestamp.format'));
 
 const scroller = ref(null);
 const stickToBottom = ref(true);
@@ -63,11 +71,7 @@ const nickSet = computed(() => {
 });
 
 function time(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  const h = String(d.getHours()).padStart(2, '0');
-  const m = String(d.getMinutes()).padStart(2, '0');
-  return `${h}:${m}`;
+  return formatTimestamp(iso, tsFormat.value);
 }
 
 function lineClass(m) {
@@ -78,13 +82,13 @@ function lineClass(m) {
 }
 
 function nickStyle(m) {
-  if (m.self) return null;
-  const c = nickColor(m.nick);
+  if (m.self) return { color: selfColor.value };
+  const c = nicks.color(m.nick);
   return c ? { color: c } : null;
 }
 
 function textSegments(m) {
-  return splitTextByNicks(m.text || '', nickSet.value, selfLower.value);
+  return nicks.splitText(m.text || '', nickSet.value, selfLower.value);
 }
 
 function maybeRequestHistory() {
@@ -166,11 +170,9 @@ watch(() => networks.activeKey, async () => {
   font-style: italic;
 }
 .nick { color: var(--accent); }
-.nick.action { font-style: italic; }
-.nick.self { color: var(--fg); }
+.nick.italic { font-style: italic; }
 .meta { color: var(--fg-muted); font-style: italic; }
 .meta.error { color: var(--bad); }
 .text { white-space: pre-wrap; word-break: break-word; }
-.text .self-mention { color: var(--fg); }
 .empty { color: var(--fg-muted); font-style: italic; padding: 8px 0; }
 </style>

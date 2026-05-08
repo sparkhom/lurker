@@ -2,6 +2,7 @@ import { ref, onMounted, onBeforeUnmount } from 'vue';
 import { useNetworksStore } from '../stores/networks.js';
 import { useBuffersStore } from '../stores/buffers.js';
 import { useAuthStore } from '../stores/auth.js';
+import { useSettingsStore } from '../stores/settings.js';
 
 let socket = null;
 const connected = ref(false);
@@ -107,6 +108,11 @@ function handleMessage(raw) {
   }
   if (payload.kind === 'irc') {
     applyEvent(payload);
+    return;
+  }
+  if (payload.kind === 'settings') {
+    const settings = useSettingsStore();
+    settings.applyRemote(payload);
     return;
   }
 }

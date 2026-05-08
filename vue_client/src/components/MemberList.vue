@@ -7,7 +7,7 @@
     <ul>
       <li v-for="m in sorted" :key="nickOf(m)" :class="prefixClass(m)">
         <span class="prefix">{{ prefixOf(m) }}</span>
-        <span class="nick" :class="{ self: isSelf(m) }" :style="nickStyle(m)">{{ nickOf(m) }}</span>
+        <span class="nick" :style="nickStyle(m)">{{ nickOf(m) }}</span>
       </li>
     </ul>
   </div>
@@ -17,10 +17,11 @@
 import { computed } from 'vue';
 import { useNetworksStore } from '../stores/networks.js';
 import { useBuffersStore } from '../stores/buffers.js';
-import { nickColor } from '../utils/nickColor.js';
+import { useNickColors } from '../composables/useNickColors.js';
 
 const networks = useNetworksStore();
 const buffers = useBuffersStore();
+const nicks = useNickColors();
 
 const buffer = computed(() => (networks.activeKey ? buffers.byKey(networks.activeKey) : null));
 const members = computed(() => buffer.value?.members || []);
@@ -35,8 +36,8 @@ function isSelf(m) {
   return !!sn && nickOf(m).toLowerCase() === sn.toLowerCase();
 }
 function nickStyle(m) {
-  if (isSelf(m)) return null;
-  const c = nickColor(nickOf(m));
+  if (isSelf(m)) return { color: nicks.selfColor.value };
+  const c = nicks.color(nickOf(m));
   return c ? { color: c } : null;
 }
 
@@ -90,5 +91,4 @@ li {
 li.mode-\@ .prefix, li.mode-\~ .prefix, li.mode-\& .prefix { color: var(--accent); }
 li.mode-\+ .prefix { color: var(--good); }
 .nick { font-family: var(--mono); color: var(--accent); }
-.nick.self { color: var(--fg); }
 </style>

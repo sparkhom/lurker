@@ -9,6 +9,7 @@
       <BufferList @edit-network="openEditNetwork" />
       <div class="sidebar-foot">
         <span class="user">{{ auth.user?.username }}</span>
+        <RouterLink class="link" to="/settings">settings</RouterLink>
         <button class="link" @click="signOut">sign out</button>
       </div>
     </aside>
@@ -49,6 +50,7 @@ import { storeToRefs } from 'pinia';
 import { useAuthStore } from '../stores/auth.js';
 import { useNetworksStore } from '../stores/networks.js';
 import { useBuffersStore } from '../stores/buffers.js';
+import { useSettingsStore } from '../stores/settings.js';
 import { useSocket } from '../composables/useSocket.js';
 import BufferList from '../components/BufferList.vue';
 import MessageList from '../components/MessageList.vue';
@@ -60,6 +62,7 @@ import TypingIndicator from '../components/TypingIndicator.vue';
 const auth = useAuthStore();
 const networks = useNetworksStore();
 const buffers = useBuffersStore();
+const settings = useSettingsStore();
 const router = useRouter();
 const { connected } = useSocket();
 
@@ -96,6 +99,7 @@ const networkState = computed(() => {
 });
 
 onMounted(async () => {
+  if (!settings.loaded) settings.fetchAll().catch(() => {});
   await networks.fetchAll();
 });
 

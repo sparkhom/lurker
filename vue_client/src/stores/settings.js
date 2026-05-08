@@ -1,0 +1,77 @@
+import { defineStore } from 'pinia';
+import { api } from '../api.js';
+import { REGISTRY, getDefault } from '../utils/settingsRegistry.js';
+
+function valuesEqual(a, b) {
+  if (a === b) return true;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  }
+  return false;
+}
+
+export const useSettingsStore = defineStore('settings', {
+  state: () => ({
+    values: {},
+    loaded: false,
+    loading: null,
+  }),
+  getters: {
+    registry: () => REGISTRY,
+    effective(state) {
+      return (key) => (key in state.values ? state.values[key] : getDefault(key));
+    },
+    isModified(state) {
+      return (key) => key in state.values;
+    },
+  },
+  actions: {
+    async fetchAll() {
+      if (this.loading) return this.loading;
+      this.loading = (async () => {
+        const { values } = await api('/api/settings/bootstrap');
+        this.values = { ...(values || {}) };
+        this.loaded = true;
+      })();
+      try {
+        await this.loading;
+      } finally {
+        this.loading = null;
+      }
+    },
+    async setValue(key, value) {
+      const { values } = await api('/api/settings', {
+        method: 'PATCH',
+        body: { changes: { [key]: value } },
+      });
+      this.values = { ...(values || {}) };
+    },
+    async reset(key) {
+      const { values } = await api(`/api/settings/${encodeURIComponent(key)}`, { method: 'DELETE' });
+      this.values = { ...(values || {}) };
+    },
+    async resetAll() {
+      const { values } = await api('/api/settings/all', { method: 'DELETE' });
+      this.values = { ...(values || {}) };
+    },
+    applyRemote({ changes, resetAll }) {
+      if (resetAll) {
+        this.values = {};
+        return;
+      }
+      if (!changes) return;
+      const next = { ...this.values };
+      for (const [key, value] of Object.entries(changes)) {
+        const def = getDefault(key);
+        if (def !== undefined && valuesEqual(value, def)) {
+          delete next[key];
+        } else {
+          next[key] = value;
+        }
+      }
+      this.values = next;
+    },
+  },
+});

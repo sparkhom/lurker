@@ -50,12 +50,13 @@ import { reactive } from 'vue';
 import { useNetworksStore } from '../stores/networks.js';
 import { useBuffersStore } from '../stores/buffers.js';
 import { socketSend } from '../composables/useSocket.js';
-import { nickColor } from '../utils/nickColor.js';
+import { useNickColors } from '../composables/useNickColors.js';
 
 defineEmits(['edit-network']);
 
 const networks = useNetworksStore();
 const buffers = useBuffersStore();
+const nicks = useNickColors();
 
 const joinInput = reactive({});
 
@@ -71,7 +72,7 @@ function labelStyle(buf) {
   if (!isDmBuffer(buf)) return null;
   const selfNick = networks.states[buf.networkId]?.nick;
   if (selfNick && buf.target.toLowerCase() === selfNick.toLowerCase()) return null;
-  const c = nickColor(buf.target);
+  const c = nicks.color(buf.target);
   return c ? { color: c } : null;
 }
 

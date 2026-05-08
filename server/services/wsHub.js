@@ -2,6 +2,7 @@ import { WebSocketServer } from 'ws';
 import cookie from 'cookie';
 import cookieParser from 'cookie-parser';
 import ircManager from './ircManager.js';
+import settingsService from './settingsService.js';
 import { findSession } from '../db/sessions.js';
 import { findUserById } from '../db/users.js';
 import { listMessages, listBufferTargets } from '../db/messages.js';
@@ -40,6 +41,10 @@ export function attachWsHub(httpServer, sessionSecret) {
 
   ircManager.on('event', (event) => {
     fanOut(event.userId, { ...event, kind: 'irc' });
+  });
+
+  settingsService.on('event', ({ userId, changes, resetAll }) => {
+    fanOut(userId, { kind: 'settings', changes: changes || {}, resetAll: !!resetAll });
   });
 
   function authenticateRequest(req) {

@@ -1,12 +1,12 @@
 <template>
-  <span class="nick-ref" :class="{ self: isSelf }" :style="style">{{ nick }}</span>
+  <span class="nick-ref" :style="style">{{ nick }}</span>
 </template>
 
 <script setup>
 import { computed } from 'vue';
 import { useNetworksStore } from '../stores/networks.js';
 import { useBuffersStore } from '../stores/buffers.js';
-import { nickColor } from '../utils/nickColor.js';
+import { useNickColors } from '../composables/useNickColors.js';
 
 const props = defineProps({
   nick: { type: String, required: true },
@@ -14,6 +14,7 @@ const props = defineProps({
 
 const networks = useNetworksStore();
 const buffers = useBuffersStore();
+const nicks = useNickColors();
 
 const selfLower = computed(() => {
   const key = networks.activeKey;
@@ -29,13 +30,12 @@ const isSelf = computed(() => {
 });
 
 const style = computed(() => {
-  if (isSelf.value) return null;
-  const c = nickColor(props.nick);
+  if (isSelf.value) return { color: nicks.selfColor.value };
+  const c = nicks.color(props.nick);
   return c ? { color: c } : null;
 });
 </script>
 
 <style scoped>
 .nick-ref { color: inherit; }
-.nick-ref.self { color: var(--fg); }
 </style>

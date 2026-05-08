@@ -76,6 +76,15 @@ function migrate() {
       FOREIGN KEY (network_id) REFERENCES networks(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_messages_buffer ON messages(network_id, target, id DESC);
+
+    CREATE TABLE IF NOT EXISTS user_settings (
+      user_id INTEGER NOT NULL,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (user_id, key),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
   `);
 }
 
