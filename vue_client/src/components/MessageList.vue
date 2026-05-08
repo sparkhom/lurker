@@ -252,7 +252,6 @@ watch(() => networks.activeKey, async () => {
   justify-self: end;
   white-space: nowrap;
   padding-right: 1ch;
-  border-right: 1px solid var(--border);
 }
 .prefix.italic { font-style: italic; }
 .prefix.action-marker { color: var(--fg-muted); }
@@ -267,10 +266,23 @@ watch(() => networks.activeKey, async () => {
 .prefix.p-motd  { color: var(--fg-muted); }
 
 .body {
+  position: relative;
   min-width: 0;
   white-space: pre-wrap;
   word-break: break-word;
   padding-left: 1ch;
+}
+/* Vertical separator between the nick and body columns. Drawn from .body
+   so it stretches the full height of the body cell — including wrapped
+   lines — rather than just the nick's single-line box. */
+.body::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  background: var(--border);
 }
 .body.meta-body { color: var(--fg-muted); font-style: italic; }
 .body.italic { font-style: italic; }
