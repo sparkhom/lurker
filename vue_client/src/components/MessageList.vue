@@ -184,25 +184,45 @@ function scrollToBottom() {
   el.scrollTop = el.scrollHeight;
 }
 
-// Watch length and first-id explicitly. pushMessage mutates the array via
+// Watch length, first-id, and last-id. pushMessage mutates the array via
 // .push(), which a `watch(messages)` with deep:false would never see — Vue
 // only re-evaluates when a tracked dep changes, and push() doesn't change
-// the array's reference. Reading .length inside the getter creates a
-// dependency on the array length, so live messages now reliably fire here.
+// the array's reference. Tracking length covers live pushes; tracking
+// first/last ids lets us tell a prepend (older history loaded on top) from
+// a wholesale replace (fresh backlog after a re-snapshot), which need
+// opposite scroll behavior.
 let preloadHeight = 0;
 watch(
-  [() => messages.value.length, () => messages.value[0]?.id],
-  async ([newLen, newFirstId], [oldLen, oldFirstId]) => {
+  [
+    () => messages.value.length,
+    () => messages.value[0]?.id,
+    () => messages.value[messages.value.length - 1]?.id,
+  ],
+  async ([newLen, newFirstId, newLastId], [oldLen, oldFirstId, oldLastId]) => {
     const el = scroller.value;
-    const grew = newLen > (oldLen || 0);
-    const prepended = (oldLen || 0) > 0 && newFirstId !== oldFirstId && newLen > (oldLen || 0);
-    if (prepended && el) {
+    if (!el) return;
+    const prevLen = oldLen || 0;
+    const grew = newLen > prevLen;
+    const firstChanged = prevLen > 0 && newFirstId !== oldFirstId;
+    const lastChanged = prevLen > 0 && newLastId !== oldLastId;
+    // Pure prepend: older messages stitched on top, newest tail unchanged.
+    // Preserve the user's scroll position relative to the previous content.
+    if (firstChanged && !lastChanged && grew) {
       preloadHeight = el.scrollHeight;
       await nextTick();
       el.scrollTop = el.scrollHeight - preloadHeight + el.scrollTop;
       return;
     }
+    // Wholesale replace (fresh backlog from a re-snapshot): both ends shifted.
+    // Snap to bottom regardless of prior scroll position so the user sees
+    // current state instead of a random offset into the new content.
+    const replaced = firstChanged && lastChanged;
     await nextTick();
+    if (replaced) {
+      stickToBottom.value = true;
+      scrollToBottom();
+      return;
+    }
     if (stickToBottom.value && grew) scrollToBottom();
   },
 );

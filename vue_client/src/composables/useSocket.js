@@ -8,6 +8,14 @@ let socket = null;
 const connected = ref(false);
 let reconnectTimer = null;
 
+// If the tab has been hidden for more than this, ask the server for a fresh
+// snapshot on return. This collapses a long queue of buffered live events
+// (which would otherwise drip into the UI one frame at a time) into a single
+// atomic backlog replace — i.e. the view "snaps" to current state.
+const HIDDEN_RESNAPSHOT_MS = 30_000;
+let hiddenSince = null;
+let visibilityWired = false;
+
 function wsUrl() {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
   return `${proto}://${window.location.host}/ws`;
@@ -151,8 +159,40 @@ function send(payload) {
   }
 }
 
+function refreshSnapshot() {
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    send({ type: 'snapshot' });
+    return;
+  }
+  // Socket isn't open — pull the reconnect forward instead of waiting on the
+  // 2s backoff timer. The fresh connection will trigger the server-side
+  // sendSnapshot path on its own.
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  open();
+}
+
+function wireVisibility() {
+  if (visibilityWired || typeof document === 'undefined') return;
+  visibilityWired = true;
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      hiddenSince = Date.now();
+      return;
+    }
+    const elapsed = hiddenSince ? Date.now() - hiddenSince : 0;
+    hiddenSince = null;
+    if (elapsed > HIDDEN_RESNAPSHOT_MS) refreshSnapshot();
+  });
+}
+
 export function useSocket() {
-  onMounted(() => open());
+  onMounted(() => {
+    wireVisibility();
+    open();
+  });
   onBeforeUnmount(() => {
     if (reconnectTimer) clearTimeout(reconnectTimer);
   });
