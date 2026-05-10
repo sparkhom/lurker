@@ -63,6 +63,7 @@
       <p v-if="error" class="error">{{ error }}</p>
       <div class="actions">
         <button v-if="isEdit" type="button" class="danger" :disabled="loading" @click="remove">Delete</button>
+        <button v-if="isEdit" type="button" class="ghost" :disabled="loading" @click="reconnect">Reconnect</button>
         <span class="spacer"></span>
         <button type="button" class="ghost" @click="$emit('close')">Cancel</button>
         <button type="submit" :disabled="loading">{{ loading ? 'Saving…' : (isEdit ? 'Save' : 'Save & connect') }}</button>
@@ -100,6 +101,25 @@ const form = reactive({
 const loading = ref(false);
 const error = ref(null);
 
+// Editing host/port/tls/nick/credentials only takes effect on the next
+// connection — a saved row otherwise sits untouched while the live IRC client
+// keeps using the old config. Detect those changes and reconnect after PATCH
+// so save-then-nothing-happens isn't the default UX.
+function connectionChanged() {
+  if (!props.network) return false;
+  const orig = props.network;
+  if ((form.host || '') !== (orig.host || '')) return true;
+  if (Number(form.port) !== Number(orig.port)) return true;
+  if (!!form.tls !== !!orig.tls) return true;
+  if ((form.nick || '') !== (orig.nick || '')) return true;
+  if ((form.realname || '') !== (orig.realname || '')) return true;
+  if ((form.sasl_account || '') !== (orig.sasl_account || '')) return true;
+  // Passwords are write-only on the API, so any non-empty value is a new value.
+  if (form.server_password) return true;
+  if (form.sasl_password) return true;
+  return false;
+}
+
 async function submit() {
   loading.value = true;
   error.value = null;
@@ -117,7 +137,9 @@ async function submit() {
       };
       if (form.server_password) patch.server_password = form.server_password;
       if (form.sasl_password) patch.sasl_password = form.sasl_password;
+      const willReconnect = connectionChanged();
       await networks.update(props.network.id, patch);
+      if (willReconnect) await networks.reconnect(props.network.id);
     } else {
       await networks.create({ ...form });
     }
@@ -125,6 +147,18 @@ async function submit() {
   } catch (err) {
     error.value = err.message || 'failed to save network';
   } finally {
+    loading.value = false;
+  }
+}
+
+async function reconnect() {
+  loading.value = true;
+  error.value = null;
+  try {
+    await networks.reconnect(props.network.id);
+    emit('close');
+  } catch (err) {
+    error.value = err.message || 'failed to reconnect';
     loading.value = false;
   }
 }

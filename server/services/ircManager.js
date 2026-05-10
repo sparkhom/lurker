@@ -73,6 +73,16 @@ class IrcManager extends EventEmitter {
     this._userMap(userId).delete(networkId);
   }
 
+  // Force a fresh connection: dispose the existing IrcConnection (if any) and
+  // start a new one against the latest DB row. Use this both for the user's
+  // explicit "reconnect" action and after editing connection-relevant fields,
+  // since startNetwork is a no-op when a connection object already exists in
+  // the map (even if it's in a disconnected state).
+  restartNetwork(userId, networkId, reason = 'reconnecting') {
+    this.disposeNetwork(userId, networkId, reason);
+    return this.startNetwork(userId, networkId);
+  }
+
   joinChannel(userId, networkId, name) {
     const conn = this.getConnection(userId, networkId);
     if (!conn) return false;

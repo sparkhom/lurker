@@ -44,6 +44,9 @@ export const useNetworksStore = defineStore('networks', {
     async disconnect(id) {
       await api(`/api/networks/${id}/disconnect`, { method: 'POST' });
     },
+    async reconnect(id) {
+      await api(`/api/networks/${id}/reconnect`, { method: 'POST' });
+    },
     setActive(networkId, target) {
       this.activeKey = `${networkId}::${target}`;
     },

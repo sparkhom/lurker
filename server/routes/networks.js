@@ -82,6 +82,14 @@ router.post('/:id/disconnect', (req, res) => {
   res.json({ ok: true });
 });
 
+router.post('/:id/reconnect', (req, res) => {
+  const id = Number(req.params.id);
+  const network = getNetwork(id, req.user.id);
+  if (!network) return res.status(404).json({ error: 'network not found' });
+  ircManager.restartNetwork(req.user.id, id);
+  res.json({ ok: true });
+});
+
 router.post('/:id/join', (req, res) => {
   const id = Number(req.params.id);
   const { channel } = req.body || {};
