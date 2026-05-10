@@ -104,6 +104,12 @@ function bufferOrder(buf) {
   return 1;
 }
 
+// Strip leading hashes so ##anime sorts next to #anime, not before #aardvark
+// (raw localeCompare would weight every leading '#' as sort-significant).
+function sortKey(target) {
+  return target.replace(/^#+/, '').toLowerCase();
+}
+
 function netBuffers(networkId) {
   return buffers
     .forNetwork(networkId)
@@ -112,7 +118,7 @@ function netBuffers(networkId) {
       const oa = bufferOrder(a);
       const ob = bufferOrder(b);
       if (oa !== ob) return oa - ob;
-      return a.target.localeCompare(b.target);
+      return sortKey(a.target).localeCompare(sortKey(b.target));
     });
 }
 

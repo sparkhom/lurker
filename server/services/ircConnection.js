@@ -177,14 +177,19 @@ export class IrcConnection {
 
     c.on('message', (event) => {
       const me = c.user?.nick;
-      const isSelf = !!event.nick && event.nick === me;
+      // Skip self-echoes. ircManager.send/.action already publishes a local
+      // copy of every outgoing PRIVMSG/ACTION, so when the IRC server reflects
+      // it back to us (echo-message cap, ergo's always-on relay, some
+      // bouncers) the second copy would land in the database with a fresh id
+      // and surface as a duplicate in the buffer. The local publish is the
+      // source of truth for anything this backend sent.
+      if (event.nick && me && event.nick.toLowerCase() === me.toLowerCase()) return;
       const isServer = !event.nick;
       const targetIsChannel = event.target && event.target.startsWith('#');
 
       let target;
       if (isServer) target = `:server:${this.network.id}`;
       else if (targetIsChannel) target = event.target;
-      else if (isSelf) target = event.target;
       else target = event.nick;
 
       const type = event.type === 'action' ? 'action' : event.type === 'notice' ? 'notice' : 'message';
@@ -196,7 +201,7 @@ export class IrcConnection {
         nick,
         text: event.message,
         kind: event.type,
-        self: isSelf,
+        self: false,
       });
     });
 

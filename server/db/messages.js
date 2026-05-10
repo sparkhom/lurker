@@ -81,19 +81,32 @@ export function countOlder(networkId, target, beforeId) {
   ).get(networkId, target, beforeId).n;
 }
 
+// Types that count as "real content" for the unread badge. Membership churn
+// (join/part/quit/kick/nick/mode/topic), MOTD, away markers, and server
+// errors are all persisted for the buffer log but shouldn't bump the badge —
+// the live unread path in useSocket.applyEvent uses the same allowlist, and
+// we need the SQL paths to match so backlog/read-state recomputes don't snap
+// the count to an inflated number.
+const COUNTABLE_TYPES_SQL = `('message','action','notice')`;
+
 export function countNewer(networkId, target, afterId) {
   return db.prepare(
-    `SELECT COUNT(*) AS n FROM messages WHERE network_id = ? AND target = ? AND id > ?`
+    `SELECT COUNT(*) AS n FROM messages
+     WHERE network_id = ? AND target = ? AND id > ?
+       AND type IN ${COUNTABLE_TYPES_SQL}`
   ).get(networkId, target, afterId || 0).n;
 }
 
 // Returns events newer than `afterId`, oldest-first, capped at `limit`. Used
 // for unread highlight counting — we need the row content (nick/text) to run
-// the highlight engine, so a bare COUNT won't do.
+// the highlight engine, so a bare COUNT won't do. Same type allowlist as
+// countNewer so the highlight scan and the unread count agree on what's
+// countable.
 export function listNewer(networkId, target, afterId, limit = 500) {
   const rows = db.prepare(
     `SELECT * FROM messages
      WHERE network_id = ? AND target = ? AND id > ?
+       AND type IN ${COUNTABLE_TYPES_SQL}
      ORDER BY id ASC
      LIMIT ?`
   ).all(networkId, target, afterId || 0, limit);
