@@ -13,6 +13,40 @@
 
     <p v-if="error" class="error">{{ error }}</p>
 
+    <section class="rules-section">
+      <h2>passkeys</h2>
+      <p class="rules-desc">
+        Sign in is passkey-only. Add a passkey for each device you want to use.
+        Removing your last passkey would lock you out, so it's blocked.
+      </p>
+      <p v-if="passkeyError" class="error inline">{{ passkeyError }}</p>
+      <ul v-if="passkeys.length" class="device-list">
+        <li v-for="pk in passkeys" :key="pk.id" class="device passkey">
+          <span class="ua">
+            <input
+              type="text"
+              :value="pk.label || ''"
+              :placeholder="defaultPasskeyLabel(pk)"
+              @change="onRenamePasskey(pk, $event.target.value)"
+            />
+          </span>
+          <span class="last-seen" :title="pk.lastUsedAt || pk.createdAt">
+            {{ pk.lastUsedAt ? `last used ${formatRelative(pk.lastUsedAt)}` : `added ${formatRelative(pk.createdAt)}` }}
+          </span>
+          <button
+            class="link danger"
+            :disabled="passkeys.length <= 1 || passkeyBusy"
+            :title="passkeys.length <= 1 ? 'cannot remove your only passkey' : 'remove this passkey'"
+            @click="onRemovePasskey(pk)"
+          >remove</button>
+        </li>
+      </ul>
+      <p v-else class="muted small">No passkeys registered.</p>
+      <div class="passkey-add">
+        <button class="link" :disabled="passkeyBusy" @click="onAddPasskey">add passkey</button>
+      </div>
+    </section>
+
     <section class="rules-section push-section">
       <h2>push notifications</h2>
       <p class="rules-desc">
@@ -199,6 +233,7 @@ import { ref, computed, onMounted } from 'vue';
 import { useSettingsStore } from '../stores/settings.js';
 import { useHighlightRulesStore } from '../stores/highlightRules.js';
 import { usePushSubscriptionsStore } from '../stores/pushSubscriptions.js';
+import { useAuthStore } from '../stores/auth.js';
 import { useSocket } from '../composables/useSocket.js';
 import {
   isSupported as isPushSupported,
@@ -213,7 +248,11 @@ useSocket();
 const settings = useSettingsStore();
 const rulesStore = useHighlightRulesStore();
 const pushSubsStore = usePushSubscriptionsStore();
+const auth = useAuthStore();
 const search = ref('');
+const passkeys = ref([]);
+const passkeyError = ref('');
+const passkeyBusy = ref(false);
 const modifiedOnly = ref(false);
 const error = ref('');
 const rulesError = ref('');
@@ -255,7 +294,60 @@ onMounted(async () => {
     registerSW().catch(() => { /* registration is best-effort here */ });
     refreshPushState();
   }
+  refreshPasskeys();
 });
+
+async function refreshPasskeys() {
+  try {
+    passkeys.value = await auth.listPasskeys();
+  } catch (e) {
+    passkeyError.value = e.message || 'failed to load passkeys';
+  }
+}
+
+function defaultPasskeyLabel(pk) {
+  const where = pk.backedUp ? 'synced' : 'this device';
+  return `passkey (${where})`;
+}
+
+async function onAddPasskey() {
+  passkeyError.value = '';
+  passkeyBusy.value = true;
+  try {
+    await auth.addPasskey({});
+    await refreshPasskeys();
+  } catch (e) {
+    if (e.name !== 'NotAllowedError') {
+      passkeyError.value = e.message || 'failed to add passkey';
+    }
+  } finally {
+    passkeyBusy.value = false;
+  }
+}
+
+async function onRenamePasskey(pk, label) {
+  passkeyError.value = '';
+  try {
+    await auth.renamePasskey(pk.id, label);
+    await refreshPasskeys();
+  } catch (e) {
+    passkeyError.value = e.message || 'rename failed';
+  }
+}
+
+async function onRemovePasskey(pk) {
+  if (!confirm(`Remove ${pk.label || 'this passkey'}?`)) return;
+  passkeyError.value = '';
+  passkeyBusy.value = true;
+  try {
+    await auth.deletePasskey(pk.id);
+    await refreshPasskeys();
+  } catch (e) {
+    passkeyError.value = e.message || 'remove failed';
+  } finally {
+    passkeyBusy.value = false;
+  }
+}
 
 async function onEnableThisClient() {
   pushError.value = '';
@@ -590,4 +682,19 @@ async function onResetAll() {
 .device .ua { color: var(--fg); }
 .device .last-seen { color: var(--fg-muted); font-size: 0.95em; }
 .muted.small { font-size: 0.95em; padding: 4px 0; }
+
+.passkey .ua input[type="text"] {
+  width: 100%;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--fg);
+  padding: 2px 4px;
+}
+.passkey .ua input[type="text"]:hover,
+.passkey .ua input[type="text"]:focus {
+  border-color: var(--border);
+}
+.passkey-add {
+  margin-top: 4px;
+}
 </style>

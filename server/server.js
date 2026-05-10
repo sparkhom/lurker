@@ -27,7 +27,7 @@ if (!SESSION_SECRET) {
 
 const app = express();
 
-const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:5173';
+const corsOrigin = process.env.CORS_ORIGIN || 'https://irc.local.bradroot.me:5173';
 app.use(cors({ origin: corsOrigin, credentials: true }));
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser(SESSION_SECRET));

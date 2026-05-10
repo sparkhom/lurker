@@ -1,5 +1,4 @@
 import Database from 'better-sqlite3';
-import bcrypt from 'bcrypt';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -20,7 +19,6 @@ function migrate() {
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT UNIQUE NOT NULL,
-      password_hash TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -121,21 +119,23 @@ function migrate() {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
-  `);
-}
 
-function seedInitialUser() {
-  const existing = db.prepare('SELECT COUNT(*) AS n FROM users').get();
-  if (existing.n > 0) return;
-  const username = process.env.INITIAL_USERNAME;
-  const password = process.env.INITIAL_PASSWORD;
-  if (!username || !password) {
-    console.warn('[db] No users exist and INITIAL_USERNAME/INITIAL_PASSWORD are not set — skipping seed.');
-    return;
-  }
-  const hash = bcrypt.hashSync(password, 12);
-  db.prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)').run(username, hash);
-  console.log(`[db] Seeded initial user "${username}"`);
+    CREATE TABLE IF NOT EXISTS webauthn_credentials (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      credential_id TEXT NOT NULL UNIQUE,
+      public_key BLOB NOT NULL,
+      counter INTEGER NOT NULL DEFAULT 0,
+      transports TEXT,
+      device_type TEXT,
+      backed_up INTEGER NOT NULL DEFAULT 0,
+      label TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_used_at TEXT,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_webauthn_user ON webauthn_credentials(user_id);
+  `);
 }
 
 function ensureColumn(table, column, def) {
@@ -145,10 +145,17 @@ function ensureColumn(table, column, def) {
   }
 }
 
+function dropColumnIfExists(table, column) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (cols.find((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} DROP COLUMN ${column}`);
+  }
+}
+
 migrate();
 ensureColumn('messages', 'extra', 'TEXT');
 ensureColumn('networks', 'sasl_account', 'TEXT');
 ensureColumn('networks', 'sasl_password', 'TEXT');
-seedInitialUser();
+dropColumnIfExists('users', 'password_hash');
 
 export default db;
