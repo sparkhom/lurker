@@ -128,8 +128,38 @@ export class IrcConnection {
       this.userModes.clear();
       this.setState('disconnected');
     });
-    c.on('socket close', () => this.setState('disconnected'));
-    c.on('reconnecting', () => this.setState('reconnecting'));
+    // irc-framework's net transport stashes socket-level errors (DNS lookup
+    // failures, ECONNREFUSED, TLS handshake errors, etc.) in last_socket_error
+    // and hands them to the close handler instead of emitting 'error', so this
+    // is the only place we get to see why the connection actually died. Without
+    // surfacing it to the server buffer the user just sees a red dot and no
+    // log line.
+    c.on('socket close', (err) => {
+      this.setState('disconnected');
+      if (err && (err.message || err.code)) {
+        const code = err.code ? `${err.code}: ` : '';
+        const where = `${this.network.host}:${this.network.port}`;
+        this.publish({
+          type: 'error',
+          target: this.serverTarget(),
+          text: `Connection failed (${where}): ${code}${err.message || 'unknown error'}`,
+        });
+      }
+    });
+    c.on('reconnecting', (event) => {
+      this.setState('reconnecting');
+      const wait = event && event.wait ? Math.max(1, Math.round(event.wait / 1000)) : null;
+      const attempt = event && event.attempt;
+      const text = wait != null && attempt
+        ? `Reconnecting in ${wait}s (attempt ${attempt})…`
+        : 'Reconnecting…';
+      this.publish({
+        type: 'notice',
+        target: this.serverTarget(),
+        nick: 'caint',
+        text,
+      });
+    });
     c.on('connecting', () => this.setState('connecting'));
 
     // RPL_UMODEIS arrives when the server sends our current umode (e.g. on
@@ -349,6 +379,13 @@ export class IrcConnection {
     const account = sasl_password
       ? { account: sasl_account || nick, password: sasl_password }
       : undefined;
+    const proto = this.network.tls ? ' (TLS)' : '';
+    this.publish({
+      type: 'notice',
+      target: this.serverTarget(),
+      nick: 'caint',
+      text: `Connecting to ${this.network.host}:${this.network.port}${proto}…`,
+    });
     this.client.connect({
       host: this.network.host,
       port: this.network.port,
