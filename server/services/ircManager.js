@@ -52,8 +52,25 @@ class IrcManager extends EventEmitter {
     conn.connect();
 
     conn.client.on('registered', () => {
-      const remembered = listChannels(networkId).filter((c) => c.joined);
-      for (const c of remembered) conn.join(c.name);
+      const names = listChannels(networkId).filter((c) => c.joined).map((c) => c.name);
+      // Send JOINs as comma-separated batches per IRC line. A tight loop of
+      // single JOINs trips Libera's per-connection flood limit ("Closing Link:
+      // ... (Excess Flood)"), so we coalesce into one line and chunk well under
+      // the 512-byte IRC line cap.
+      const MAX = 400;
+      let chunk = [];
+      let len = 0;
+      for (const name of names) {
+        const add = chunk.length === 0 ? name.length : name.length + 1;
+        if (len + add > MAX && chunk.length > 0) {
+          conn.join(chunk.join(','));
+          chunk = [];
+          len = 0;
+        }
+        chunk.push(name);
+        len += add;
+      }
+      if (chunk.length > 0) conn.join(chunk.join(','));
     });
 
     return conn;
