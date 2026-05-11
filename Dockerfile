@@ -7,6 +7,10 @@ COPY vue_client/package*.json ./
 RUN npm install
 
 COPY vue_client/ ./
+# Vue and server both import shared/settingsRegistry.js via relative paths,
+# so the shared/ tree has to land at /app/shared regardless of which stage
+# is doing the work.
+COPY shared/ /app/shared/
 RUN npm run build
 
 # Stage 2: Install server dependencies (with toolchain for native modules)
@@ -30,6 +34,7 @@ RUN apk add --no-cache tini
 COPY --from=server-deps /app/node_modules ./node_modules
 COPY package*.json ./
 COPY server/ ./server/
+COPY shared/ ./shared/
 COPY --from=vue-builder /app/vue_client/dist ./vue_client/dist
 
 RUN mkdir -p /app/data
