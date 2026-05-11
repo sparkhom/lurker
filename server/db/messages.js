@@ -43,7 +43,18 @@ function rowToEvent(row) {
   return event;
 }
 
-export function listMessages(networkId, target, { before, limit = 50 } = {}) {
+// `before` paginates backward (returns up to `limit` events with id < before).
+// `afterId` does the opposite — used by the WS resume path to ship only the
+// gap an existing client missed, instead of re-sending its last 50 known rows.
+// Results are always returned oldest-first regardless of which path was taken.
+export function listMessages(networkId, target, { before, afterId, limit = 50 } = {}) {
+  if (afterId) {
+    const rows = db.prepare(
+      `SELECT * FROM messages WHERE network_id = ? AND target = ? AND id > ?
+       ORDER BY id ASC LIMIT ?`
+    ).all(networkId, target, afterId, limit);
+    return rows.map(rowToEvent);
+  }
   const sql = before
     ? `SELECT * FROM messages WHERE network_id = ? AND target = ? AND id < ? ORDER BY id DESC LIMIT ?`
     : `SELECT * FROM messages WHERE network_id = ? AND target = ? ORDER BY id DESC LIMIT ?`;

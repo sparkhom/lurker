@@ -10,6 +10,11 @@ let socket = null;
 const connected = ref(false);
 let reconnectTimer = null;
 const openHandlers = new Set();
+// Highest event id this client has ever received in any buffer. Sent on
+// reconnect as `?since=N` so the server can ship just the gap instead of
+// re-issuing the whole last-50-per-buffer backlog. Per-buffer dedupe in
+// buffers.pushMessage handles any residual overlap if the gap is empty.
+let lastSeenEventId = 0;
 
 export function onSocketOpen(handler) {
   openHandlers.add(handler);
@@ -26,7 +31,14 @@ let visibilityWired = false;
 
 function wsUrl() {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${proto}://${window.location.host}/ws`;
+  const base = `${proto}://${window.location.host}/ws`;
+  return lastSeenEventId > 0 ? `${base}?since=${lastSeenEventId}` : base;
+}
+
+function trackSeenId(eventId) {
+  if (typeof eventId === 'number' && eventId > lastSeenEventId) {
+    lastSeenEventId = eventId;
+  }
 }
 
 function applyEvent(event) {
@@ -38,8 +50,11 @@ function applyEvent(event) {
       networks.applyState(event);
       break;
     case 'message':
-    case 'action':
-      buffers.pushMessage(event);
+    case 'action': {
+      // pushMessage returns false on dedupe (a replayed event we already had).
+      // Skip the speaker/unread/highlight side effects in that case — replaying
+      // them would inflate unread counts and re-seed speakers with stale times.
+      if (!buffers.pushMessage(event)) break;
       // Speakers feeds tab-complete and the nick-picker. Our own messages
       // would just clutter our own suggestions, so they don't count as
       // "people who recently spoke here."
@@ -56,8 +71,9 @@ function applyEvent(event) {
         }
       }
       break;
+    }
     case 'notice':
-      buffers.pushMessage(event);
+      if (!buffers.pushMessage(event)) break;
       if (!event.self && networks.activeKey !== `${event.networkId}::${event.target}`) {
         buffers.markUnread(event.networkId, event.target);
         if (event.matched) {
@@ -65,26 +81,29 @@ function applyEvent(event) {
         }
       }
       break;
+    // For events that carry an id AND mutate buffer state (member list,
+    // topic), run the dedupe in pushMessage first. On a replay the mutation
+    // would re-apply stale state (e.g. revert the topic) — skip both.
     case 'join':
+      if (!buffers.pushMessage(event)) break;
       buffers.addMember(event.networkId, event.target, event.nick);
-      buffers.pushMessage(event);
       break;
     case 'part':
     case 'quit':
+      if (!buffers.pushMessage(event)) break;
       buffers.removeMember(event.networkId, event.target, event.nick);
-      buffers.pushMessage(event);
       break;
     case 'kick':
+      if (!buffers.pushMessage(event)) break;
       buffers.removeMember(event.networkId, event.target, event.kicked);
-      buffers.pushMessage(event);
       break;
     case 'nick':
+      if (!buffers.pushMessage(event)) break;
       buffers.renameMember(event.networkId, event.target, event.nick, event.newNick);
-      buffers.pushMessage(event);
       break;
     case 'topic':
+      if (!buffers.pushMessage(event)) break;
       buffers.setTopic(event.networkId, event.target, event.text);
-      buffers.pushMessage(event);
       break;
     case 'mode':
       buffers.pushMessage(event);
@@ -174,15 +193,21 @@ function handleMessage(raw) {
     return;
   }
   if (payload.kind === 'backlog') {
+    if (Array.isArray(payload.events)) {
+      for (const e of payload.events) trackSeenId(e?.id);
+    }
     applyBacklog(payload);
     return;
   }
   if (payload.kind === 'history') {
+    // History pages are *older* events than what we already have — they
+    // shouldn't advance the resume cursor.
     const buffers = useBuffersStore();
     buffers.prependHistory(payload.networkId, payload.target, payload.events, payload.hasMore, payload.speakers);
     return;
   }
   if (payload.kind === 'irc') {
+    trackSeenId(payload.id);
     applyEvent(payload);
     return;
   }
@@ -279,6 +304,7 @@ export function resetSocket() {
   }
   connected.value = false;
   hiddenSince = null;
+  lastSeenEventId = 0;
 }
 
 function refreshSnapshot() {

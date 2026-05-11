@@ -57,7 +57,7 @@ export async function deliver(userId, payload) {
     const err = r.reason;
     const status = err?.statusCode;
     if (status === 404 || status === 410) {
-      deleteById(sub.id);
+      deleteById(sub.id, sub.user_id);
       dropped += 1;
       return;
     }

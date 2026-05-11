@@ -32,12 +32,18 @@ router.post('/subscriptions', (req, res) => {
   if (!endpoint || !keys?.p256dh || !keys?.auth) {
     return res.status(400).json({ error: 'endpoint and keys.p256dh + keys.auth are required' });
   }
-  const sub = upsertSubscription(req.user.id, {
+  const result = upsertSubscription(req.user.id, {
     endpoint,
     p256dh: keys.p256dh,
     auth: keys.auth,
     userAgent: userAgent || req.headers['user-agent'] || null,
   });
+  if (!result.ok) {
+    return res.status(409).json({
+      error: 'this browser is already registered for push under another account; disable push there first',
+    });
+  }
+  const { sub } = result;
   res.status(201).json({ subscription: { id: sub.id, endpoint: sub.endpoint } });
 });
 

@@ -33,16 +33,26 @@ export function getByEndpoint(endpoint) {
   return rowToSub(db.prepare('SELECT * FROM push_subscriptions WHERE endpoint = ?').get(endpoint));
 }
 
+// Push endpoint URLs persist per browser/PushManager — when two users log
+// into the same browser, the same endpoint comes back from subscribe(). A
+// blind UPDATE would silently rebind it to whichever user enabled most
+// recently, stealing the other user's notifications. Refuse instead; the
+// previous owner must disable push on their session before a new user can
+// claim it. Returns { ok, sub? } on success or { ok: false, error } on a
+// cross-user collision.
 export function upsertSubscription(userId, { endpoint, p256dh, auth, userAgent }) {
   const existing = getByEndpoint(endpoint);
+  if (existing && existing.user_id !== userId) {
+    return { ok: false, error: 'endpoint_owned_by_other_user' };
+  }
   if (existing) {
     db.prepare(`
       UPDATE push_subscriptions
-      SET user_id = ?, p256dh = ?, auth = ?, user_agent = COALESCE(?, user_agent),
+      SET p256dh = ?, auth = ?, user_agent = COALESCE(?, user_agent),
           enabled = 1, last_seen_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
       WHERE endpoint = ?
-    `).run(userId, p256dh, auth, userAgent || null, endpoint);
-    return getByEndpoint(endpoint);
+    `).run(p256dh, auth, userAgent || null, endpoint);
+    return { ok: true, sub: getByEndpoint(endpoint) };
   }
   db.prepare(`
     INSERT INTO push_subscriptions
@@ -51,7 +61,7 @@ export function upsertSubscription(userId, { endpoint, p256dh, auth, userAgent }
       strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
       strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
   `).run(userId, endpoint, p256dh, auth, userAgent || null);
-  return getByEndpoint(endpoint);
+  return { ok: true, sub: getByEndpoint(endpoint) };
 }
 
 // Touch last_seen_at if the endpoint exists; no-op otherwise. Used by the
@@ -71,8 +81,8 @@ export function deleteByEndpoint(userId, endpoint) {
   db.prepare('DELETE FROM push_subscriptions WHERE user_id = ? AND endpoint = ?').run(userId, endpoint);
 }
 
-export function deleteById(id) {
-  db.prepare('DELETE FROM push_subscriptions WHERE id = ?').run(id);
+export function deleteById(id, userId) {
+  db.prepare('DELETE FROM push_subscriptions WHERE id = ? AND user_id = ?').run(id, userId);
 }
 
 export function touchSubscription(id) {

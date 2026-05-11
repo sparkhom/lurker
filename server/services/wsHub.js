@@ -151,9 +151,17 @@ export function attachWsHub(httpServer, sessionSecret) {
     const set = socketsByUser.get(userId);
     if (!set) return;
     const json = JSON.stringify(payload);
+    const eventId = typeof payload.id === 'number' ? payload.id : null;
     for (const ws of set) {
       if (opts.exceptWs && ws === opts.exceptWs) continue;
-      if (ws.readyState === ws.OPEN) ws.send(json);
+      if (ws.readyState === ws.OPEN) {
+        ws.send(json);
+        // Advance the per-socket cursor so a subsequent sendSnapshot ships
+        // only the gap newer than what this socket has already received.
+        if (eventId != null && eventId > (ws.sinceId || 0)) {
+          ws.sinceId = eventId;
+        }
+      }
     }
   }
 
@@ -235,6 +243,18 @@ export function attachWsHub(httpServer, sessionSecret) {
     fanOut(userId, { kind: 'highlight-rules-changed' });
   });
 
+  function parseSinceParam(rawUrl) {
+    try {
+      const url = new URL(rawUrl, 'http://localhost');
+      const raw = url.searchParams.get('since');
+      if (!raw) return 0;
+      const n = Number.parseInt(raw, 10);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
   function authenticateRequest(req) {
     const header = req.headers.cookie;
     if (!header) return null;
@@ -256,8 +276,15 @@ export function attachWsHub(httpServer, sessionSecret) {
       socket.destroy();
       return;
     }
+    // `?since=N` cursors the initial backlog: a reconnecting client passes the
+    // highest event id it has, and the server ships only events newer than that
+    // for each buffer. The first connect omits it (or sends 0), getting the
+    // current "last 50 per buffer" behavior. Hostname is irrelevant — URL
+    // wants a base for relative parsing.
+    const initialSinceId = parseSinceParam(req.url);
     wss.handleUpgrade(req, socket, head, (ws) => {
       ws.userId = user.id;
+      ws.sinceId = initialSinceId;
       ws.presence = { visible: false };
       addSocket(user.id, ws);
       onConnection(ws, user);
@@ -287,6 +314,7 @@ export function attachWsHub(httpServer, sessionSecret) {
     send(ws, { kind: 'snapshot', networks });
     const readState = listReadStateForUser(userId);
     const closed = closedKeySetForUser(userId);
+    let maxSentId = ws.sinceId || 0;
     for (const conn of ircManager.listConnections(userId)) {
       const targets = new Set(listBufferTargets(conn.network.id));
       targets.add(`:server:${conn.network.id}`);
@@ -301,8 +329,20 @@ export function attachWsHub(httpServer, sessionSecret) {
             && !conn.channels.has(target.toLowerCase())) {
           continue;
         }
-        const events = listMessages(conn.network.id, target, { limit: 50 })
-          .map((e) => decorateMessage(userId, e));
+        // Resume cursor: ship only the gap (id > sinceId) when the client has
+        // local state to merge with. Cap at 500 — a much wider net than the
+        // 50-row first-connect default — to cover longer flaps without
+        // unbounded payloads. If the gap is larger than 500, the client's
+        // dedupe still makes a later full re-fetch safe.
+        const sinceId = ws.sinceId || 0;
+        const events = (
+          sinceId > 0
+            ? listMessages(conn.network.id, target, { afterId: sinceId, limit: 500 })
+            : listMessages(conn.network.id, target, { limit: 50 })
+        ).map((e) => decorateMessage(userId, e));
+        for (const e of events) {
+          if (e.id != null && e.id > maxSentId) maxSentId = e.id;
+        }
         const speakers = listSpeakers(conn.network.id, target);
         const lastReadId = readState[`${conn.network.id}::${target}`] || 0;
         const counts = computeUnreadFor(userId, conn.network.id, target, lastReadId);
@@ -328,6 +368,10 @@ export function attachWsHub(httpServer, sessionSecret) {
         });
       }
     }
+    // Advance the resume cursor past everything we just shipped, so the next
+    // sendSnapshot (in-band 'snapshot' request, or another IRC-state trigger)
+    // resumes from where this snapshot left off.
+    ws.sinceId = maxSentId;
   }
 
   function handleClientMessage(ws, user, msg) {
@@ -379,6 +423,10 @@ export function attachWsHub(httpServer, sessionSecret) {
         break;
       }
       case 'snapshot':
+        // ws.sinceId is kept current by fanOut and prior sendSnapshot calls,
+        // so an in-band 'snapshot' resync (visibility return after a long
+        // hide) naturally becomes a gap-fill from the highest id this socket
+        // has already received.
         sendSnapshot(ws, userId);
         break;
       case 'raw':

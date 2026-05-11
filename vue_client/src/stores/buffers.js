@@ -73,9 +73,14 @@ export const useBuffersStore = defineStore('buffers', {
       return ensureBuffer(this, networkId, target);
     },
     pushMessage(event) {
-      if (!event.target) return;
+      if (!event.target) return false;
       const buf = ensureBuffer(this, event.networkId, event.target);
       const prevMaxId = buf.messages[buf.messages.length - 1]?.id ?? 0;
+      // Server inserts persisted events in id order per buffer, so any event
+      // with id <= prevMaxId is a replay (e.g. a WS resume that overlapped
+      // with an event we already saw live). Drop it — and signal the caller
+      // so it can skip unread/highlight side effects too.
+      if (event.id != null && event.id <= prevMaxId) return false;
       buf.messages.push(event);
       if (buf.messages.length > MAX_PER_BUFFER) buf.messages.splice(0, buf.messages.length - MAX_PER_BUFFER);
       if (buf.oldestId == null && event.id != null) buf.oldestId = event.id;
@@ -96,13 +101,29 @@ export const useBuffersStore = defineStore('buffers', {
         clearTypingTimer(event.networkId, event.target, event.nick);
         delete buf.typing[event.nick];
       }
+      return true;
     },
     replaceBacklog(networkId, target, events, speakers, readState, joined) {
       const buf = ensureBuffer(this, networkId, target);
-      buf.messages = events.slice(-MAX_PER_BUFFER);
-      const first = buf.messages[0];
-      buf.oldestId = first?.id ?? null;
-      buf.hasMore = events.length >= 50;
+      const existingMaxId = buf.messages[buf.messages.length - 1]?.id ?? 0;
+      if (existingMaxId === 0) {
+        // Initial seed (first connect, or a brand-new buffer we hadn't seen
+        // pre-flap). Take the backlog wholesale.
+        buf.messages = events.slice(-MAX_PER_BUFFER);
+        buf.hasMore = events.length >= 50;
+      } else {
+        // Gap-fill on reconnect: filter to events newer than what we already
+        // have and append. Keeps live state intact when the server's backlog
+        // overlaps with messages we received before the flap.
+        const fresh = events.filter((e) => e.id == null || e.id > existingMaxId);
+        if (fresh.length > 0) {
+          const combined = [...buf.messages, ...fresh];
+          buf.messages = combined.length > MAX_PER_BUFFER
+            ? combined.slice(-MAX_PER_BUFFER)
+            : combined;
+        }
+      }
+      buf.oldestId = buf.messages[0]?.id ?? null;
       if (speakers !== undefined) this.seedSpeakers(networkId, target, speakers);
       if (readState) this.applyReadState(networkId, target, readState);
       if (typeof joined === 'boolean') buf.joined = joined;
