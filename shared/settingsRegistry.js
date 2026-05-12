@@ -3,11 +3,17 @@
 // (which uses it to render the Settings UI and supply defaults during the
 // initial paint before /api/settings/bootstrap returns). Each side adds its
 // own helpers in a thin wrapper module — keep this file data-only.
+//
+// `category` + `group` drive the Settings UI sidebar and subheadings. The
+// server ignores both fields; they exist purely so the client can build a
+// table-of-contents layout without parsing key prefixes.
 
 export const REGISTRY = Object.freeze([
   // ─── Fonts ─────────────────────────────────────────────────────────────
   {
     key: 'look.font.family',
+    category: 'appearance',
+    group: 'fonts',
     type: 'string',
     default: "'Input Mono', 'Input', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
     description:
@@ -16,6 +22,8 @@ export const REGISTRY = Object.freeze([
   },
   {
     key: 'look.font.size',
+    category: 'appearance',
+    group: 'fonts',
     type: 'int',
     min: 9,
     max: 32,
@@ -24,6 +32,8 @@ export const REGISTRY = Object.freeze([
   },
   {
     key: 'look.font.weight',
+    category: 'appearance',
+    group: 'fonts',
     type: 'int',
     min: 100,
     max: 900,
@@ -36,6 +46,8 @@ export const REGISTRY = Object.freeze([
   },
   {
     key: 'look.font.smoothing_macos',
+    category: 'appearance',
+    group: 'fonts',
     type: 'bool',
     default: false,
     description:
@@ -47,36 +59,48 @@ export const REGISTRY = Object.freeze([
   // ─── Core palette (Monokai Pro / Brad's iTerm theme) ───────────────────
   {
     key: 'look.color.bg',
+    category: 'appearance',
+    group: 'palette',
     type: 'color',
     default: '#212022',
     description: "Window background (every region uses this, like a CLI app).",
   },
   {
     key: 'look.color.bg_soft',
+    category: 'appearance',
+    group: 'palette',
     type: 'color',
     default: '#2c2a2e',
     description: 'Slightly raised background used for hover and active-buffer highlight.',
   },
   {
     key: 'look.color.fg',
+    category: 'appearance',
+    group: 'palette',
     type: 'color',
     default: '#fcfcfa',
     description: 'Default foreground / text color.',
   },
   {
     key: 'look.color.fg_muted',
+    category: 'appearance',
+    group: 'palette',
     type: 'color',
     default: '#939293',
     description: 'Muted text (timestamps, system events, secondary labels).',
   },
   {
     key: 'look.color.accent',
+    category: 'appearance',
+    group: 'palette',
     type: 'color',
     default: '#a99dec',
     description: 'Primary accent (logo, active-buffer indicator, focused borders).',
   },
   {
     key: 'look.color.link',
+    category: 'appearance',
+    group: 'palette',
     type: 'color',
     default: 'var(--fg)',
     description:
@@ -85,24 +109,32 @@ export const REGISTRY = Object.freeze([
   },
   {
     key: 'look.color.good',
+    category: 'appearance',
+    group: 'palette',
     type: 'color',
     default: '#b3db82',
     description: 'Positive / connected state.',
   },
   {
     key: 'look.color.warn',
+    category: 'appearance',
+    group: 'palette',
     type: 'color',
     default: '#f9d978',
     description: 'Warning / in-progress state (connecting, modified setting marker).',
   },
   {
     key: 'look.color.bad',
+    category: 'appearance',
+    group: 'palette',
     type: 'color',
     default: '#ed6c89',
     description: 'Error / disconnected / destructive state.',
   },
   {
     key: 'look.color.border',
+    category: 'appearance',
+    group: 'palette',
     type: 'color',
     default: '#38353b',
     description: 'Subtle horizontal/vertical separators between regions.',
@@ -111,6 +143,8 @@ export const REGISTRY = Object.freeze([
   // ─── Alternating message rows ─────────────────────────────────────────
   {
     key: 'look.color.message.alt_bg',
+    category: 'appearance',
+    group: 'messages',
     type: 'color',
     default: 'var(--bg)',
     description:
@@ -119,6 +153,8 @@ export const REGISTRY = Object.freeze([
   },
   {
     key: 'look.color.message.alt_fg',
+    category: 'appearance',
+    group: 'messages',
     type: 'color',
     default: '#c4c4c4',
     description:
@@ -130,30 +166,40 @@ export const REGISTRY = Object.freeze([
   // ─── Member-list mode prefixes ────────────────────────────────────────
   {
     key: 'look.color.member.owner',
+    category: 'appearance',
+    group: 'members',
     type: 'color',
     default: '#ed6c89',
     description: 'Color for the ~ prefix (channel owner mode +q).',
   },
   {
     key: 'look.color.member.admin',
+    category: 'appearance',
+    group: 'members',
     type: 'color',
     default: '#fc9867',
     description: 'Color for the & prefix (channel admin mode +a).',
   },
   {
     key: 'look.color.member.op',
+    category: 'appearance',
+    group: 'members',
     type: 'color',
     default: '#a99dec',
     description: 'Color for the @ prefix (channel operator mode +o).',
   },
   {
     key: 'look.color.member.halfop',
+    category: 'appearance',
+    group: 'members',
     type: 'color',
     default: '#78dce8',
     description: 'Color for the % prefix (half-op mode +h).',
   },
   {
     key: 'look.color.member.voice',
+    category: 'appearance',
+    group: 'members',
     type: 'color',
     default: '#b3db82',
     description: 'Color for the + prefix (voiced mode +v).',
@@ -162,6 +208,8 @@ export const REGISTRY = Object.freeze([
   // ─── Nick coloring ────────────────────────────────────────────────────
   {
     key: 'look.nick.colors',
+    category: 'appearance',
+    group: 'nicks',
     type: 'string-list',
     default: [
       '#ff6188', '#fc9867', '#ffd866', '#a9dc76', '#78dce8', '#ab9df2',
@@ -175,6 +223,8 @@ export const REGISTRY = Object.freeze([
   },
   {
     key: 'look.nick.self_color',
+    category: 'appearance',
+    group: 'nicks',
     type: 'color',
     default: 'var(--fg)',
     description:
@@ -183,6 +233,8 @@ export const REGISTRY = Object.freeze([
   },
   {
     key: 'look.nick.color_stop_chars',
+    category: 'appearance',
+    group: 'nicks',
     type: 'string',
     default: '_|',
     description:
@@ -191,6 +243,8 @@ export const REGISTRY = Object.freeze([
   },
   {
     key: 'look.nick.color_hash',
+    category: 'appearance',
+    group: 'nicks',
     type: 'enum',
     choices: ['djb2-32'],
     default: 'djb2-32',
@@ -200,12 +254,16 @@ export const REGISTRY = Object.freeze([
   // ─── Misc look ────────────────────────────────────────────────────────
   {
     key: 'look.action.italic',
+    category: 'appearance',
+    group: 'misc',
     type: 'bool',
     default: true,
     description: 'Render /me action messages in italics.',
   },
   {
     key: 'look.buffer.time_format',
+    category: 'appearance',
+    group: 'misc',
     type: 'string',
     default: 'HH:mm:ss',
     description:
@@ -214,6 +272,8 @@ export const REGISTRY = Object.freeze([
   },
   {
     key: 'look.bar.time_format',
+    category: 'appearance',
+    group: 'misc',
     type: 'string',
     default: 'HH:mm:ss',
     description:
@@ -224,6 +284,8 @@ export const REGISTRY = Object.freeze([
   // ─── Smart filter (join/part/quit/nick noise) ─────────────────────────
   {
     key: 'chat.smart_filter',
+    category: 'chat',
+    group: 'smart-filter',
     type: 'bool',
     default: true,
     description:
@@ -232,6 +294,8 @@ export const REGISTRY = Object.freeze([
   },
   {
     key: 'chat.smart_filter_delay',
+    category: 'chat',
+    group: 'smart-filter',
     type: 'int',
     min: 0,
     max: 1440,
@@ -243,24 +307,32 @@ export const REGISTRY = Object.freeze([
   },
   {
     key: 'chat.smart_filter_join',
+    category: 'chat',
+    group: 'smart-filter',
     type: 'bool',
     default: true,
     description: 'Apply smart filter to JOIN events.',
   },
   {
     key: 'chat.smart_filter_quit',
+    category: 'chat',
+    group: 'smart-filter',
     type: 'bool',
     default: true,
     description: 'Apply smart filter to PART and QUIT events.',
   },
   {
     key: 'chat.smart_filter_nick',
+    category: 'chat',
+    group: 'smart-filter',
     type: 'bool',
     default: true,
     description: 'Apply smart filter to NICK change events.',
   },
   {
     key: 'chat.smart_filter_join_unmask',
+    category: 'chat',
+    group: 'smart-filter',
     type: 'int',
     min: 0,
     max: 1440,
@@ -273,6 +345,8 @@ export const REGISTRY = Object.freeze([
   // ─── Auto-away (sets you AWAY when no client is connected) ────────────
   {
     key: 'away.auto.enabled',
+    category: 'away',
+    group: 'auto-away',
     type: 'bool',
     default: true,
     description:
@@ -282,6 +356,8 @@ export const REGISTRY = Object.freeze([
   },
   {
     key: 'away.auto.delay_seconds',
+    category: 'away',
+    group: 'auto-away',
     type: 'int',
     min: 5,
     max: 3600,
@@ -292,6 +368,8 @@ export const REGISTRY = Object.freeze([
   },
   {
     key: 'away.auto.message',
+    category: 'away',
+    group: 'auto-away',
     type: 'string',
     default: 'afk',
     description:

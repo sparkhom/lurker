@@ -13,325 +13,353 @@
 
     <p v-if="error" class="error">{{ error }}</p>
 
-    <section class="rules-section">
-      <h2>sign-in</h2>
-      <p class="rules-desc">
-        You can sign in with a passkey, a password, or both. Removing your last
-        sign-in method would lock you out, so it's blocked.
-      </p>
-      <p v-if="passkeyError" class="error inline">{{ passkeyError }}</p>
+    <div class="body">
+      <nav class="sidebar" aria-label="settings sections">
+        <a
+          v-for="s in visibleSections"
+          :key="s.id"
+          :href="`#${s.id}`"
+          @click.prevent="jumpTo(s.id)"
+        >{{ s.title }}</a>
+      </nav>
 
-      <h3 class="subhead">passkeys</h3>
-      <ul v-if="passkeys.length" class="device-list">
-        <li v-for="pk in passkeys" :key="pk.id" class="device passkey">
-          <span class="ua">
+      <main class="content">
+        <!-- ─── Appearance / Chat / Away (registry-driven) ─────────────── -->
+        <section
+          v-for="cat in visibleCategories"
+          :key="cat.id"
+          :id="cat.id"
+          class="section"
+        >
+          <h2>{{ cat.title }}</h2>
+          <template v-for="grp in cat.groups" :key="grp.id">
+            <h3 v-if="cat.groups.length > 1" class="subhead">{{ grp.title }}</h3>
+            <ul class="rows">
+              <li
+                v-for="opt in grp.items"
+                :key="opt.key"
+                class="row"
+                :class="{ modified: settings.isModified(opt.key) }"
+              >
+                <span class="marker" :title="settings.isModified(opt.key) ? 'modified from default' : ''">{{ settings.isModified(opt.key) ? '*' : '' }}</span>
+                <div class="head">
+                  <span class="key">{{ opt.key }}</span>
+                  <span class="type">{{ opt.type }}</span>
+                  <button v-if="settings.isModified(opt.key)" class="link reset" @click="onReset(opt.key)" title="reset to default">reset</button>
+                </div>
+                <div class="desc">{{ opt.description }}</div>
+                <div class="editor">
+                  <label v-if="opt.type === 'bool'" class="bool">
+                    <input type="checkbox" :checked="settings.effective(opt.key)" @change="onCommit(opt.key, $event.target.checked)" />
+                    <span>{{ settings.effective(opt.key) ? 'on' : 'off' }}</span>
+                  </label>
+                  <input
+                    v-else-if="opt.type === 'int'"
+                    type="number"
+                    :min="opt.min"
+                    :max="opt.max"
+                    :value="settings.effective(opt.key)"
+                    @change="onCommit(opt.key, Number($event.target.value))"
+                  />
+                  <select
+                    v-else-if="opt.type === 'enum'"
+                    :value="settings.effective(opt.key)"
+                    @change="onCommit(opt.key, $event.target.value)"
+                  >
+                    <option v-for="c in opt.choices" :key="c" :value="c">{{ c }}</option>
+                  </select>
+                  <span v-else-if="opt.type === 'color'" class="color-edit">
+                    <span class="swatch" :style="{ background: settings.effective(opt.key) }"></span>
+                    <input
+                      type="text"
+                      :value="settings.effective(opt.key)"
+                      @change="onCommit(opt.key, $event.target.value)"
+                    />
+                  </span>
+                  <textarea
+                    v-else-if="opt.type === 'string-list'"
+                    :value="(settings.effective(opt.key) || []).join('\n')"
+                    @change="onCommit(opt.key, $event.target.value.split('\n').map(s => s.trim()).filter(Boolean))"
+                    rows="6"
+                  ></textarea>
+                  <input
+                    v-else
+                    type="text"
+                    :value="settings.effective(opt.key)"
+                    @change="onCommit(opt.key, $event.target.value)"
+                  />
+                </div>
+                <div v-if="settings.isModified(opt.key)" class="default-line">
+                  default: <code>{{ formatDefault(opt) }}</code>
+                </div>
+              </li>
+            </ul>
+          </template>
+        </section>
+
+        <p v-if="filtersActive && !visibleCategories.length" class="muted">No settings match.</p>
+        <p v-else-if="!settings.loaded && !visibleCategories.length" class="muted">Loading settings…</p>
+
+        <!-- ─── Highlights ─────────────────────────────────────────────── -->
+        <section v-if="showBespoke" id="highlights" class="section">
+          <h2>highlights</h2>
+          <p class="rules-desc">
+            Rules whose pattern matches an incoming message mark it as a highlight (line accent + sidebar dot).
+            Auto-managed entries track each network's current nick and can only be enabled/disabled.
+          </p>
+          <p v-if="rulesError" class="error inline">{{ rulesError }}</p>
+          <ul class="rule-list">
+            <li v-for="rule in rulesStore.rules" :key="rule.id" class="rule" :class="{ auto: rule.auto_managed }">
+              <span class="lock" :title="rule.auto_managed ? 'auto-managed (network nick)' : 'user rule'">
+                {{ rule.auto_managed ? '🔒' : '' }}
+              </span>
+              <input
+                type="text"
+                class="pattern"
+                :value="rule.pattern"
+                :disabled="rule.auto_managed"
+                @change="onRuleField(rule, 'pattern', $event.target.value)"
+                placeholder="pattern"
+              />
+              <select
+                :value="rule.kind"
+                :disabled="rule.auto_managed"
+                @change="onRuleField(rule, 'kind', $event.target.value)"
+              >
+                <option value="plain">plain</option>
+                <option value="glob">glob</option>
+                <option value="regex">regex</option>
+              </select>
+              <label class="ck" title="case sensitive">
+                <input
+                  type="checkbox"
+                  :checked="rule.case_sensitive"
+                  :disabled="rule.auto_managed"
+                  @change="onRuleField(rule, 'case_sensitive', $event.target.checked)"
+                />
+                <span>Aa</span>
+              </label>
+              <label class="ck" title="enabled">
+                <input
+                  type="checkbox"
+                  :checked="rule.enabled"
+                  @change="onRuleField(rule, 'enabled', $event.target.checked)"
+                />
+                <span>{{ rule.enabled ? 'on' : 'off' }}</span>
+              </label>
+              <button
+                class="link danger"
+                :disabled="rule.auto_managed"
+                @click="onRuleDelete(rule)"
+                title="delete rule"
+              ><i class="fa-solid fa-xmark"></i></button>
+            </li>
+          </ul>
+          <div class="rule-add">
             <input
+              v-model="newPattern"
               type="text"
-              :value="pk.label || ''"
-              :placeholder="defaultPasskeyLabel(pk)"
-              @change="onRenamePasskey(pk, $event.target.value)"
+              placeholder="add highlight pattern…"
+              @keydown.enter="onRuleAdd"
             />
-          </span>
-          <span class="last-seen" :title="pk.lastUsedAt || pk.createdAt">
-            {{ pk.lastUsedAt ? `last used ${formatRelative(pk.lastUsedAt)}` : `added ${formatRelative(pk.createdAt)}` }}
-          </span>
-          <button
-            class="link danger"
-            :disabled="!canRemovePasskey || passkeyBusy"
-            :title="removePasskeyTitle"
-            @click="onRemovePasskey(pk)"
-          >remove</button>
-        </li>
-      </ul>
-      <p v-else class="muted small">No passkeys registered.</p>
-      <div class="passkey-add">
-        <button class="link" :disabled="passkeyBusy" @click="onAddPasskey">add passkey</button>
-      </div>
+            <select v-model="newKind">
+              <option value="plain">plain</option>
+              <option value="glob">glob</option>
+              <option value="regex">regex</option>
+            </select>
+            <label class="ck">
+              <input type="checkbox" v-model="newCaseSensitive" />
+              <span>Aa</span>
+            </label>
+            <button class="link" :disabled="!newPattern.trim()" @click="onRuleAdd">add</button>
+          </div>
+        </section>
 
-      <h3 class="subhead">password</h3>
-      <p v-if="passwordError" class="error inline">{{ passwordError }}</p>
-      <p v-if="passwordNotice" class="muted small">{{ passwordNotice }}</p>
-      <p v-if="!hasPassword" class="muted small">No password set.</p>
-      <p v-else class="muted small">Password is set.</p>
-      <form class="password-form" @submit.prevent="onSavePassword">
-        <label v-if="hasPassword">
-          <span>Current password</span>
-          <input v-model="currentPasswordInput" type="password" autocomplete="current-password" />
-        </label>
-        <label>
-          <span>{{ hasPassword ? 'New password' : 'Password' }}</span>
-          <input
-            v-model="newPasswordInput"
-            type="password"
-            autocomplete="new-password"
-            minlength="8"
-          />
-        </label>
-        <div class="password-actions">
-          <button
-            class="link"
-            type="submit"
-            :disabled="passwordBusy || !newPasswordInput || (hasPassword && !currentPasswordInput)"
-          >{{ hasPassword ? 'change password' : 'set password' }}</button>
-          <button
-            v-if="hasPassword"
-            type="button"
-            class="link danger"
-            :disabled="passwordBusy || passkeys.length === 0"
-            :title="passkeys.length === 0 ? 'add a passkey before removing your password' : 'remove password'"
-            @click="onRemovePassword"
-          >remove password</button>
-        </div>
-      </form>
+        <!-- ─── Notifications ──────────────────────────────────────────── -->
+        <section v-if="showBespoke" id="notifications" class="section">
+          <h2>notifications</h2>
+          <p class="rules-desc">
+            Each browser/device subscribes independently. Enable here to receive system
+            notifications on this device when a highlight or DM arrives and no other
+            client of yours is currently visible.
+          </p>
+          <p v-if="pushError" class="error inline">{{ pushError }}</p>
 
-      <div class="signout-row">
-        <button class="link danger" @click="signOut">sign out</button>
-      </div>
-    </section>
+          <div class="this-client">
+            <span class="this-label">this client</span>
+            <button
+              v-if="!pushSupported"
+              class="link"
+              disabled
+            >push not supported in this browser</button>
+            <button
+              v-else-if="thisClientEnabled"
+              class="link danger"
+              :disabled="pushBusy"
+              @click="onDisableThisClient"
+            >disable for this client</button>
+            <button
+              v-else
+              class="link"
+              :disabled="pushBusy"
+              @click="onEnableThisClient"
+            >enable for this client</button>
+          </div>
 
-    <section v-if="isAdmin" class="rules-section admin-section">
-      <h2>users</h2>
-      <p class="rules-desc">
-        Invite friends with a one-time link, or remove an account. The last admin
-        and your own account can't be deleted.
-      </p>
-      <p v-if="adminError" class="error inline">{{ adminError }}</p>
+          <ul v-if="otherSubscriptions.length" class="device-list">
+            <li v-for="sub in otherSubscriptions" :key="sub.id" class="device">
+              <span class="ua">{{ formatUA(sub.user_agent) }}</span>
+              <span class="last-seen" :title="sub.last_seen_at">last seen {{ formatRelative(sub.last_seen_at) }}</span>
+              <button class="link danger" @click="onRemoveOther(sub)" :disabled="pushBusy">remove</button>
+            </li>
+          </ul>
+          <p v-else-if="pushSubsStore.loaded && thisClientEnabled" class="muted small">No other devices registered.</p>
+        </section>
 
-      <h3 class="subhead">members</h3>
-      <ul v-if="adminStore.users.length" class="device-list">
-        <li v-for="u in adminStore.users" :key="u.id" class="device user-row">
-          <span class="ua">
-            {{ u.username }}
-            <span v-if="u.role === 'admin'" class="role-tag">admin</span>
-          </span>
-          <span class="last-seen">joined {{ formatRelative(u.createdAt) }}</span>
-          <button
-            class="link danger"
-            :disabled="u.id === auth.user?.id || adminBusy"
-            :title="u.id === auth.user?.id ? 'cannot delete yourself' : 'delete user'"
-            @click="onDeleteUser(u)"
-          >delete</button>
-        </li>
-      </ul>
-      <p v-else-if="adminStore.usersLoaded" class="muted small">No users.</p>
+        <!-- ─── Account (sign-in) ──────────────────────────────────────── -->
+        <section v-if="showBespoke" id="account" class="section">
+          <h2>account</h2>
+          <p class="rules-desc">
+            You can sign in with a passkey, a password, or both. Removing your last
+            sign-in method would lock you out, so it's blocked.
+          </p>
+          <p v-if="passkeyError" class="error inline">{{ passkeyError }}</p>
 
-      <h3 class="subhead">invites</h3>
-      <div class="invite-actions">
-        <button class="link" :disabled="adminBusy" @click="onCreateInvite">
-          generate invite link
-        </button>
-        <span v-if="lastCreatedInviteUrl" class="invite-fresh" title="copied to clipboard">
-          <code>{{ lastCreatedInviteUrl }}</code>
-          <button class="link" @click="copyInviteUrl(lastCreatedInviteUrl)">copy</button>
-        </span>
-      </div>
-      <ul v-if="adminStore.invites.length" class="device-list">
-        <li v-for="inv in adminStore.invites" :key="inv.token" class="device invite-row">
-          <span class="ua">
-            <code class="invite-url">{{ inv.url }}</code>
-            <span class="invite-status" :class="`status-${inv.status}`">{{ inv.status }}</span>
-            <span v-if="inv.usedByUsername" class="invite-used"> → {{ inv.usedByUsername }}</span>
-          </span>
-          <span class="last-seen" :title="inv.expiresAt">
-            <template v-if="inv.status === 'consumed' && inv.usedAt">used {{ formatRelative(inv.usedAt) }}</template>
-            <template v-else-if="inv.expiresAt">expires {{ formatRelative(inv.expiresAt) }}</template>
-            <template v-else>no expiry</template>
-          </span>
-          <button
-            v-if="inv.status !== 'consumed'"
-            class="link danger"
-            :disabled="adminBusy"
-            @click="onRevokeInvite(inv)"
-          >revoke</button>
-          <button
-            v-else
-            class="link"
-            disabled
-            title="consumed invites are kept as an audit trail"
-          >—</button>
-        </li>
-      </ul>
-      <p v-else-if="adminStore.invitesLoaded" class="muted small">No invites yet.</p>
-    </section>
+          <h3 class="subhead">passkeys</h3>
+          <ul v-if="passkeys.length" class="device-list">
+            <li v-for="pk in passkeys" :key="pk.id" class="device passkey">
+              <span class="ua">
+                <input
+                  type="text"
+                  :value="pk.label || ''"
+                  :placeholder="defaultPasskeyLabel(pk)"
+                  @change="onRenamePasskey(pk, $event.target.value)"
+                />
+              </span>
+              <span class="last-seen" :title="pk.lastUsedAt || pk.createdAt">
+                {{ pk.lastUsedAt ? `last used ${formatRelative(pk.lastUsedAt)}` : `added ${formatRelative(pk.createdAt)}` }}
+              </span>
+              <button
+                class="link danger"
+                :disabled="!canRemovePasskey || passkeyBusy"
+                :title="removePasskeyTitle"
+                @click="onRemovePasskey(pk)"
+              >remove</button>
+            </li>
+          </ul>
+          <p v-else class="muted small">No passkeys registered.</p>
+          <div class="passkey-add">
+            <button class="link" :disabled="passkeyBusy" @click="onAddPasskey">add passkey</button>
+          </div>
 
-    <section class="rules-section push-section">
-      <h2>push notifications</h2>
-      <p class="rules-desc">
-        Each browser/device subscribes independently. Enable here to receive system
-        notifications on this device when a highlight or DM arrives and no other
-        client of yours is currently visible.
-      </p>
-      <p v-if="pushError" class="error inline">{{ pushError }}</p>
+          <h3 class="subhead">password</h3>
+          <p v-if="passwordError" class="error inline">{{ passwordError }}</p>
+          <p v-if="passwordNotice" class="muted small">{{ passwordNotice }}</p>
+          <p v-if="!hasPassword" class="muted small">No password set.</p>
+          <p v-else class="muted small">Password is set.</p>
+          <form class="password-form" @submit.prevent="onSavePassword">
+            <label v-if="hasPassword">
+              <span>Current password</span>
+              <input v-model="currentPasswordInput" type="password" autocomplete="current-password" />
+            </label>
+            <label>
+              <span>{{ hasPassword ? 'New password' : 'Password' }}</span>
+              <input
+                v-model="newPasswordInput"
+                type="password"
+                autocomplete="new-password"
+                minlength="8"
+              />
+            </label>
+            <div class="password-actions">
+              <button
+                class="link"
+                type="submit"
+                :disabled="passwordBusy || !newPasswordInput || (hasPassword && !currentPasswordInput)"
+              >{{ hasPassword ? 'change password' : 'set password' }}</button>
+              <button
+                v-if="hasPassword"
+                type="button"
+                class="link danger"
+                :disabled="passwordBusy || passkeys.length === 0"
+                :title="passkeys.length === 0 ? 'add a passkey before removing your password' : 'remove password'"
+                @click="onRemovePassword"
+              >remove password</button>
+            </div>
+          </form>
 
-      <div class="this-client">
-        <span class="this-label">this client</span>
-        <button
-          v-if="!pushSupported"
-          class="link"
-          disabled
-        >push not supported in this browser</button>
-        <button
-          v-else-if="thisClientEnabled"
-          class="link danger"
-          :disabled="pushBusy"
-          @click="onDisableThisClient"
-        >disable for this client</button>
-        <button
-          v-else
-          class="link"
-          :disabled="pushBusy"
-          @click="onEnableThisClient"
-        >enable for this client</button>
-      </div>
+          <div class="signout-row">
+            <button class="link danger" @click="signOut">sign out</button>
+          </div>
+        </section>
 
-      <ul v-if="otherSubscriptions.length" class="device-list">
-        <li v-for="sub in otherSubscriptions" :key="sub.id" class="device">
-          <span class="ua">{{ formatUA(sub.user_agent) }}</span>
-          <span class="last-seen" :title="sub.last_seen_at">last seen {{ formatRelative(sub.last_seen_at) }}</span>
-          <button class="link danger" @click="onRemoveOther(sub)" :disabled="pushBusy">remove</button>
-        </li>
-      </ul>
-      <p v-else-if="pushSubsStore.loaded && thisClientEnabled" class="muted small">No other devices registered.</p>
-    </section>
+        <!-- ─── Users (admin only) ─────────────────────────────────────── -->
+        <section v-if="showBespoke && isAdmin" id="users" class="section">
+          <h2>users</h2>
+          <p class="rules-desc">
+            Invite friends with a one-time link, or remove an account. The last admin
+            and your own account can't be deleted.
+          </p>
+          <p v-if="adminError" class="error inline">{{ adminError }}</p>
 
-    <section class="rules-section">
-      <h2>highlight rules</h2>
-      <p class="rules-desc">
-        Rules whose pattern matches an incoming message mark it as a highlight (line accent + sidebar dot).
-        Auto-managed entries track each network's current nick and can only be enabled/disabled.
-      </p>
-      <p v-if="rulesError" class="error inline">{{ rulesError }}</p>
-      <ul class="rule-list">
-        <li v-for="rule in rulesStore.rules" :key="rule.id" class="rule" :class="{ auto: rule.auto_managed }">
-          <span class="lock" :title="rule.auto_managed ? 'auto-managed (network nick)' : 'user rule'">
-            {{ rule.auto_managed ? '🔒' : '' }}
-          </span>
-          <input
-            type="text"
-            class="pattern"
-            :value="rule.pattern"
-            :disabled="rule.auto_managed"
-            @change="onRuleField(rule, 'pattern', $event.target.value)"
-            placeholder="pattern"
-          />
-          <select
-            :value="rule.kind"
-            :disabled="rule.auto_managed"
-            @change="onRuleField(rule, 'kind', $event.target.value)"
-          >
-            <option value="plain">plain</option>
-            <option value="glob">glob</option>
-            <option value="regex">regex</option>
-          </select>
-          <label class="ck" title="case sensitive">
-            <input
-              type="checkbox"
-              :checked="rule.case_sensitive"
-              :disabled="rule.auto_managed"
-              @change="onRuleField(rule, 'case_sensitive', $event.target.checked)"
-            />
-            <span>Aa</span>
-          </label>
-          <label class="ck" title="enabled">
-            <input
-              type="checkbox"
-              :checked="rule.enabled"
-              @change="onRuleField(rule, 'enabled', $event.target.checked)"
-            />
-            <span>{{ rule.enabled ? 'on' : 'off' }}</span>
-          </label>
-          <button
-            class="link danger"
-            :disabled="rule.auto_managed"
-            @click="onRuleDelete(rule)"
-            title="delete rule"
-          ><i class="fa-solid fa-xmark"></i></button>
-        </li>
-      </ul>
-      <div class="rule-add">
-        <input
-          v-model="newPattern"
-          type="text"
-          placeholder="add highlight pattern…"
-          @keydown.enter="onRuleAdd"
-        />
-        <select v-model="newKind">
-          <option value="plain">plain</option>
-          <option value="glob">glob</option>
-          <option value="regex">regex</option>
-        </select>
-        <label class="ck">
-          <input type="checkbox" v-model="newCaseSensitive" />
-          <span>Aa</span>
-        </label>
-        <button class="link" :disabled="!newPattern.trim()" @click="onRuleAdd">add</button>
-      </div>
-    </section>
+          <h3 class="subhead">members</h3>
+          <ul v-if="adminStore.users.length" class="device-list">
+            <li v-for="u in adminStore.users" :key="u.id" class="device user-row">
+              <span class="ua">
+                {{ u.username }}
+                <span v-if="u.role === 'admin'" class="role-tag">admin</span>
+              </span>
+              <span class="last-seen">joined {{ formatRelative(u.createdAt) }}</span>
+              <button
+                class="link danger"
+                :disabled="u.id === auth.user?.id || adminBusy"
+                :title="u.id === auth.user?.id ? 'cannot delete yourself' : 'delete user'"
+                @click="onDeleteUser(u)"
+              >delete</button>
+            </li>
+          </ul>
+          <p v-else-if="adminStore.usersLoaded" class="muted small">No users.</p>
 
-    <p v-if="!settings.loaded && !filtered.length" class="muted">Loading settings…</p>
-    <p v-else-if="!filtered.length" class="muted">No settings match.</p>
-
-    <ul class="rows">
-      <li v-for="opt in filtered" :key="opt.key" class="row" :class="{ modified: settings.isModified(opt.key) }">
-        <span class="marker" :title="settings.isModified(opt.key) ? 'modified from default' : ''">{{ settings.isModified(opt.key) ? '*' : '' }}</span>
-        <div class="head">
-          <span class="key">{{ opt.key }}</span>
-          <span class="type">{{ opt.type }}</span>
-          <button v-if="settings.isModified(opt.key)" class="link reset" @click="onReset(opt.key)" title="reset to default">reset</button>
-        </div>
-        <div class="desc">{{ opt.description }}</div>
-        <div class="editor">
-          <!-- bool -->
-          <label v-if="opt.type === 'bool'" class="bool">
-            <input type="checkbox" :checked="settings.effective(opt.key)" @change="onCommit(opt.key, $event.target.checked)" />
-            <span>{{ settings.effective(opt.key) ? 'on' : 'off' }}</span>
-          </label>
-          <!-- int -->
-          <input
-            v-else-if="opt.type === 'int'"
-            type="number"
-            :min="opt.min"
-            :max="opt.max"
-            :value="settings.effective(opt.key)"
-            @change="onCommit(opt.key, Number($event.target.value))"
-          />
-          <!-- enum -->
-          <select
-            v-else-if="opt.type === 'enum'"
-            :value="settings.effective(opt.key)"
-            @change="onCommit(opt.key, $event.target.value)"
-          >
-            <option v-for="c in opt.choices" :key="c" :value="c">{{ c }}</option>
-          </select>
-          <!-- color -->
-          <span v-else-if="opt.type === 'color'" class="color-edit">
-            <span class="swatch" :style="{ background: settings.effective(opt.key) }"></span>
-            <input
-              type="text"
-              :value="settings.effective(opt.key)"
-              @change="onCommit(opt.key, $event.target.value)"
-            />
-          </span>
-          <!-- string-list -->
-          <textarea
-            v-else-if="opt.type === 'string-list'"
-            :value="(settings.effective(opt.key) || []).join('\n')"
-            @change="onCommit(opt.key, $event.target.value.split('\n').map(s => s.trim()).filter(Boolean))"
-            rows="6"
-          ></textarea>
-          <!-- string (default) -->
-          <input
-            v-else
-            type="text"
-            :value="settings.effective(opt.key)"
-            @change="onCommit(opt.key, $event.target.value)"
-          />
-        </div>
-        <div v-if="settings.isModified(opt.key)" class="default-line">
-          default: <code>{{ formatDefault(opt) }}</code>
-        </div>
-      </li>
-    </ul>
+          <h3 class="subhead">invites</h3>
+          <div class="invite-actions">
+            <button class="link" :disabled="adminBusy" @click="onCreateInvite">
+              generate invite link
+            </button>
+            <span v-if="lastCreatedInviteUrl" class="invite-fresh" title="copied to clipboard">
+              <code>{{ lastCreatedInviteUrl }}</code>
+              <button class="link" @click="copyInviteUrl(lastCreatedInviteUrl)">copy</button>
+            </span>
+          </div>
+          <ul v-if="adminStore.invites.length" class="device-list">
+            <li v-for="inv in adminStore.invites" :key="inv.token" class="device invite-row">
+              <span class="ua">
+                <code class="invite-url">{{ inv.url }}</code>
+                <span class="invite-status" :class="`status-${inv.status}`">{{ inv.status }}</span>
+                <span v-if="inv.usedByUsername" class="invite-used"> → {{ inv.usedByUsername }}</span>
+              </span>
+              <span class="last-seen" :title="inv.expiresAt">
+                <template v-if="inv.status === 'consumed' && inv.usedAt">used {{ formatRelative(inv.usedAt) }}</template>
+                <template v-else-if="inv.expiresAt">expires {{ formatRelative(inv.expiresAt) }}</template>
+                <template v-else>no expiry</template>
+              </span>
+              <button
+                v-if="inv.status !== 'consumed'"
+                class="link danger"
+                :disabled="adminBusy"
+                @click="onRevokeInvite(inv)"
+              >revoke</button>
+              <button
+                v-else
+                class="link"
+                disabled
+                title="consumed invites are kept as an audit trail"
+              >—</button>
+            </li>
+          </ul>
+          <p v-else-if="adminStore.invitesLoaded" class="muted small">No invites yet.</p>
+        </section>
+      </main>
+    </div>
   </div>
 </template>
 
@@ -698,14 +726,73 @@ async function onRuleAdd() {
   }
 }
 
-const filtered = computed(() => {
+// Category / group titles for the sidebar TOC and subheadings.
+const CATEGORY_ORDER = ['appearance', 'chat', 'away'];
+const CATEGORY_TITLES = {
+  appearance: 'appearance',
+  chat: 'chat',
+  away: 'away',
+};
+const GROUP_TITLES = {
+  fonts: 'fonts',
+  palette: 'colors',
+  messages: 'message rows',
+  members: 'member prefixes',
+  nicks: 'nick coloring',
+  misc: 'misc',
+  'smart-filter': 'smart filter',
+  'auto-away': 'auto-away',
+};
+
+const filtersActive = computed(() => !!search.value.trim() || modifiedOnly.value);
+const showBespoke = computed(() => !filtersActive.value);
+
+function matchesSearch(opt) {
   const q = search.value.trim().toLowerCase();
-  return settings.registry.filter((opt) => {
-    if (modifiedOnly.value && !settings.isModified(opt.key)) return false;
-    if (!q) return true;
-    return opt.key.toLowerCase().includes(q) || (opt.description || '').toLowerCase().includes(q);
-  });
+  if (!q) return true;
+  return opt.key.toLowerCase().includes(q) || (opt.description || '').toLowerCase().includes(q);
+}
+
+const visibleCategories = computed(() => {
+  const cats = [];
+  for (const id of CATEGORY_ORDER) {
+    const items = settings.registry.filter((opt) => {
+      if (opt.category !== id) return false;
+      if (modifiedOnly.value && !settings.isModified(opt.key)) return false;
+      return matchesSearch(opt);
+    });
+    if (!items.length) continue;
+    const groupsMap = new Map();
+    for (const opt of items) {
+      const gid = opt.group || '_';
+      if (!groupsMap.has(gid)) groupsMap.set(gid, []);
+      groupsMap.get(gid).push(opt);
+    }
+    const groups = Array.from(groupsMap, ([gid, gItems]) => ({
+      id: gid,
+      title: GROUP_TITLES[gid] || gid,
+      items: gItems,
+    }));
+    cats.push({ id, title: CATEGORY_TITLES[id], groups });
+  }
+  return cats;
 });
+
+const visibleSections = computed(() => {
+  const sections = visibleCategories.value.map((c) => ({ id: c.id, title: c.title }));
+  if (showBespoke.value) {
+    sections.push({ id: 'highlights', title: 'highlights' });
+    sections.push({ id: 'notifications', title: 'notifications' });
+    sections.push({ id: 'account', title: 'account' });
+    if (isAdmin.value) sections.push({ id: 'users', title: 'users' });
+  }
+  return sections;
+});
+
+function jumpTo(id) {
+  const el = document.getElementById(id);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
 
 const anyModified = computed(() => settings.registry.some((o) => settings.isModified(o.key)));
 
@@ -798,19 +885,68 @@ async function onResetAll() {
   margin: 0;
 }
 .muted {
-  text-align: center;
   color: var(--fg-muted);
-  padding: 32px;
+  padding: 16px 12px;
   font-style: italic;
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.sidebar {
+  flex: 0 0 auto;
+  width: 13em;
+  border-right: 1px solid var(--border);
+  padding: 8px 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.sidebar a {
+  color: var(--fg-muted);
+  text-decoration: none;
+  padding: 4px 12px;
+  text-transform: lowercase;
+  letter-spacing: 0.04em;
+}
+.sidebar a:hover { color: var(--fg); background: var(--bg-soft); }
+.content {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+}
+@media (max-width: 720px) {
+  .sidebar { display: none; }
+}
+
+.section {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.section h2 {
+  margin: 0 0 6px;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: inherit;
+  font-weight: 600;
+}
+.section .subhead {
+  margin: 12px 0 4px;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.95em;
+  font-weight: 600;
 }
 
 .rows {
   list-style: none;
   margin: 0;
   padding: 0;
-  overflow-y: auto;
-  flex: 1;
-  min-height: 0;
 }
 .row {
   display: grid;
@@ -821,9 +957,10 @@ async function onResetAll() {
     ".      editor"
     ".      default";
   gap: 2px 8px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
 }
+.row:first-child { border-top: none; }
 .row:hover { background: var(--bg-soft); }
 .row.modified .key { color: var(--warn); }
 
@@ -861,19 +998,6 @@ async function onResetAll() {
   padding: 0 4px;
 }
 
-.rules-section {
-  padding: 8px 12px 12px;
-  border-bottom: 1px solid var(--border);
-  flex: 0 0 auto;
-}
-.rules-section h2 {
-  margin: 0 0 4px;
-  color: var(--fg-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: inherit;
-  font-weight: 600;
-}
 .rules-desc { color: var(--fg-muted); margin: 0 0 8px; }
 .error.inline { padding: 4px 0; border: none; }
 .rule-list { list-style: none; margin: 0 0 6px; padding: 0; }
@@ -895,13 +1019,13 @@ async function onResetAll() {
 }
 .rule-add input[type="text"] { flex: 1; min-width: 200px; }
 
-.push-section .this-client {
+.this-client {
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 4px 0 8px;
 }
-.push-section .this-label {
+.this-label {
   color: var(--fg-muted);
   font-weight: 600;
 }
@@ -965,14 +1089,6 @@ async function onResetAll() {
   justify-content: flex-start;
 }
 
-.admin-section .subhead {
-  margin: 12px 0 4px;
-  color: var(--fg-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: 0.95em;
-  font-weight: 600;
-}
 .user-row .role-tag {
   color: var(--accent);
   border: 1px solid var(--accent);
