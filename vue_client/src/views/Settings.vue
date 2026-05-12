@@ -14,12 +14,14 @@
     <p v-if="error" class="error">{{ error }}</p>
 
     <section class="rules-section">
-      <h2>passkeys</h2>
+      <h2>sign-in</h2>
       <p class="rules-desc">
-        Sign in is passkey-only. Add a passkey for each device you want to use.
-        Removing your last passkey would lock you out, so it's blocked.
+        You can sign in with a passkey, a password, or both. Removing your last
+        sign-in method would lock you out, so it's blocked.
       </p>
       <p v-if="passkeyError" class="error inline">{{ passkeyError }}</p>
+
+      <h3 class="subhead">passkeys</h3>
       <ul v-if="passkeys.length" class="device-list">
         <li v-for="pk in passkeys" :key="pk.id" class="device passkey">
           <span class="ua">
@@ -35,8 +37,8 @@
           </span>
           <button
             class="link danger"
-            :disabled="passkeys.length <= 1 || passkeyBusy"
-            :title="passkeys.length <= 1 ? 'cannot remove your only passkey' : 'remove this passkey'"
+            :disabled="!canRemovePasskey || passkeyBusy"
+            :title="removePasskeyTitle"
             @click="onRemovePasskey(pk)"
           >remove</button>
         </li>
@@ -44,6 +46,45 @@
       <p v-else class="muted small">No passkeys registered.</p>
       <div class="passkey-add">
         <button class="link" :disabled="passkeyBusy" @click="onAddPasskey">add passkey</button>
+      </div>
+
+      <h3 class="subhead">password</h3>
+      <p v-if="passwordError" class="error inline">{{ passwordError }}</p>
+      <p v-if="passwordNotice" class="muted small">{{ passwordNotice }}</p>
+      <p v-if="!hasPassword" class="muted small">No password set.</p>
+      <p v-else class="muted small">Password is set.</p>
+      <form class="password-form" @submit.prevent="onSavePassword">
+        <label v-if="hasPassword">
+          <span>Current password</span>
+          <input v-model="currentPasswordInput" type="password" autocomplete="current-password" />
+        </label>
+        <label>
+          <span>{{ hasPassword ? 'New password' : 'Password' }}</span>
+          <input
+            v-model="newPasswordInput"
+            type="password"
+            autocomplete="new-password"
+            minlength="8"
+          />
+        </label>
+        <div class="password-actions">
+          <button
+            class="link"
+            type="submit"
+            :disabled="passwordBusy || !newPasswordInput || (hasPassword && !currentPasswordInput)"
+          >{{ hasPassword ? 'change password' : 'set password' }}</button>
+          <button
+            v-if="hasPassword"
+            type="button"
+            class="link danger"
+            :disabled="passwordBusy || passkeys.length === 0"
+            :title="passkeys.length === 0 ? 'add a passkey before removing your password' : 'remove password'"
+            @click="onRemovePassword"
+          >remove password</button>
+        </div>
+      </form>
+
+      <div class="signout-row">
         <button class="link danger" @click="signOut">sign out</button>
       </div>
     </section>
@@ -328,6 +369,23 @@ const search = ref('');
 const passkeys = ref([]);
 const passkeyError = ref('');
 const passkeyBusy = ref(false);
+const hasPassword = ref(false);
+const passwordError = ref('');
+const passwordNotice = ref('');
+const passwordBusy = ref(false);
+const currentPasswordInput = ref('');
+const newPasswordInput = ref('');
+
+const canRemovePasskey = computed(() => {
+  // Server blocks removing the last sign-in method. So removing a passkey is
+  // safe when there's another passkey, OR when a password exists.
+  if (passkeys.value.length > 1) return true;
+  return hasPassword.value;
+});
+const removePasskeyTitle = computed(() => {
+  if (canRemovePasskey.value) return 'remove this passkey';
+  return 'set a password first — this is your only sign-in method';
+});
 const modifiedOnly = ref(false);
 const error = ref('');
 const rulesError = ref('');
@@ -370,6 +428,7 @@ onMounted(async () => {
     refreshPushState();
   }
   refreshPasskeys();
+  refreshPasswordStatus();
   if (isAdmin.value) {
     adminStore.fetchUsers().catch((e) => { adminError.value = e.message; });
     adminStore.fetchInvites().catch((e) => { adminError.value = e.message; });
@@ -474,6 +533,49 @@ async function onRemovePasskey(pk) {
     passkeyError.value = e.message || 'remove failed';
   } finally {
     passkeyBusy.value = false;
+  }
+}
+
+async function refreshPasswordStatus() {
+  hasPassword.value = await auth.fetchPasswordStatus();
+}
+
+async function onSavePassword() {
+  passwordError.value = '';
+  passwordNotice.value = '';
+  if (!newPasswordInput.value) return;
+  passwordBusy.value = true;
+  try {
+    await auth.setPassword({
+      password: newPasswordInput.value,
+      currentPassword: hasPassword.value ? currentPasswordInput.value : undefined,
+    });
+    currentPasswordInput.value = '';
+    newPasswordInput.value = '';
+    await refreshPasswordStatus();
+    passwordNotice.value = 'Password saved.';
+  } catch (e) {
+    passwordError.value = e.message || 'failed to save password';
+  } finally {
+    passwordBusy.value = false;
+  }
+}
+
+async function onRemovePassword() {
+  if (!confirm('Remove your password? You will only be able to sign in with a passkey.')) return;
+  passwordError.value = '';
+  passwordNotice.value = '';
+  passwordBusy.value = true;
+  try {
+    await auth.removePassword();
+    currentPasswordInput.value = '';
+    newPasswordInput.value = '';
+    await refreshPasswordStatus();
+    passwordNotice.value = 'Password removed.';
+  } catch (e) {
+    passwordError.value = e.message || 'failed to remove password';
+  } finally {
+    passwordBusy.value = false;
   }
 }
 
@@ -832,6 +934,35 @@ async function onResetAll() {
   display: flex;
   gap: 1ch;
   align-items: center;
+}
+.password-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+  max-width: 360px;
+}
+.password-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--fg-muted);
+}
+.password-form label span {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.85em;
+}
+.password-actions {
+  display: flex;
+  gap: 1ch;
+  align-items: center;
+  margin-top: 2px;
+}
+.signout-row {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-start;
 }
 
 .admin-section .subhead {

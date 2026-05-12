@@ -25,6 +25,20 @@ export function createUser(username, { role = 'user' } = {}) {
   return findUserById(info.lastInsertRowid);
 }
 
+export function getPasswordHash(userId) {
+  const row = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(userId);
+  return row ? row.password_hash : null;
+}
+
+export function userHasPassword(userId) {
+  return getPasswordHash(userId) !== null;
+}
+
+export function setPasswordHash(userId, hash) {
+  const info = db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, userId);
+  return info.changes > 0;
+}
+
 // Hard delete. FKs are ON DELETE CASCADE for sessions / networks / messages /
 // settings / etc., so dependent rows vacate on their own.
 export function deleteUser(id) {

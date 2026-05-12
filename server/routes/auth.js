@@ -12,6 +12,9 @@ import {
   countUsers,
   createUser,
   deleteUser,
+  getPasswordHash,
+  userHasPassword,
+  setPasswordHash,
 } from '../db/users.js';
 import { inviteStatus, consumeInvite } from '../db/invites.js';
 import {
@@ -32,6 +35,12 @@ import {
   consumeChallenge,
   userIdToHandle,
 } from '../services/webauthn.js';
+import {
+  hashPassword,
+  verifyPassword,
+  isValidPassword,
+  passwordRequirementsMessage,
+} from '../services/password.js';
 
 const CHALLENGE_COOKIE = 'lurker_webauthn_challenge';
 
@@ -175,6 +184,31 @@ router.post('/setup/verify', async (req, res) => {
   res.json({ user: { id: user.id, username: user.username, role: user.role } });
 });
 
+// Password-only first-admin setup. Mirrors /setup/options + /setup/verify but
+// skips the WebAuthn dance — operator picks a username and password and is
+// signed in straight away. They can add a passkey later from settings.
+router.post('/setup/password', (req, res) => {
+  if (countUsers() > 0) {
+    return res.status(409).json({ error: 'setup already complete' });
+  }
+  const requested = (req.body?.username || '').trim();
+  const password = req.body?.password;
+  if (!isValidUsername(requested)) {
+    return res.status(400).json({ error: 'invalid username' });
+  }
+  if (!isValidPassword(password)) {
+    return res.status(400).json({ error: passwordRequirementsMessage() });
+  }
+  if (findUserByUsername(requested)) {
+    return res.status(409).json({ error: 'username already taken' });
+  }
+  const user = createUser(requested, { role: 'admin' });
+  setPasswordHash(user.id, hashPassword(password));
+  const { token: sessionToken } = createSession(user.id);
+  res.cookie(SESSION_COOKIE, sessionToken, getCookieOptions());
+  res.json({ user: { id: user.id, username: user.username, role: user.role } });
+});
+
 // ---------- invite redemption ----------
 
 // Public status probe. Returns the bare minimum the UI needs to render the
@@ -287,9 +321,43 @@ router.post('/invite/:token/verify', async (req, res) => {
   res.json({ user: { id: user.id, username: user.username, role: user.role } });
 });
 
+// Password redemption of an invite. Mirrors /invite/:token/options +
+// /invite/:token/verify but with no WebAuthn dance.
+router.post('/invite/:token/password', (req, res) => {
+  const result = inviteStatus(req.params.token);
+  if (result.status !== 'valid') {
+    return res.status(404).json({ error: 'invalid or used invite' });
+  }
+  const requested = (req.body?.username || '').trim();
+  const password = req.body?.password;
+  if (!isValidUsername(requested)) {
+    return res.status(400).json({ error: 'invalid username' });
+  }
+  if (!isValidPassword(password)) {
+    return res.status(400).json({ error: passwordRequirementsMessage() });
+  }
+  if (findUserByUsername(requested)) {
+    return res.status(409).json({ error: 'username already taken' });
+  }
+  const user = createUser(requested, { role: 'user' });
+  // Atomic consume — only one parallel redemption can win. If we lose,
+  // tear down the user we just created and surface the conflict.
+  if (!consumeInvite(req.params.token, user.id)) {
+    deleteUser(user.id);
+    return res.status(409).json({ error: 'invite is no longer valid' });
+  }
+  setPasswordHash(user.id, hashPassword(password));
+  const { token: sessionToken } = createSession(user.id);
+  res.cookie(SESSION_COOKIE, sessionToken, getCookieOptions());
+  res.json({ user: { id: user.id, username: user.username, role: user.role } });
+});
+
 // ---------- login ----------
 
 router.post('/login/options', async (req, res) => {
+  // Returns options only when at least one passkey exists. The client also
+  // probes /auth-methods to know whether to even surface the passkey button,
+  // so this 409 mostly guards against stale clients calling out of order.
   if (countAllCredentials() === 0) {
     return res.status(409).json({ error: 'no passkeys registered' });
   }
@@ -352,6 +420,37 @@ router.post('/login/verify', async (req, res) => {
   const { token: sessionToken } = createSession(user.id);
   res.cookie(SESSION_COOKIE, sessionToken, getCookieOptions());
   res.json({ user: { id: user.id, username: user.username, role: user.role } });
+});
+
+// Dummy hash with valid format and the real algorithm parameters. Verifying
+// against it on a username-miss costs the same scrypt work as a real verify,
+// so response time doesn't leak whether the account exists. Salt/digest are
+// fixed zero bytes — no secret value.
+const DUMMY_PASSWORD_HASH =
+  `scrypt$32768$8$1$${Buffer.alloc(16).toString('base64')}$${Buffer.alloc(64).toString('base64')}`;
+
+router.post('/login/password', (req, res) => {
+  const username = (req.body?.username || '').trim();
+  const password = req.body?.password;
+  if (!isValidUsername(username) || typeof password !== 'string' || password.length === 0) {
+    return res.status(400).json({ error: 'username and password required' });
+  }
+  const user = findUserByUsername(username);
+  const stored = user ? getPasswordHash(user.id) : null;
+  const ok = verifyPassword(password, stored || DUMMY_PASSWORD_HASH);
+  if (!user || !stored || !ok) {
+    return res.status(401).json({ error: 'invalid username or password' });
+  }
+  const { token: sessionToken } = createSession(user.id);
+  res.cookie(SESSION_COOKIE, sessionToken, getCookieOptions());
+  res.json({ user: { id: user.id, username: user.username, role: user.role } });
+});
+
+// Public probe so the login UI can decide which sign-in buttons to surface.
+// Currently just reports whether any passkey exists anywhere — discoverable
+// passkey login doesn't need a username, so a single global flag is enough.
+router.get('/auth-methods', (req, res) => {
+  res.json({ passkey: countAllCredentials() > 0 });
 });
 
 // ---------- session ----------
@@ -451,14 +550,47 @@ router.patch('/passkeys/:id', requireAuth, (req, res) => {
 router.delete('/passkeys/:id', requireAuth, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
-  // Refuse to remove the last passkey — that locks the account out, and we
-  // don't have a fallback auth method to recover with.
-  if (countCredentialsForUser(req.user.id) <= 1) {
-    return res.status(409).json({ error: 'cannot remove your only passkey' });
+  // Removing the last passkey is only safe if the user can still sign in
+  // another way. Right now that's a password.
+  if (countCredentialsForUser(req.user.id) <= 1 && !userHasPassword(req.user.id)) {
+    return res.status(409).json({ error: 'cannot remove your only sign-in method — set a password first' });
   }
   const ok = deleteCredentialById(id, req.user.id);
   if (!ok) return res.status(404).json({ error: 'not found' });
   res.json({ ok: true });
+});
+
+// ---------- password management (authed) ----------
+
+router.get('/password', requireAuth, (req, res) => {
+  res.json({ hasPassword: userHasPassword(req.user.id) });
+});
+
+router.put('/password', requireAuth, (req, res) => {
+  const password = req.body?.password;
+  const currentPassword = req.body?.currentPassword;
+  if (!isValidPassword(password)) {
+    return res.status(400).json({ error: passwordRequirementsMessage() });
+  }
+  // Require the current password when one already exists, so a stolen session
+  // cookie can't lock the real owner out by silently rotating it.
+  if (userHasPassword(req.user.id)) {
+    const stored = getPasswordHash(req.user.id);
+    if (typeof currentPassword !== 'string' || !verifyPassword(currentPassword, stored)) {
+      return res.status(401).json({ error: 'current password is incorrect' });
+    }
+  }
+  setPasswordHash(req.user.id, hashPassword(password));
+  res.json({ ok: true, hasPassword: true });
+});
+
+router.delete('/password', requireAuth, (req, res) => {
+  // Can't drop the last sign-in method.
+  if (countCredentialsForUser(req.user.id) === 0) {
+    return res.status(409).json({ error: 'cannot remove your only sign-in method — add a passkey first' });
+  }
+  setPasswordHash(req.user.id, null);
+  res.json({ ok: true, hasPassword: false });
 });
 
 export default router;

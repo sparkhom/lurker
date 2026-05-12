@@ -33,6 +33,13 @@ export const useAuthStore = defineStore('auth', {
       }
       return this.setupStatus;
     },
+    async fetchAuthMethods() {
+      try {
+        return await api('/api/auth/auth-methods');
+      } catch (err) {
+        return { passkey: false };
+      }
+    },
     async loginWithPasskey() {
       this.error = null;
       try {
@@ -71,6 +78,37 @@ export const useAuthStore = defineStore('auth', {
         throw err;
       }
     },
+    async setupFirstPassword({ username, password } = {}) {
+      this.error = null;
+      try {
+        const { user } = await api('/api/auth/setup/password', {
+          method: 'POST',
+          body: { username, password },
+        });
+        this.user = user;
+        this.checked = true;
+        this.setupStatus = { needsSetup: false };
+        return user;
+      } catch (err) {
+        this.error = friendlyError(err, 'setup failed');
+        throw err;
+      }
+    },
+    async loginWithPassword({ username, password } = {}) {
+      this.error = null;
+      try {
+        const { user } = await api('/api/auth/login/password', {
+          method: 'POST',
+          body: { username, password },
+        });
+        this.user = user;
+        this.checked = true;
+        return user;
+      } catch (err) {
+        this.error = friendlyError(err, 'login failed');
+        throw err;
+      }
+    },
     async fetchInviteStatus(token) {
       // Public endpoint, never throws on a missing/expired token — returns
       // { valid: bool, expired?: bool } so the landing page can pick its copy.
@@ -102,6 +140,23 @@ export const useAuthStore = defineStore('auth', {
         throw err;
       }
     },
+    async acceptInviteWithPassword({ token, username, password } = {}) {
+      this.error = null;
+      try {
+        const { user } = await api(
+          `/api/auth/invite/${encodeURIComponent(token)}/password`,
+          { method: 'POST', body: { username, password } }
+        );
+        this.user = null;
+        resetSession();
+        this.user = user;
+        this.checked = true;
+        return user;
+      } catch (err) {
+        this.error = friendlyError(err, 'invite redemption failed');
+        throw err;
+      }
+    },
     async addPasskey({ label } = {}) {
       const { options } = await api('/api/auth/passkeys/options', { method: 'POST' });
       const response = await startRegistration({ optionsJSON: options });
@@ -120,6 +175,23 @@ export const useAuthStore = defineStore('auth', {
     },
     async deletePasskey(id) {
       await api(`/api/auth/passkeys/${id}`, { method: 'DELETE' });
+    },
+    async fetchPasswordStatus() {
+      try {
+        const { hasPassword } = await api('/api/auth/password');
+        return !!hasPassword;
+      } catch (_) {
+        return false;
+      }
+    },
+    async setPassword({ password, currentPassword } = {}) {
+      await api('/api/auth/password', {
+        method: 'PUT',
+        body: { password, currentPassword },
+      });
+    },
+    async removePassword() {
+      await api('/api/auth/password', { method: 'DELETE' });
     },
     async logout() {
       try {

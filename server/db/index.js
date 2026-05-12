@@ -259,7 +259,7 @@ migrate();
 ensureColumn('messages', 'extra', 'TEXT');
 ensureColumn('networks', 'sasl_account', 'TEXT');
 ensureColumn('networks', 'sasl_password', 'TEXT');
-dropColumnIfExists('users', 'password_hash');
+ensureColumn('users', 'password_hash', 'TEXT');
 
 // Roles: 'admin' can manage invites and other users; 'user' is everyone else.
 // On a fresh install the first user (created via /api/auth/setup) is promoted
