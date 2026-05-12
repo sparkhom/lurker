@@ -6,7 +6,7 @@ import path from 'path';
 // Point the DB layer at a throwaway file before importing anything that
 // touches it. db/index.js reads DATABASE_PATH at module-load time, so this
 // must happen before the dynamic imports below.
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'caint-test-'));
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lurker-test-'));
 process.env.DATABASE_PATH = path.join(tmpDir, 'test.db');
 
 let createUser;

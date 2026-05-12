@@ -7,7 +7,7 @@ import {
   setMeta,
 } from '../db/pushSubscriptions.js';
 
-const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:caint@localhost';
+const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:lurker@localhost';
 
 let vapidConfigured = false;
 let publicKey = null;

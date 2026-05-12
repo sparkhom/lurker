@@ -1,5 +1,5 @@
 {
-  "name": "caint",
+  "name": "lurker",
   "version": "0.1.0",
   "description": "Self-hosted IRC client with persistent server-side connection and a Vue web UI",
   "main": "server/server.js",

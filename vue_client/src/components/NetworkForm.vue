@@ -54,7 +54,7 @@
       </div>
       <label v-if="!isEdit">
         <span>Default channel</span>
-        <input v-model="form.default_channel" placeholder="#caint" />
+        <input v-model="form.default_channel" placeholder="#lurker" />
       </label>
       <label class="check">
         <input v-model="form.autoconnect" type="checkbox" />
@@ -94,7 +94,7 @@ const form = reactive({
   server_password: '',
   sasl_account: props.network?.sasl_account ?? '',
   sasl_password: '',
-  default_channel: '#caint',
+  default_channel: '#lurker',
   autoconnect: props.network ? !!props.network.autoconnect : true,
 });
 

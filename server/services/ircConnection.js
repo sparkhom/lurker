@@ -182,7 +182,7 @@ export class IrcConnection {
       this.publish({
         type: 'notice',
         target: this.serverTarget(),
-        nick: 'caint',
+        nick: 'lurker',
         text,
       });
     });
@@ -536,7 +536,7 @@ export class IrcConnection {
     });
   }
 
-  // Periodic PING with a `caint-lag-<sent>` token. PONG echoes the token back
+  // Periodic PING with a `lurker-lag-<sent>` token. PONG echoes the token back
   // so the matching pong handler can compute roundtrip even when the server
   // is also ponging unrelated PINGs we didn't send. Cleared on disconnect.
   startLagPinger() {
@@ -550,7 +550,7 @@ export class IrcConnection {
         this.publishLag();
         this.lagPendingToken = null;
       }
-      const token = `caint-lag-${Date.now()}`;
+      const token = `lurker-lag-${Date.now()}`;
       this.lagPendingToken = token;
       this.lagPendingSentAt = Date.now();
       try { this.client.ping(token); } catch (_) { /* ignore */ }
@@ -577,7 +577,7 @@ export class IrcConnection {
     this.publish({
       type: 'notice',
       target: this.serverTarget(),
-      nick: 'caint',
+      nick: 'lurker',
       text: `Connecting to ${this.network.host}:${this.network.port}${proto}…`,
     });
     this.client.connect({
@@ -627,7 +627,7 @@ export class IrcConnection {
     this.publishAwayState();
   }
 
-  disconnect(reason = 'caint shutting down') {
+  disconnect(reason = 'lurker shutting down') {
     this.client.quit(reason);
   }
 

@@ -1,4 +1,4 @@
-# Caint
+# Lurker
 
 Self-hosted IRC client. Server holds a persistent IRC connection; a Vue web UI connects over WebSocket to view and interact with channels.
 
@@ -31,4 +31,4 @@ npm start
 ```
 
 ## Status
-v0.1 — single-user, single-network, in-memory backlog. See the Vikunja "Caint" project for the post-v0.1 roadmap.
+v0.1 — single-user, single-network, in-memory backlog. See the Vikunja "Lurker" project for the post-v0.1 roadmap.

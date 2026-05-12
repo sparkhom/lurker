@@ -267,7 +267,7 @@ export const REGISTRY = Object.freeze([
     type: 'bool',
     default: true,
     description:
-      'Automatically set you AWAY on every connected network when no caint client ' +
+      'Automatically set you AWAY on every connected network when no Lurker client ' +
       'is attached, and clear AWAY when a client reconnects. Modeled on the WeeChat ' +
       'screen_away.py script.',
   },

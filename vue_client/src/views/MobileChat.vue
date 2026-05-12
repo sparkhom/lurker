@@ -3,7 +3,7 @@
     <!-- Screen: channel list -->
     <section v-if="screen === 'list'" class="screen list">
       <header class="bar">
-        <span class="logo">caint</span>
+        <span class="logo">lurker</span>
         <span v-if="!connected" class="status off" title="Disconnected">●</span>
         <span class="spacer"></span>
         <button class="icon" title="Highlights" @click="showHighlights = true">

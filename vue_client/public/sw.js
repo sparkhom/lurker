@@ -1,4 +1,4 @@
-// Caint service worker — handles Web Push delivery and notification clicks.
+// Lurker service worker — handles Web Push delivery and notification clicks.
 // The server has already gated by presence (no push fires when any of the
 // user's clients are visible), so this worker just renders whatever arrives.
 
@@ -25,8 +25,8 @@ self.addEventListener('push', (event) => {
     body: data.text || '',
     tag: `${data.networkId || 0}::${data.target || ''}`,
     data,
-    icon: '/caint-icon-192.png',
-    badge: '/caint-icon-192.png',
+    icon: '/lurker-icon-192.png',
+    badge: '/lurker-icon-192.png',
   }));
 });
 

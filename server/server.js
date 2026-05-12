@@ -23,7 +23,7 @@ const __dirname = path.dirname(__filename);
 const PORT = Number(process.env.PORT || 8010);
 const SESSION_SECRET = process.env.SESSION_SECRET;
 if (!SESSION_SECRET) {
-  console.error('[caint] SESSION_SECRET is required. See .env.example.');
+  console.error('[lurker] SESSION_SECRET is required. See .env.example.');
   process.exit(1);
 }
 
@@ -55,7 +55,7 @@ app.get(/^\/(?!api|ws).*/, (req, res, next) => {
 });
 
 app.use((err, req, res, next) => {
-  console.error('[caint] error:', err);
+  console.error('[lurker] error:', err);
   if (res.headersSent) return next(err);
   res.status(500).json({ error: 'internal error' });
 });
@@ -69,11 +69,11 @@ setInterval(purgeExpiredSessions, 60 * 60 * 1000).unref();
 ircManager.initAll();
 
 server.listen(PORT, () => {
-  console.log(`[caint] listening on http://localhost:${PORT}`);
+  console.log(`[lurker] listening on http://localhost:${PORT}`);
 });
 
 function shutdown(signal) {
-  console.log(`[caint] received ${signal}, shutting down`);
+  console.log(`[lurker] received ${signal}, shutting down`);
   ircManager.shutdown();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 5000).unref();

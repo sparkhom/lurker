@@ -1,7 +1,7 @@
 <template>
   <div class="invite">
     <div class="card">
-      <h1>Caint</h1>
+      <h1>Lurker</h1>
 
       <template v-if="checking">
         <p class="subtitle">Checking invite…</p>

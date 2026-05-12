@@ -1,7 +1,7 @@
 import { findSession } from '../db/sessions.js';
 import { findUserById } from '../db/users.js';
 
-export const SESSION_COOKIE = 'caint_session';
+export const SESSION_COOKIE = 'lurker_session';
 
 export function getCookieOptions() {
   const isProd = process.env.NODE_ENV === 'production';

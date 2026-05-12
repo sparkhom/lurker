@@ -33,7 +33,7 @@ import {
   userIdToHandle,
 } from '../services/webauthn.js';
 
-const CHALLENGE_COOKIE = 'caint_webauthn_challenge';
+const CHALLENGE_COOKIE = 'lurker_webauthn_challenge';
 
 function challengeCookieOptions() {
   // Short-lived, signed, scoped to the auth flow. Mirrors session cookie

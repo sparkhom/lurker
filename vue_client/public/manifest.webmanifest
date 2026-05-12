@@ -1,6 +1,6 @@
 {
-  "name": "Caint",
-  "short_name": "Caint",
+  "name": "Lurker",
+  "short_name": "Lurker",
   "description": "Self-hosted IRC client",
   "start_url": "/",
   "scope": "/",
@@ -9,19 +9,19 @@
   "theme_color": "#0b0b0b",
   "icons": [
     {
-      "src": "/caint-icon.svg",
+      "src": "/lurker-icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"
     },
     {
-      "src": "/caint-icon-192.png",
+      "src": "/lurker-icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/caint-icon-512.png",
+      "src": "/lurker-icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"

@@ -1,7 +1,7 @@
 services:
-  caint:
+  lurker:
     build: .
-    container_name: caint-server
+    container_name: lurker-server
     ports:
       - "8015:8015"
     volumes:
@@ -9,7 +9,7 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=8015
-      - DATABASE_PATH=/app/data/caint.db
+      - DATABASE_PATH=/app/data/lurker.db
       # Set in .env next to this compose file (gitignored).
       - SESSION_SECRET=${SESSION_SECRET}
       # Public hostname served via your reverse proxy. Set all of these in .env.

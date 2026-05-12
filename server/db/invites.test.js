@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'caint-test-'));
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lurker-test-'));
 process.env.DATABASE_PATH = path.join(tmpDir, 'test.db');
 
 let createUser;

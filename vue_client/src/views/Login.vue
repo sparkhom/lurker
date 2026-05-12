@@ -1,7 +1,7 @@
 <template>
   <div class="login">
     <div class="card">
-      <h1>Caint</h1>
+      <h1>Lurker</h1>
 
       <template v-if="loadingStatus">
         <p class="subtitle">Checking setup…</p>

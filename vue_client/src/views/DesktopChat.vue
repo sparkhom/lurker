@@ -2,7 +2,7 @@
   <div class="chat" @click="onChatClick">
     <aside class="sidebar">
       <div class="sidebar-head">
-        <span class="logo">caint</span>
+        <span class="logo">lurker</span>
         <span v-if="!connected" class="status off" title="Disconnected">●</span>
       </div>
       <BufferList />

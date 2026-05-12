@@ -21,7 +21,7 @@ export function rpConfig() {
   // RP ID must match the effective domain the browser sees. Defaults work for
   // the local-dev hostname the user configured in /etc/hosts.
   const rpID = process.env.WEBAUTHN_RP_ID || 'irc.local.bradroot.me';
-  const rpName = process.env.WEBAUTHN_RP_NAME || 'Caint';
+  const rpName = process.env.WEBAUTHN_RP_NAME || 'Lurker';
   const rawOrigins = process.env.WEBAUTHN_ORIGIN || 'https://irc.local.bradroot.me:5173';
   const expectedOrigin = rawOrigins.split(',').map((s) => s.trim()).filter(Boolean);
   return { rpID, rpName, expectedOrigin };
@@ -47,6 +47,8 @@ export function consumeChallenge(token) {
 // WebAuthn user handles must be 1-64 bytes of opaque binary. We derive one
 // deterministically from the integer user id so the same user always gets the
 // same handle (required for credential discovery & cross-device sync).
+// The `caint-` prefix is frozen — these bytes live on enrolled authenticators
+// (TouchID/security keys) and cannot be rotated without re-registering passkeys.
 export function userIdToHandle(userId) {
   return Buffer.from(`caint-user-${userId}`, 'utf8');
 }
