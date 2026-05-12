@@ -13,6 +13,7 @@
 // Both go away when we hand the body off to https.request directly.
 
 import { buildMultipart, postBuffer } from './multipart.js';
+import { USER_AGENT } from '../../utils/userAgent.js';
 
 const ENDPOINT = 'https://catbox.moe/user/api.php';
 const TIMEOUT_MS = 60_000;
@@ -36,7 +37,7 @@ export async function upload(buffer, { filename, mime }, secrets = {}) {
     resp = await postBuffer(ENDPOINT, body, {
       headers: {
         'Content-Type': contentType,
-        'User-Agent': 'Lurker/0.1 (+https://github.com/amiantos/caint)',
+        'User-Agent': USER_AGENT,
         'Accept': '*/*',
       },
       timeoutMs: TIMEOUT_MS,

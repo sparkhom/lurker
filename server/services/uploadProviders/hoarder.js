@@ -4,6 +4,8 @@
 // the Hoarder repo); returns JSON `{ id, ext, url, thumb_url, ... }` where
 // `url` is already the public CDN URL.
 
+import { USER_AGENT } from '../../utils/userAgent.js';
+
 export const id = 'hoarder';
 export const requiresSecrets = true;
 
@@ -25,7 +27,10 @@ export async function upload(buffer, { filename, mime }, secrets = {}) {
 
   const resp = await fetch(`${base}/api/upload`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${secrets.api_key}` },
+    headers: {
+      Authorization: `Bearer ${secrets.api_key}`,
+      'User-Agent': USER_AGENT,
+    },
     body: form,
   });
 

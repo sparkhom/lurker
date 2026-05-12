@@ -48,6 +48,7 @@ describe('x0 provider', () => {
     const result = await x0.upload(Buffer.from([1, 2, 3]), { filename: 'a.png', mime: 'image/png' });
     expect(cap.url).toBe('https://x0.at/');
     expect(cap.init.method).toBe('POST');
+    expect(cap.init.headers['User-Agent']).toMatch(/^Lurker\//);
     expect(cap.formData.get('file')).toBeInstanceOf(Blob);
     expect(result.url).toBe('https://example.test/abc.png');
   });
@@ -76,6 +77,7 @@ describe('catbox provider', () => {
     expect(cap.url).toBe('https://catbox.moe/user/api.php');
     expect(Buffer.isBuffer(cap.body)).toBe(true);
     expect(cap.headers['Content-Type']).toMatch(/^multipart\/form-data; boundary=/);
+    expect(cap.headers['User-Agent']).toMatch(/^Lurker\//);
     const text = cap.body.toString('binary');
     expect(text).toContain('name="reqtype"');
     expect(text).toContain('fileupload');
@@ -123,6 +125,7 @@ describe('hoarder provider', () => {
     );
     expect(cap.url).toBe('https://upload.example.com/api/upload');
     expect(cap.init.headers.Authorization).toBe('Bearer sekret');
+    expect(cap.init.headers['User-Agent']).toMatch(/^Lurker\//);
     expect(cap.formData.get('file')).toBeInstanceOf(Blob);
     expect(result.url).toBe('https://cdn.test/aB3kZ.gif');
   });

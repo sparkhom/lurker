@@ -4,6 +4,7 @@ import { upsertChannel } from '../db/networks.js';
 import * as chanlistDb from '../db/chanlist.js';
 import highlightRulesService from './highlightRulesService.js';
 import { matchEvent } from './highlightEngine.js';
+import { IRC_VERSION } from '../utils/userAgent.js';
 
 const NON_PERSISTED_TYPES = new Set([
   'state', 'names', 'channel-joined', 'channel-parted', 'typing', 'away-state',
@@ -23,7 +24,11 @@ export class IrcConnection {
   constructor({ network, onEvent }) {
     this.network = network;
     this.onEvent = onEvent;
-    this.client = new IRC.Client();
+    // `version` is the string irc-framework returns in response to CTCP
+    // VERSION queries — without this, peers see the library's default
+    // "node.js irc-framework". Identifying as Lurker lets server operators
+    // tell our traffic apart from generic library bots.
+    this.client = new IRC.Client({ version: IRC_VERSION });
     this.client.requestCap('message-tags');
     this.state = 'disconnected';
     this.channels = new Map();
