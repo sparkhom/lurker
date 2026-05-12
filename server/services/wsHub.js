@@ -330,15 +330,15 @@ export function attachWsHub(httpServer, sessionSecret) {
           continue;
         }
         // Resume cursor: ship only the gap (id > sinceId) when the client has
-        // local state to merge with. Cap at 500 — a much wider net than the
-        // 50-row first-connect default — to cover longer flaps without
+        // local state to merge with. Cap at 500 — a wider net than the
+        // 200-row first-connect default — to cover longer flaps without
         // unbounded payloads. If the gap is larger than 500, the client's
         // dedupe still makes a later full re-fetch safe.
         const sinceId = ws.sinceId || 0;
         const events = (
           sinceId > 0
             ? listMessages(conn.network.id, target, { afterId: sinceId, limit: 500 })
-            : listMessages(conn.network.id, target, { limit: 50 })
+            : listMessages(conn.network.id, target, { limit: 200 })
         ).map((e) => decorateMessage(userId, e));
         for (const e of events) {
           if (e.id != null && e.id > maxSentId) maxSentId = e.id;

@@ -128,14 +128,14 @@ const smartFilterQuit = computed(() => !!settings.effective('chat.smart_filter_q
 const smartFilterNick = computed(() => !!settings.effective('chat.smart_filter_nick'));
 
 // One-pass walk over messages to (a) decide which rows the smart filter
-// should hide and (b) compute alt-row striping that only counts visible
-// rows. Reactive on settings + buf.speakers, so unmasking happens for
-// free when a quiet nick speaks.
+// should hide and (b) tag rows with alt-row striping. Striping is derived
+// from message id parity so it stays stable across smart-filter visibility
+// flips and backlog prepends — counting visible rows here used to recolor
+// the whole list any time a quiet nick spoke or a history page loaded.
 const renderRows = computed(() => {
   const list = messages.value;
   const buf = buffer.value;
   const out = [];
-  let parity = 0;
 
   const filterOn = smartFilterEnabled.value && !!buf?.speakers;
   const ownNickLc = selfLower.value;
@@ -184,8 +184,7 @@ const renderRows = computed(() => {
       out.push({ divider: true, key: 'unread-divider' });
       dividerInserted = true;
     }
-    out.push({ m, alt: parity === 1, key });
-    parity ^= 1;
+    out.push({ m, alt: (m.id & 1) === 1, key });
   }
   return out;
 });
@@ -261,8 +260,13 @@ function requestMoreHistory() {
   if (!buf) return;
   if (!buf.hasMore || buf.loadingHistory) return;
   if (buf.target.startsWith(':server:')) return;
-  buffers.setLoadingHistory(buf.networkId, buf.target, true);
   const before = buf.oldestId ?? buf.messages[0]?.id;
+  // Without an anchor id, the server interprets `before` as "latest" and
+  // returns the most recent rows — which can include a live row we just got
+  // via fan-out, defeating prependHistory's prepend semantics and creating a
+  // visible duplicate. Wait until there's at least one message to anchor on.
+  if (!before) return;
+  buffers.setLoadingHistory(buf.networkId, buf.target, true);
   socketSend({
     type: 'history',
     networkId: buf.networkId,

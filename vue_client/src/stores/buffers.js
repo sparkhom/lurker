@@ -130,7 +130,16 @@ export const useBuffersStore = defineStore('buffers', {
     },
     prependHistory(networkId, target, events, hasMore, speakers) {
       const buf = ensureBuffer(this, networkId, target);
-      buf.messages = [...events, ...buf.messages];
+      // Dedupe against ids we already hold. The server can return overlapping
+      // rows when a history request races a live fan-out — pushMessage and
+      // replaceBacklog already guard their own paths; this keeps prepend
+      // consistent so a stale anchor or future race can't double a row.
+      const existing = new Set();
+      for (const m of buf.messages) {
+        if (m.id != null) existing.add(m.id);
+      }
+      const fresh = events.filter((e) => e.id == null || !existing.has(e.id));
+      buf.messages = [...fresh, ...buf.messages];
       const first = buf.messages[0];
       buf.oldestId = first?.id ?? buf.oldestId;
       buf.hasMore = !!hasMore;
