@@ -24,7 +24,123 @@
       </nav>
 
       <main class="content">
-        <!-- ─── Appearance / Chat / Away (registry-driven) ─────────────── -->
+        <!-- ─── Notifications ──────────────────────────────────────────── -->
+        <section v-if="showBespoke" id="notifications" class="section">
+          <h2>notifications</h2>
+          <p class="section-desc">
+            Each browser/device subscribes independently. Enable here to receive system
+            notifications on this device when a highlight or DM arrives and no other
+            client of yours is currently visible.
+          </p>
+          <p v-if="pushError" class="error inline">{{ pushError }}</p>
+
+          <div class="this-client">
+            <span class="this-label">this client</span>
+            <button
+              v-if="!pushSupported"
+              class="link"
+              disabled
+            >push not supported in this browser</button>
+            <button
+              v-else-if="thisClientEnabled"
+              class="link danger"
+              :disabled="pushBusy"
+              @click="onDisableThisClient"
+            >disable for this client</button>
+            <button
+              v-else
+              class="link"
+              :disabled="pushBusy"
+              @click="onEnableThisClient"
+            >enable for this client</button>
+          </div>
+
+          <ul v-if="otherSubscriptions.length" class="device-list">
+            <li v-for="sub in otherSubscriptions" :key="sub.id" class="device">
+              <span class="ua">{{ formatUA(sub.user_agent) }}</span>
+              <span class="last-seen" :title="sub.last_seen_at">last seen {{ formatRelative(sub.last_seen_at) }}</span>
+              <button class="link danger" @click="onRemoveOther(sub)" :disabled="pushBusy">remove</button>
+            </li>
+          </ul>
+          <p v-else-if="pushSubsStore.loaded && thisClientEnabled" class="muted small">No other devices registered.</p>
+        </section>
+
+        <!-- ─── Highlights ─────────────────────────────────────────────── -->
+        <section v-if="showBespoke" id="highlights" class="section">
+          <h2>highlights</h2>
+          <p class="section-desc">
+            Rules whose pattern matches an incoming message mark it as a highlight (line accent + sidebar dot).
+            Auto-managed entries track each network's current nick and can only be enabled/disabled.
+          </p>
+          <p v-if="rulesError" class="error inline">{{ rulesError }}</p>
+          <ul class="rule-list">
+            <li v-for="rule in rulesStore.rules" :key="rule.id" class="rule" :class="{ auto: rule.auto_managed }">
+              <span class="lock" :title="rule.auto_managed ? 'auto-managed (network nick)' : 'user rule'">
+                {{ rule.auto_managed ? '🔒' : '' }}
+              </span>
+              <input
+                type="text"
+                class="pattern"
+                :value="rule.pattern"
+                :disabled="rule.auto_managed"
+                @change="onRuleField(rule, 'pattern', $event.target.value)"
+                placeholder="pattern"
+              />
+              <select
+                :value="rule.kind"
+                :disabled="rule.auto_managed"
+                @change="onRuleField(rule, 'kind', $event.target.value)"
+              >
+                <option value="plain">plain</option>
+                <option value="glob">glob</option>
+                <option value="regex">regex</option>
+              </select>
+              <label class="ck" title="case sensitive">
+                <input
+                  type="checkbox"
+                  :checked="rule.case_sensitive"
+                  :disabled="rule.auto_managed"
+                  @change="onRuleField(rule, 'case_sensitive', $event.target.checked)"
+                />
+                <span>Aa</span>
+              </label>
+              <label class="ck" title="enabled">
+                <input
+                  type="checkbox"
+                  :checked="rule.enabled"
+                  @change="onRuleField(rule, 'enabled', $event.target.checked)"
+                />
+                <span>{{ rule.enabled ? 'on' : 'off' }}</span>
+              </label>
+              <button
+                class="link danger"
+                :disabled="rule.auto_managed"
+                @click="onRuleDelete(rule)"
+                title="delete rule"
+              >delete</button>
+            </li>
+          </ul>
+          <div class="rule-add">
+            <input
+              v-model="newPattern"
+              type="text"
+              placeholder="add highlight pattern…"
+              @keydown.enter="onRuleAdd"
+            />
+            <select v-model="newKind">
+              <option value="plain">plain</option>
+              <option value="glob">glob</option>
+              <option value="regex">regex</option>
+            </select>
+            <label class="ck">
+              <input type="checkbox" v-model="newCaseSensitive" />
+              <span>Aa</span>
+            </label>
+            <button class="link" :disabled="!newPattern.trim()" @click="onRuleAdd">add</button>
+          </div>
+        </section>
+
+        <!-- ─── Away / Chat / Appearance (registry-driven) ────────────── -->
         <section
           v-for="cat in visibleCategories"
           :key="cat.id"
@@ -40,8 +156,8 @@
                 :key="opt.key"
                 class="row"
                 :class="{ modified: settings.isModified(opt.key) }"
+                :title="settings.isModified(opt.key) ? 'modified from default' : ''"
               >
-                <span class="marker" :title="settings.isModified(opt.key) ? 'modified from default' : ''">{{ settings.isModified(opt.key) ? '*' : '' }}</span>
                 <div class="head">
                   <span class="key">{{ opt.key }}</span>
                   <span class="type">{{ opt.type }}</span>
@@ -100,126 +216,76 @@
         <p v-if="filtersActive && !visibleCategories.length" class="muted">No settings match.</p>
         <p v-else-if="!settings.loaded && !visibleCategories.length" class="muted">Loading settings…</p>
 
-        <!-- ─── Highlights ─────────────────────────────────────────────── -->
-        <section v-if="showBespoke" id="highlights" class="section">
-          <h2>highlights</h2>
-          <p class="rules-desc">
-            Rules whose pattern matches an incoming message mark it as a highlight (line accent + sidebar dot).
-            Auto-managed entries track each network's current nick and can only be enabled/disabled.
+        <!-- ─── Users (admin only) ─────────────────────────────────────── -->
+        <section v-if="showBespoke && isAdmin" id="users" class="section">
+          <h2>users</h2>
+          <p class="section-desc">
+            Invite friends with a one-time link, or remove an account. The last admin
+            and your own account can't be deleted.
           </p>
-          <p v-if="rulesError" class="error inline">{{ rulesError }}</p>
-          <ul class="rule-list">
-            <li v-for="rule in rulesStore.rules" :key="rule.id" class="rule" :class="{ auto: rule.auto_managed }">
-              <span class="lock" :title="rule.auto_managed ? 'auto-managed (network nick)' : 'user rule'">
-                {{ rule.auto_managed ? '🔒' : '' }}
+          <p v-if="adminError" class="error inline">{{ adminError }}</p>
+
+          <h3 class="subhead">members</h3>
+          <ul v-if="adminStore.users.length" class="device-list">
+            <li v-for="u in adminStore.users" :key="u.id" class="device user-row">
+              <span class="ua">
+                {{ u.username }}
+                <span v-if="u.role === 'admin'" class="role-tag">admin</span>
               </span>
-              <input
-                type="text"
-                class="pattern"
-                :value="rule.pattern"
-                :disabled="rule.auto_managed"
-                @change="onRuleField(rule, 'pattern', $event.target.value)"
-                placeholder="pattern"
-              />
-              <select
-                :value="rule.kind"
-                :disabled="rule.auto_managed"
-                @change="onRuleField(rule, 'kind', $event.target.value)"
-              >
-                <option value="plain">plain</option>
-                <option value="glob">glob</option>
-                <option value="regex">regex</option>
-              </select>
-              <label class="ck" title="case sensitive">
-                <input
-                  type="checkbox"
-                  :checked="rule.case_sensitive"
-                  :disabled="rule.auto_managed"
-                  @change="onRuleField(rule, 'case_sensitive', $event.target.checked)"
-                />
-                <span>Aa</span>
-              </label>
-              <label class="ck" title="enabled">
-                <input
-                  type="checkbox"
-                  :checked="rule.enabled"
-                  @change="onRuleField(rule, 'enabled', $event.target.checked)"
-                />
-                <span>{{ rule.enabled ? 'on' : 'off' }}</span>
-              </label>
+              <span class="last-seen">joined {{ formatRelative(u.createdAt) }}</span>
               <button
                 class="link danger"
-                :disabled="rule.auto_managed"
-                @click="onRuleDelete(rule)"
-                title="delete rule"
-              ><i class="fa-solid fa-xmark"></i></button>
+                :disabled="u.id === auth.user?.id || adminBusy"
+                :title="u.id === auth.user?.id ? 'cannot delete yourself' : 'delete user'"
+                @click="onDeleteUser(u)"
+              >delete</button>
             </li>
           </ul>
-          <div class="rule-add">
-            <input
-              v-model="newPattern"
-              type="text"
-              placeholder="add highlight pattern…"
-              @keydown.enter="onRuleAdd"
-            />
-            <select v-model="newKind">
-              <option value="plain">plain</option>
-              <option value="glob">glob</option>
-              <option value="regex">regex</option>
-            </select>
-            <label class="ck">
-              <input type="checkbox" v-model="newCaseSensitive" />
-              <span>Aa</span>
-            </label>
-            <button class="link" :disabled="!newPattern.trim()" @click="onRuleAdd">add</button>
+          <p v-else-if="adminStore.usersLoaded" class="muted small">No users.</p>
+
+          <h3 class="subhead">invites</h3>
+          <div class="invite-actions">
+            <button class="link" :disabled="adminBusy" @click="onCreateInvite">
+              generate invite link
+            </button>
+            <span v-if="lastCreatedInviteUrl" class="invite-fresh" title="copied to clipboard">
+              <code>{{ lastCreatedInviteUrl }}</code>
+              <button class="link" @click="copyInviteUrl(lastCreatedInviteUrl)">copy</button>
+            </span>
           </div>
-        </section>
-
-        <!-- ─── Notifications ──────────────────────────────────────────── -->
-        <section v-if="showBespoke" id="notifications" class="section">
-          <h2>notifications</h2>
-          <p class="rules-desc">
-            Each browser/device subscribes independently. Enable here to receive system
-            notifications on this device when a highlight or DM arrives and no other
-            client of yours is currently visible.
-          </p>
-          <p v-if="pushError" class="error inline">{{ pushError }}</p>
-
-          <div class="this-client">
-            <span class="this-label">this client</span>
-            <button
-              v-if="!pushSupported"
-              class="link"
-              disabled
-            >push not supported in this browser</button>
-            <button
-              v-else-if="thisClientEnabled"
-              class="link danger"
-              :disabled="pushBusy"
-              @click="onDisableThisClient"
-            >disable for this client</button>
-            <button
-              v-else
-              class="link"
-              :disabled="pushBusy"
-              @click="onEnableThisClient"
-            >enable for this client</button>
-          </div>
-
-          <ul v-if="otherSubscriptions.length" class="device-list">
-            <li v-for="sub in otherSubscriptions" :key="sub.id" class="device">
-              <span class="ua">{{ formatUA(sub.user_agent) }}</span>
-              <span class="last-seen" :title="sub.last_seen_at">last seen {{ formatRelative(sub.last_seen_at) }}</span>
-              <button class="link danger" @click="onRemoveOther(sub)" :disabled="pushBusy">remove</button>
+          <ul v-if="adminStore.invites.length" class="device-list">
+            <li v-for="inv in adminStore.invites" :key="inv.token" class="device invite-row">
+              <span class="ua">
+                <code class="invite-url">{{ inv.url }}</code>
+                <span class="invite-status" :class="`status-${inv.status}`">{{ inv.status }}</span>
+                <span v-if="inv.usedByUsername" class="invite-used"> → {{ inv.usedByUsername }}</span>
+              </span>
+              <span class="last-seen" :title="inv.expiresAt">
+                <template v-if="inv.status === 'consumed' && inv.usedAt">used {{ formatRelative(inv.usedAt) }}</template>
+                <template v-else-if="inv.expiresAt">expires {{ formatRelative(inv.expiresAt) }}</template>
+                <template v-else>no expiry</template>
+              </span>
+              <button
+                v-if="inv.status !== 'consumed'"
+                class="link danger"
+                :disabled="adminBusy"
+                @click="onRevokeInvite(inv)"
+              >revoke</button>
+              <button
+                v-else
+                class="link"
+                disabled
+                title="consumed invites are kept as an audit trail"
+              >—</button>
             </li>
           </ul>
-          <p v-else-if="pushSubsStore.loaded && thisClientEnabled" class="muted small">No other devices registered.</p>
+          <p v-else-if="adminStore.invitesLoaded" class="muted small">No invites yet.</p>
         </section>
 
         <!-- ─── Account (sign-in) ──────────────────────────────────────── -->
         <section v-if="showBespoke" id="account" class="section">
           <h2>account</h2>
-          <p class="rules-desc">
+          <p class="section-desc">
             You can sign in with a passkey, a password, or both. Removing your last
             sign-in method would lock you out, so it's blocked.
           </p>
@@ -291,72 +357,6 @@
           <div class="signout-row">
             <button class="link danger" @click="signOut">sign out</button>
           </div>
-        </section>
-
-        <!-- ─── Users (admin only) ─────────────────────────────────────── -->
-        <section v-if="showBespoke && isAdmin" id="users" class="section">
-          <h2>users</h2>
-          <p class="rules-desc">
-            Invite friends with a one-time link, or remove an account. The last admin
-            and your own account can't be deleted.
-          </p>
-          <p v-if="adminError" class="error inline">{{ adminError }}</p>
-
-          <h3 class="subhead">members</h3>
-          <ul v-if="adminStore.users.length" class="device-list">
-            <li v-for="u in adminStore.users" :key="u.id" class="device user-row">
-              <span class="ua">
-                {{ u.username }}
-                <span v-if="u.role === 'admin'" class="role-tag">admin</span>
-              </span>
-              <span class="last-seen">joined {{ formatRelative(u.createdAt) }}</span>
-              <button
-                class="link danger"
-                :disabled="u.id === auth.user?.id || adminBusy"
-                :title="u.id === auth.user?.id ? 'cannot delete yourself' : 'delete user'"
-                @click="onDeleteUser(u)"
-              >delete</button>
-            </li>
-          </ul>
-          <p v-else-if="adminStore.usersLoaded" class="muted small">No users.</p>
-
-          <h3 class="subhead">invites</h3>
-          <div class="invite-actions">
-            <button class="link" :disabled="adminBusy" @click="onCreateInvite">
-              generate invite link
-            </button>
-            <span v-if="lastCreatedInviteUrl" class="invite-fresh" title="copied to clipboard">
-              <code>{{ lastCreatedInviteUrl }}</code>
-              <button class="link" @click="copyInviteUrl(lastCreatedInviteUrl)">copy</button>
-            </span>
-          </div>
-          <ul v-if="adminStore.invites.length" class="device-list">
-            <li v-for="inv in adminStore.invites" :key="inv.token" class="device invite-row">
-              <span class="ua">
-                <code class="invite-url">{{ inv.url }}</code>
-                <span class="invite-status" :class="`status-${inv.status}`">{{ inv.status }}</span>
-                <span v-if="inv.usedByUsername" class="invite-used"> → {{ inv.usedByUsername }}</span>
-              </span>
-              <span class="last-seen" :title="inv.expiresAt">
-                <template v-if="inv.status === 'consumed' && inv.usedAt">used {{ formatRelative(inv.usedAt) }}</template>
-                <template v-else-if="inv.expiresAt">expires {{ formatRelative(inv.expiresAt) }}</template>
-                <template v-else>no expiry</template>
-              </span>
-              <button
-                v-if="inv.status !== 'consumed'"
-                class="link danger"
-                :disabled="adminBusy"
-                @click="onRevokeInvite(inv)"
-              >revoke</button>
-              <button
-                v-else
-                class="link"
-                disabled
-                title="consumed invites are kept as an audit trail"
-              >—</button>
-            </li>
-          </ul>
-          <p v-else-if="adminStore.invitesLoaded" class="muted small">No invites yet.</p>
         </section>
       </main>
     </div>
@@ -727,7 +727,7 @@ async function onRuleAdd() {
 }
 
 // Category / group titles for the sidebar TOC and subheadings.
-const CATEGORY_ORDER = ['appearance', 'chat', 'away'];
+const CATEGORY_ORDER = ['away', 'chat', 'appearance'];
 const CATEGORY_TITLES = {
   appearance: 'appearance',
   chat: 'chat',
@@ -779,12 +779,17 @@ const visibleCategories = computed(() => {
 });
 
 const visibleSections = computed(() => {
-  const sections = visibleCategories.value.map((c) => ({ id: c.id, title: c.title }));
+  const sections = [];
   if (showBespoke.value) {
-    sections.push({ id: 'highlights', title: 'highlights' });
     sections.push({ id: 'notifications', title: 'notifications' });
-    sections.push({ id: 'account', title: 'account' });
+    sections.push({ id: 'highlights', title: 'highlights' });
+  }
+  for (const cat of visibleCategories.value) {
+    sections.push({ id: cat.id, title: cat.title });
+  }
+  if (showBespoke.value) {
     if (isAdmin.value) sections.push({ id: 'users', title: 'users' });
+    sections.push({ id: 'account', title: 'account' });
   }
   return sections;
 });
@@ -847,6 +852,8 @@ async function onResetAll() {
   display: flex;
   flex-direction: column;
 }
+
+/* ── Top bar ──────────────────────────────────────────────────────── */
 .bar {
   display: flex;
   align-items: center;
@@ -855,7 +862,15 @@ async function onResetAll() {
   border-bottom: 1px solid var(--border);
   flex: 0 0 auto;
 }
-.bar h1 { margin: 0; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em; flex: 0 0 auto; font-size: inherit; font-weight: 600; }
+.bar h1 {
+  margin: 0;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex: 0 0 auto;
+  font-size: inherit;
+  font-weight: 600;
+}
 .bar .back { color: var(--accent); text-decoration: none; }
 .bar .back:hover { color: var(--fg); }
 .bar .search { flex: 1; }
@@ -866,6 +881,8 @@ async function onResetAll() {
   gap: 6px;
   color: var(--fg-muted);
 }
+
+/* ── Text-button (link-style) ─────────────────────────────────────── */
 .link {
   background: none;
   border: none;
@@ -874,22 +891,26 @@ async function onResetAll() {
   cursor: pointer;
   font: inherit;
 }
-.link:hover:not(:disabled) { color: var(--fg); background: transparent; }
+.link:hover:not(:disabled) { color: var(--fg); }
 .link:disabled { opacity: 0.4; cursor: not-allowed; }
 .link.danger { color: var(--bad); }
 
+/* ── Errors and muted placeholders ────────────────────────────────── */
 .error {
   color: var(--bad);
   padding: 6px 12px;
   border-bottom: 1px solid var(--border);
   margin: 0;
 }
+.error.inline { padding: 0 0 6px; border: none; }
 .muted {
   color: var(--fg-muted);
-  padding: 16px 12px;
+  padding: 16px;
   font-style: italic;
 }
+.muted.small { font-size: 0.95em; padding: 4px 0; font-style: normal; }
 
+/* ── Body: sidebar + scrolling content ───────────────────────────── */
 .body {
   flex: 1;
   min-height: 0;
@@ -899,7 +920,7 @@ async function onResetAll() {
   flex: 0 0 auto;
   width: 13em;
   border-right: 1px solid var(--border);
-  padding: 8px 0;
+  padding: 12px 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -908,11 +929,16 @@ async function onResetAll() {
 .sidebar a {
   color: var(--fg-muted);
   text-decoration: none;
-  padding: 4px 12px;
+  padding: 4px 16px;
   text-transform: lowercase;
   letter-spacing: 0.04em;
+  border-left: 2px solid transparent;
 }
-.sidebar a:hover { color: var(--fg); background: var(--bg-soft); }
+.sidebar a:hover {
+  color: var(--fg);
+  background: var(--bg-soft);
+  border-left-color: var(--accent);
+}
 .content {
   flex: 1;
   min-width: 0;
@@ -922,60 +948,69 @@ async function onResetAll() {
   .sidebar { display: none; }
 }
 
+/* ── Section block (used by every section) ───────────────────────── */
 .section {
-  padding: 12px;
+  padding: 16px;
   border-bottom: 1px solid var(--border);
 }
+/* Cap every direct child at a comfortable reading column so prose,
+   lists, forms, and rows all align to the same right edge. */
+.section > * { max-width: 70ch; }
 .section h2 {
   margin: 0 0 6px;
-  color: var(--fg-muted);
+  color: var(--accent);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: inherit;
+  letter-spacing: 0.08em;
+  font-size: 1.05em;
   font-weight: 600;
+}
+.section .section-desc {
+  color: var(--fg-muted);
+  margin: 0 0 12px;
 }
 .section .subhead {
-  margin: 12px 0 4px;
+  margin: 18px 0 6px;
   color: var(--fg-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  font-size: 0.95em;
+  font-size: 0.9em;
   font-weight: 600;
 }
+/* When a subhead immediately follows the section header (no description
+   in between), pull it up so the first group hugs the title. */
+.section > .subhead:first-of-type { margin-top: 4px; }
 
+/* ── Param row (registry-driven settings) ────────────────────────── */
 .rows {
   list-style: none;
   margin: 0;
   padding: 0;
 }
 .row {
-  display: grid;
-  grid-template-columns: 14px 1fr;
-  grid-template-areas:
-    "marker head"
-    ".      desc"
-    ".      editor"
-    ".      default";
-  gap: 2px 8px;
-  padding: 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 0 8px 8px;
   border-top: 1px solid var(--border);
+  border-left: 2px solid transparent;
 }
 .row:first-child { border-top: none; }
 .row:hover { background: var(--bg-soft); }
+.row.modified { border-left-color: var(--warn); }
 .row.modified .key { color: var(--warn); }
 
-.marker { grid-area: marker; color: var(--warn); }
-.head { grid-area: head; display: flex; align-items: center; gap: 10px; }
+.head { display: flex; align-items: center; gap: 10px; }
 .key { font-weight: 600; color: var(--accent); }
 .type {
   color: var(--fg-muted);
   border: 1px solid var(--border);
   padding: 0 4px;
   text-transform: lowercase;
+  font-size: 0.85em;
 }
-.desc { grid-area: desc; color: var(--fg-muted); }
+.desc { color: var(--fg-muted); }
 
-.editor { grid-area: editor; margin-top: 4px; }
+.editor { margin-top: 2px; }
 .editor input[type="text"],
 .editor select { min-width: 280px; }
 .editor input[type="number"] { width: 120px; }
@@ -992,22 +1027,24 @@ async function onResetAll() {
   border: 1px solid var(--border);
   display: inline-block;
 }
-.default-line { grid-area: default; color: var(--fg-muted); }
+.default-line { color: var(--fg-muted); font-size: 0.9em; }
 .default-line code {
   background: var(--bg-soft);
   padding: 0 4px;
 }
 
-.rules-desc { color: var(--fg-muted); margin: 0 0 8px; }
-.error.inline { padding: 4px 0; border: none; }
-.rule-list { list-style: none; margin: 0 0 6px; padding: 0; }
+/* ── Highlight rule row ──────────────────────────────────────────── */
+.rule-list { list-style: none; margin: 0; padding: 0; }
 .rule {
   display: grid;
   grid-template-columns: 18px minmax(120px, 1fr) max-content max-content max-content max-content;
   align-items: center;
   gap: 8px;
-  padding: 4px 0;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
 }
+.rule:first-child { border-top: none; }
+.rule:hover { background: var(--bg-soft); }
 .rule.auto .pattern { color: var(--fg-muted); }
 .lock { font-size: 12px; color: var(--fg-muted); text-align: center; }
 .rule .ck { display: flex; align-items: center; gap: 4px; color: var(--fg-muted); cursor: pointer; }
@@ -1015,15 +1052,16 @@ async function onResetAll() {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 4px;
+  padding-top: 10px;
 }
 .rule-add input[type="text"] { flex: 1; min-width: 200px; }
 
+/* ── Compact single-line row (devices, passkeys, users, invites) ── */
 .this-client {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 4px 0 8px;
+  padding: 0 0 10px;
 }
 .this-label {
   color: var(--fg-muted);
@@ -1035,13 +1073,15 @@ async function onResetAll() {
   grid-template-columns: 1fr max-content max-content;
   gap: 12px;
   align-items: center;
-  padding: 4px 0;
+  padding: 6px 0;
   border-top: 1px solid var(--border);
 }
+.device:first-child { border-top: none; }
+.device:hover { background: var(--bg-soft); }
 .device .ua { color: var(--fg); }
 .device .last-seen { color: var(--fg-muted); font-size: 0.95em; }
-.muted.small { font-size: 0.95em; padding: 4px 0; }
 
+/* Inline-editable passkey label. */
 .passkey .ua input[type="text"] {
   width: 100%;
   background: transparent;
@@ -1053,16 +1093,13 @@ async function onResetAll() {
 .passkey .ua input[type="text"]:focus {
   border-color: var(--border);
 }
-.passkey-add {
-  margin-top: 4px;
-  display: flex;
-  gap: 1ch;
-  align-items: center;
-}
+.passkey-add { padding-top: 8px; }
+
+/* ── Password form ──────────────────────────────────────────────── */
 .password-form {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   margin-top: 4px;
   max-width: 360px;
 }
@@ -1084,11 +1121,12 @@ async function onResetAll() {
   margin-top: 2px;
 }
 .signout-row {
-  margin-top: 12px;
+  margin-top: 16px;
   display: flex;
   justify-content: flex-start;
 }
 
+/* ── Admin: users + invites ─────────────────────────────────────── */
 .user-row .role-tag {
   color: var(--accent);
   border: 1px solid var(--accent);
@@ -1101,7 +1139,7 @@ async function onResetAll() {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 4px 0;
+  padding: 0 0 10px;
   flex-wrap: wrap;
 }
 .invite-fresh {

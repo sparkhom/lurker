@@ -24,7 +24,13 @@ export const useSettingsStore = defineStore('settings', {
       return (key) => (key in state.values ? state.values[key] : getDefault(key));
     },
     isModified(state) {
-      return (key) => key in state.values;
+      return (key) => {
+        if (!(key in state.values)) return false;
+        // Defensive: the server normally drops rows whose value equals the
+        // default, but stale rows can survive from older versions. Treat
+        // them as unmodified so the UI stays correct.
+        return !valuesEqual(state.values[key], getDefault(key));
+      };
     },
   },
   actions: {
