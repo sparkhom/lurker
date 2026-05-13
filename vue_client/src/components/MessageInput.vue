@@ -55,6 +55,7 @@ import { useSettingsStore } from '../stores/settings.js';
 import { useUploadsStore, onInsertUrl } from '../stores/uploads.js';
 import { useToastsStore } from '../stores/toasts.js';
 import { socketSend, socketSendWithAck } from '../composables/useSocket.js';
+import { requestScrollToBottom } from '../composables/useScrollState.js';
 import NickPicker from './NickPicker.vue';
 
 const networks = useNetworksStore();
@@ -545,6 +546,10 @@ function commitInput(raw, networkId, target) {
   socketSend({ type: 'input-history-add', networkId, target, text: raw });
   text.value = '';
   resetHistoryNav();
+  // Re-pin to the bottom so a user who was scrolled up reading history sees
+  // their own send land — and the live-append watcher in MessageList keeps
+  // following once stickToBottom flips back on.
+  requestScrollToBottom();
 }
 
 async function submit() {
