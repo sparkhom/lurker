@@ -6,6 +6,7 @@ import { useSettingsStore } from '../stores/settings.js';
 import { useHighlightRulesStore } from '../stores/highlightRules.js';
 import { useInputHistoryStore } from '../stores/inputHistory.js';
 import { useChanlistStore } from '../stores/chanlist.js';
+import { notifyHighlight } from './useHighlightNotifier.js';
 
 let socket = null;
 const connected = ref(false);
@@ -65,10 +66,14 @@ function applyEvent(event) {
         buffers.recordSpeaker(event.networkId, event.target, event.nick,
           Date.parse(event.time) || Date.now());
       }
+      // Skipped on dedupe (above), so replayed events from a resume gap
+      // can't re-fire a toast or sound for highlights we've already seen.
+      notifyHighlight(event);
       break;
     }
     case 'notice':
-      buffers.pushMessage(event);
+      if (!buffers.pushMessage(event)) break;
+      notifyHighlight(event);
       break;
     // For events that carry an id AND mutate buffer state (member list,
     // topic), run the dedupe in pushMessage first. On a replay the mutation

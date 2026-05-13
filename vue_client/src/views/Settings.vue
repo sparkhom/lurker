@@ -138,6 +138,67 @@
             </label>
             <button class="link" :disabled="!newPattern.trim()" @click="onRuleAdd">add</button>
           </div>
+
+          <hr class="hl-sep" />
+          <h3 class="subhead">in-client alerts</h3>
+          <p class="section-desc">
+            Toast and sound that fire in this tab when a rule above matches.
+            Push notifications cover the case where no Lurker tab is visible.
+          </p>
+          <div class="hl-notif">
+            <label class="hl-row">
+              <input
+                type="checkbox"
+                :checked="settings.effective('notifications.highlight.toast.enabled')"
+                @change="onCommit('notifications.highlight.toast.enabled', $event.target.checked)"
+              />
+              <span>show toast in the corner</span>
+            </label>
+
+            <label class="hl-row">
+              <input
+                type="checkbox"
+                :checked="settings.effective('notifications.highlight.sound.enabled')"
+                @change="onCommit('notifications.highlight.sound.enabled', $event.target.checked)"
+              />
+              <span>play a sound</span>
+            </label>
+
+            <div class="hl-row" :class="{ 'hl-row--dim': !soundEnabled }">
+              <span class="hl-label">sound</span>
+              <select
+                :value="settings.effective('notifications.highlight.sound.choice')"
+                :disabled="!soundEnabled"
+                @change="onCommit('notifications.highlight.sound.choice', $event.target.value)"
+              >
+                <option
+                  v-for="c in soundChoices"
+                  :key="c"
+                  :value="c"
+                >{{ c }}</option>
+              </select>
+              <button
+                class="link"
+                :disabled="!soundEnabled"
+                @click="onPreviewSound"
+              >preview</button>
+            </div>
+
+            <div class="hl-row" :class="{ 'hl-row--dim': !soundEnabled }">
+              <span class="hl-label">volume</span>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                :value="settings.effective('notifications.highlight.sound.volume')"
+                :disabled="!soundEnabled"
+                @input="onVolumeInput($event.target.value)"
+                @change="onCommit('notifications.highlight.sound.volume', Number($event.target.value))"
+              />
+              <span class="hl-vol-num">{{ settings.effective('notifications.highlight.sound.volume') }}</span>
+            </div>
+          </div>
         </section>
 
         <!-- ─── Away / Chat / Appearance (registry-driven) ────────────── -->
@@ -397,6 +458,8 @@ import {
   disable as disablePush,
   getCurrentEndpoint,
 } from '../composables/usePush.js';
+import { playHighlightSound } from '../composables/useHighlightNotifier.js';
+import { getOption } from '../utils/settingsRegistry.js';
 
 useSocket();
 
@@ -459,6 +522,20 @@ const thisClientEnabled = computed(() => {
 const otherSubscriptions = computed(() =>
   pushSubsStore.subscriptions.filter((s) => s.endpoint !== currentEndpoint.value)
 );
+
+const soundChoices = computed(() => getOption('notifications.highlight.sound.choice')?.choices || []);
+const soundEnabled = computed(() => !!settings.effective('notifications.highlight.sound.enabled'));
+
+function onPreviewSound() {
+  playHighlightSound();
+}
+
+// Live-update volume on drag without spamming the server: the range input's
+// `input` event tweaks the local optimistic value, and `change` commits.
+function onVolumeInput(raw) {
+  const n = Number(raw);
+  if (Number.isFinite(n)) settings.values = { ...settings.values, 'notifications.highlight.sound.volume': n };
+}
 
 async function refreshPushState() {
   if (!pushSupported) return;
@@ -1068,6 +1145,40 @@ async function onResetAll() {
   padding-top: 10px;
 }
 .rule-add input[type="text"] { flex: 1; min-width: 200px; }
+.hl-sep {
+  border: none;
+  border-top: 1px solid var(--border);
+  /* Explicit margin-inline:0 overrides the user-agent `margin-inline:auto`
+     that would otherwise center the hr within its 70ch cap. */
+  margin: 28px 0 22px;
+  width: 100%;
+}
+
+/* ── Highlight notification controls ─────────────────────────────── */
+.hl-notif {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0 0;
+}
+.hl-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.hl-row select { min-width: 160px; }
+.hl-row input[type="range"] { width: 220px; }
+.hl-row--dim { color: var(--fg-muted); }
+.hl-label {
+  color: var(--fg-muted);
+  min-width: 7em;
+}
+.hl-vol-num {
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 2.5em;
+  text-align: right;
+}
 
 /* ── Compact single-line row (devices, passkeys, users, invites) ── */
 .this-client {

@@ -526,6 +526,52 @@ export const REGISTRY = Object.freeze([
       'with `node scripts/gen-api-key.js` and add it to ' +
       'web.auth.api_keys in its config.json.',
   },
+
+  // ─── In-client highlight notifications ────────────────────────────────
+  // Push notifications cover the case where no client is visible. These
+  // settings drive the in-client toast + sound that fire while you ARE
+  // looking at Lurker, so an arriving highlight is impossible to miss.
+  {
+    key: 'notifications.highlight.toast.enabled',
+    category: 'highlights',
+    group: 'alerts',
+    type: 'bool',
+    default: true,
+    description:
+      'Show a corner toast when a new highlight arrives, even while a Lurker ' +
+      'tab is visible (push notifications already cover the hidden-tab case).',
+  },
+  {
+    key: 'notifications.highlight.sound.enabled',
+    category: 'highlights',
+    group: 'alerts',
+    type: 'bool',
+    default: false,
+    description:
+      'Play a short sound when a new highlight arrives in a buffer you are ' +
+      'not currently looking at. Off by default — opt in if you want it.',
+  },
+  {
+    key: 'notifications.highlight.sound.choice',
+    category: 'highlights',
+    group: 'alerts',
+    type: 'enum',
+    choices: ['ping', 'chime', 'pop', 'beep', 'knock'],
+    default: 'ping',
+    description:
+      'Which bundled sound to play. Files live in /sounds/<choice>.mp3 on ' +
+      'the client. Use the preview button in Settings to audition each one.',
+  },
+  {
+    key: 'notifications.highlight.sound.volume',
+    category: 'highlights',
+    group: 'alerts',
+    type: 'int',
+    min: 0,
+    max: 100,
+    default: 60,
+    description: 'Playback volume for the highlight sound, 0–100.',
+  },
 ]);
 
 const BY_KEY = new Map(REGISTRY.map((opt) => [opt.key, opt]));

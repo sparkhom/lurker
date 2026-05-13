@@ -3,6 +3,13 @@
     <div class="card">
       <header class="head">
         <h2>highlights</h2>
+        <button
+          class="link sound-toggle"
+          :title="soundEnabled ? 'mute highlight sound' : 'unmute highlight sound'"
+          @click="toggleSound"
+        >
+          <i :class="soundEnabled ? 'fa-solid fa-volume-high' : 'fa-solid fa-volume-xmark'"></i>
+        </button>
         <button class="link" @click="$emit('close')" title="close"><i class="fa-solid fa-xmark"></i></button>
       </header>
       <p v-if="store.error" class="error inline">{{ store.error }}</p>
@@ -51,6 +58,13 @@ const store = useHighlightsStore();
 const nicks = useNickColors();
 
 const tsFormat = computed(() => settings.effective('look.buffer.time_format'));
+const soundEnabled = computed(() => !!settings.effective('notifications.highlight.sound.enabled'));
+
+async function toggleSound() {
+  try {
+    await settings.setValue('notifications.highlight.sound.enabled', !soundEnabled.value);
+  } catch (_) { /* setting writes are best-effort from the modal */ }
+}
 
 onMounted(() => {
   store.loadInitial();
@@ -122,6 +136,7 @@ function onJump(m) {
 }
 .link:hover { color: var(--fg); }
 .link:disabled { opacity: 0.5; cursor: default; }
+.sound-toggle { font-size: 0.9em; }
 
 .match-list {
   list-style: none;
