@@ -53,7 +53,8 @@ import { useBuffersStore } from '../stores/buffers.js';
 import { useInputHistoryStore } from '../stores/inputHistory.js';
 import { useSettingsStore } from '../stores/settings.js';
 import { useUploadsStore, onInsertUrl } from '../stores/uploads.js';
-import { socketSend } from '../composables/useSocket.js';
+import { useToastsStore } from '../stores/toasts.js';
+import { socketSend, socketSendWithAck } from '../composables/useSocket.js';
 import NickPicker from './NickPicker.vue';
 
 const networks = useNetworksStore();
@@ -61,6 +62,7 @@ const buffers = useBuffersStore();
 const inputHistory = useInputHistoryStore();
 const settings = useSettingsStore();
 const uploads = useUploadsStore();
+const toasts = useToastsStore();
 const text = ref('');
 const inputEl = ref(null);
 const formEl = ref(null);
@@ -519,7 +521,33 @@ defineExpose({
   focus: () => inputEl.value?.focus(),
 });
 
-function submit() {
+function toastSendFailure(error, body) {
+  // Translate the small set of ack/error strings into something a person can
+  // act on. We keep the failed text in the toast body so the user can copy
+  // it; up-arrow also recalls it from local input history.
+  const title = error === 'disconnected'
+    ? 'Disconnected — message not sent'
+    : error === 'timeout'
+      ? 'Send timed out — message may not have been delivered'
+      : error === 'not-connected'
+        ? 'Network offline — message not sent'
+        : error === 'unknown-network'
+          ? 'Network not available — message not sent'
+          : 'Message not sent';
+  toasts.push({ title, body, kind: 'error', ttlMs: 8000 });
+}
+
+// Optimistically clear, but only AFTER we've confirmed the send actually
+// hit the wire. Anything we'd otherwise have lost (the typed text, the
+// history slot) is still recoverable via up-arrow if delivery later fails.
+function commitInput(raw, networkId, target) {
+  inputHistory.add(networkId, target, raw);
+  socketSend({ type: 'input-history-add', networkId, target, text: raw });
+  text.value = '';
+  resetHistoryNav();
+}
+
+async function submit() {
   resetCompletion();
   closePicker();
   const raw = text.value;
@@ -527,22 +555,32 @@ function submit() {
   const { networkId, target } = active.value;
 
   if (raw.startsWith('/')) {
-    handleCommand(raw, networkId, target);
-  } else if (sendable.value) {
-    socketSend({ type: 'send', networkId, target, text: raw });
-    typingState = null;
-    typingTarget = null;
-    clearInactivityTimer();
-  } else {
+    // Slash commands cover a lot of ground (joins, raws, /me, etc.). Treat
+    // /me with the same ACK path as a normal send since it visibly fans out
+    // as a chat message; the rest stay best-effort but at least bail out
+    // synchronously if the socket is closed so we don't silently swallow
+    // them either.
+    const handled = await handleCommand(raw, networkId, target);
+    if (!handled) return;
+    commitInput(raw, networkId, target);
     return;
   }
-  // Record after the early-return so we don't log plain text typed into a
-  // :server: buffer that we refused to send. The optimistic local add keeps
-  // up-arrow immediate; the server fans out to other tabs only (exceptWs).
-  inputHistory.add(networkId, target, raw);
-  socketSend({ type: 'input-history-add', networkId, target, text: raw });
-  text.value = '';
-  resetHistoryNav();
+
+  if (!sendable.value) return;
+
+  const pending = socketSendWithAck({ type: 'send', networkId, target, text: raw });
+  if (!pending) {
+    // Socket isn't open — don't clear the input, don't pollute history. The
+    // user can edit and retry, or wait for the auto-reconnect.
+    toastSendFailure('disconnected', raw);
+    return;
+  }
+  typingState = null;
+  typingTarget = null;
+  clearInactivityTimer();
+  commitInput(raw, networkId, target);
+  const result = await pending;
+  if (!result.ok) toastSendFailure(result.error, raw);
 }
 
 // Drop a synthetic, non-persisted info line into the current buffer so the
@@ -589,28 +627,49 @@ function randomRoomId() {
   return Array.from(buf, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+// Best-effort send for control commands (/join, /raw, /away, ...). Returns
+// false if the socket isn't open — so the caller can keep the typed text in
+// the input rather than silently swallowing it.
+function sendOrToast(payload, body) {
+  const ok = socketSend(payload);
+  if (!ok) toastSendFailure('disconnected', body);
+  return ok;
+}
+
+// ACK-tracked send used by anything that puts a visible message into a
+// channel/DM (/me, /msg <body>, /jitsi). Same shape as the main submit path:
+// returns false synchronously if the socket is closed; otherwise kicks off
+// the await and toasts asynchronously on a non-ok ACK.
+function ackedSend(payload, body) {
+  const pending = socketSendWithAck(payload);
+  if (!pending) { toastSendFailure('disconnected', body); return false; }
+  pending.then((result) => { if (!result.ok) toastSendFailure(result.error, body); });
+  return true;
+}
+
 function handleCommand(line, networkId, target) {
   const [cmd, ...rest] = line.slice(1).split(/\s+/);
   const argLine = line.slice(1 + cmd.length).trim();
   switch (cmd.toLowerCase()) {
     case 'me':
-      socketSend({ type: 'action', networkId, target, text: argLine });
-      break;
+      return ackedSend({ type: 'action', networkId, target, text: argLine }, argLine);
     case 'msg':
     case 'query': {
       const [who, ...msgParts] = rest;
-      if (!who) return;
+      if (!who) return true;
       const body = msgParts.join(' ');
-      if (body) socketSend({ type: 'send', networkId, target: who, text: body });
+      if (body) {
+        if (!ackedSend({ type: 'send', networkId, target: who, text: body }, body)) return false;
+      }
       buffers.activate(networkId, who);
-      break;
+      return true;
     }
     case 'join':
       if (rest[0]) {
         const ch = rest[0].startsWith('#') ? rest[0] : `#${rest[0]}`;
-        socketSend({ type: 'join', networkId, channel: ch });
+        return sendOrToast({ type: 'join', networkId, channel: ch }, line);
       }
-      break;
+      return true;
     case 'part':
     case 'leave': {
       // /part leaves the channel but KEEPS the buffer so the user can scroll
@@ -618,30 +677,24 @@ function handleCommand(line, networkId, target) {
       // sidebar. Use /close to actually drop a buffer.
       const channel = rest[0] || target;
       const reason = rest.slice(1).join(' ');
-      socketSend({ type: 'part', networkId, channel, reason });
-      break;
+      return sendOrToast({ type: 'part', networkId, channel, reason }, line);
     }
     case 'close':
       // Close the current buffer. For channels this also PARTs; for DMs it
       // just hides the buffer. Server pseudo-buffers can't be closed.
-      socketSend({ type: 'close-buffer', networkId, target });
-      break;
+      return sendOrToast({ type: 'close-buffer', networkId, target }, line);
     case 'raw':
     case 'quote':
-      socketSend({ type: 'raw', networkId, line: argLine });
-      break;
+      return sendOrToast({ type: 'raw', networkId, line: argLine }, line);
     case 'away':
       // Empty arg → clear away. Server treats it the same as /back.
-      socketSend({ type: 'away', message: argLine });
-      break;
+      return sendOrToast({ type: 'away', message: argLine }, line);
     case 'back':
-      socketSend({ type: 'back' });
-      break;
+      return sendOrToast({ type: 'back' }, line);
     case 'whois': {
       const who = rest[0];
-      if (!who) { localInfo(networkId, target, 'usage: /whois <nick>'); return; }
-      socketSend({ type: 'raw', networkId, line: `WHOIS ${who}` });
-      break;
+      if (!who) { localInfo(networkId, target, 'usage: /whois <nick>'); return true; }
+      return sendOrToast({ type: 'raw', networkId, line: `WHOIS ${who}` }, line);
     }
     case 'kick': {
       // /kick <nick> [reason]            (in a channel buffer)
@@ -653,11 +706,10 @@ function handleCommand(line, networkId, target) {
         channel = isChannelTarget(target) ? target : null;
         nick = rest[0]; reason = rest.slice(1).join(' ');
       }
-      if (!channel) { localInfo(networkId, target, 'usage: /kick [#chan] <nick> [reason] — no channel context'); return; }
-      if (!nick) { localInfo(networkId, target, 'usage: /kick [#chan] <nick> [reason]'); return; }
+      if (!channel) { localInfo(networkId, target, 'usage: /kick [#chan] <nick> [reason] — no channel context'); return true; }
+      if (!nick) { localInfo(networkId, target, 'usage: /kick [#chan] <nick> [reason]'); return true; }
       const trailer = reason ? ` :${reason}` : '';
-      socketSend({ type: 'raw', networkId, line: `KICK ${channel} ${nick}${trailer}` });
-      break;
+      return sendOrToast({ type: 'raw', networkId, line: `KICK ${channel} ${nick}${trailer}` }, line);
     }
     case 'topic': {
       // /topic                        — request current topic (server buffer)
@@ -671,49 +723,42 @@ function handleCommand(line, networkId, target) {
         channel = isChannelTarget(target) ? target : null;
         body = argLine;
       }
-      if (!channel) { localInfo(networkId, target, 'usage: /topic [#chan] [text] — no channel context'); return; }
+      if (!channel) { localInfo(networkId, target, 'usage: /topic [#chan] [text] — no channel context'); return true; }
       const trailer = body ? ` :${body}` : '';
-      socketSend({ type: 'raw', networkId, line: `TOPIC ${channel}${trailer}` });
-      break;
+      return sendOrToast({ type: 'raw', networkId, line: `TOPIC ${channel}${trailer}` }, line);
     }
     case 'nick': {
       const newNick = rest[0];
-      if (!newNick) { localInfo(networkId, target, 'usage: /nick <newnick>'); return; }
-      socketSend({ type: 'raw', networkId, line: `NICK ${newNick}` });
-      break;
+      if (!newNick) { localInfo(networkId, target, 'usage: /nick <newnick>'); return true; }
+      return sendOrToast({ type: 'raw', networkId, line: `NICK ${newNick}` }, line);
     }
     case 'mode': {
       // /mode <flags>                  — apply to current channel
       // /mode <target> <flags...>      — apply to target (channel or self)
-      if (!rest.length) { localInfo(networkId, target, 'usage: /mode [target] <flags> [args]'); return; }
+      if (!rest.length) { localInfo(networkId, target, 'usage: /mode [target] <flags> [args]'); return true; }
       const looksLikeFlagsOnly = /^[+-]/.test(rest[0]);
       if (looksLikeFlagsOnly && isChannelTarget(target)) {
-        socketSend({ type: 'raw', networkId, line: `MODE ${target} ${rest.join(' ')}` });
-      } else {
-        socketSend({ type: 'raw', networkId, line: `MODE ${argLine}` });
+        return sendOrToast({ type: 'raw', networkId, line: `MODE ${target} ${rest.join(' ')}` }, line);
       }
-      break;
+      return sendOrToast({ type: 'raw', networkId, line: `MODE ${argLine}` }, line);
     }
     case 'quit': {
       const reason = argLine || 'lurker';
-      socketSend({ type: 'raw', networkId, line: `QUIT :${reason}` });
-      break;
+      return sendOrToast({ type: 'raw', networkId, line: `QUIT :${reason}` }, line);
     }
     case 'list':
-      socketSend({ type: 'raw', networkId, line: argLine ? `LIST ${argLine}` : 'LIST' });
-      break;
+      return sendOrToast({ type: 'raw', networkId, line: argLine ? `LIST ${argLine}` : 'LIST' }, line);
     case 'jitsi':
     case 'talk': {
-      if (isServer.value) { localInfo(networkId, target, 'usage: /jitsi — run inside a channel or DM'); return; }
+      if (isServer.value) { localInfo(networkId, target, 'usage: /jitsi — run inside a channel or DM'); return true; }
       const url = `https://meet.jit.si/lurker-${randomRoomId()}`;
-      socketSend({ type: 'send', networkId, target, text: url });
-      break;
+      return ackedSend({ type: 'send', networkId, target, text: url }, url);
     }
     case 'help':
       for (const text of HELP_LINES) localInfo(networkId, target, text);
-      break;
+      return true;
     default:
-      socketSend({ type: 'raw', networkId, line: line.slice(1) });
+      return sendOrToast({ type: 'raw', networkId, line: line.slice(1) }, line);
   }
 }
 </script>

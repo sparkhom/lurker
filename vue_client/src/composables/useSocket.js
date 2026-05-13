@@ -12,6 +12,11 @@ let socket = null;
 const connected = ref(false);
 let reconnectTimer = null;
 const openHandlers = new Set();
+// Outstanding send/action ACKs keyed by clientId. Resolver is called with
+// { ok, error } when the server returns a send-result, on socket close, or on
+// timeout — whichever fires first.
+const pendingAcks = new Map();
+const ACK_TIMEOUT_MS = 8000;
 // Highest event id this client has ever received in any buffer. Sent on
 // reconnect as `?since=N` so the server can ship just the gap instead of
 // re-issuing the whole last-50-per-buffer backlog. Per-buffer dedupe in
@@ -279,6 +284,11 @@ function handleMessage(raw) {
     // signal silently so future tabs/devices don't keep filtering.
     return;
   }
+  if (payload.kind === 'send-result') {
+    const resolver = pendingAcks.get(payload.clientId);
+    if (resolver) resolver({ ok: !!payload.ok, error: payload.error });
+    return;
+  }
 }
 
 function open() {
@@ -294,6 +304,10 @@ function open() {
   socket.onclose = () => {
     connected.value = false;
     socket = null;
+    // Anything we were waiting on is gone with the socket. Settle every
+    // pending ACK as a disconnect so callers can surface the failure now
+    // instead of waiting out the timeout.
+    failAllPendingAcks('disconnected');
     const auth = useAuthStore();
     if (auth.user) {
       reconnectTimer = setTimeout(open, 2000);
@@ -307,7 +321,56 @@ function open() {
 function send(payload) {
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify(payload));
+    return true;
   }
+  return false;
+}
+
+function failAllPendingAcks(error) {
+  if (!pendingAcks.size) return;
+  const entries = Array.from(pendingAcks.values());
+  pendingAcks.clear();
+  for (const resolver of entries) resolver({ ok: false, error });
+}
+
+// Generate a clientId for an ACK-tracked send. Uses crypto.randomUUID where
+// available and falls back to a random-base36 string otherwise (older Safari
+// in non-secure contexts won't expose randomUUID).
+function makeClientId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+// Send a payload that expects a `send-result` ACK from the server. Returns
+// null synchronously if the socket isn't open — so the caller can detect
+// "not even sent" before doing anything destructive (clearing the input,
+// recording history). On a successful queue, returns a Promise<{ok, error}>
+// that resolves when the server ACKs, the socket closes, or ACK_TIMEOUT_MS
+// elapses — whichever fires first.
+export function socketSendWithAck(payload) {
+  if (!socket || socket.readyState !== WebSocket.OPEN) return null;
+  const clientId = makeClientId();
+  const wire = { ...payload, clientId };
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      if (pendingAcks.delete(clientId)) resolve({ ok: false, error: 'timeout' });
+    }, ACK_TIMEOUT_MS);
+    pendingAcks.set(clientId, (result) => {
+      clearTimeout(timer);
+      pendingAcks.delete(clientId);
+      resolve(result);
+    });
+    try {
+      socket.send(JSON.stringify(wire));
+    } catch (_) {
+      if (pendingAcks.delete(clientId)) {
+        clearTimeout(timer);
+        resolve({ ok: false, error: 'disconnected' });
+      }
+    }
+  });
 }
 
 // Tear down the socket without triggering the auto-reconnect path. Used on
@@ -329,6 +392,7 @@ export function resetSocket() {
   connected.value = false;
   hiddenSince = null;
   lastSeenEventId = 0;
+  failAllPendingAcks('disconnected');
 }
 
 function refreshSnapshot() {
@@ -371,4 +435,4 @@ export function useSocket() {
   return { connected, send, reconnect: open };
 }
 
-export function socketSend(payload) { send(payload); }
+export function socketSend(payload) { return send(payload); }

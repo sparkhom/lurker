@@ -431,6 +431,11 @@ export function attachWsHub(httpServer, sessionSecret) {
       const networkId = Number(msg.networkId);
       if (!Number.isInteger(networkId) || !ownsNetwork(userId, networkId)) {
         send(ws, { kind: 'error', text: 'unknown network' });
+        // Surface the failure on the originating send/action so the client
+        // can stop pretending the message succeeded.
+        if (msg.clientId && (msg.type === 'send' || msg.type === 'action')) {
+          send(ws, { kind: 'send-result', clientId: msg.clientId, ok: false, error: 'unknown-network' });
+        }
         return;
       }
       msg.networkId = networkId;
@@ -439,12 +444,20 @@ export function attachWsHub(httpServer, sessionSecret) {
       case 'presence':
         ws.presence = { visible: !!msg.visible };
         break;
-      case 'send':
-        ircManager.send(userId, msg.networkId, msg.target, msg.text);
+      case 'send': {
+        const ok = ircManager.send(userId, msg.networkId, msg.target, msg.text);
+        if (msg.clientId) {
+          send(ws, { kind: 'send-result', clientId: msg.clientId, ok, error: ok ? undefined : 'not-connected' });
+        }
         break;
-      case 'action':
-        ircManager.action(userId, msg.networkId, msg.target, msg.text);
+      }
+      case 'action': {
+        const ok = ircManager.action(userId, msg.networkId, msg.target, msg.text);
+        if (msg.clientId) {
+          send(ws, { kind: 'send-result', clientId: msg.clientId, ok, error: ok ? undefined : 'not-connected' });
+        }
         break;
+      }
       case 'join':
         ircManager.joinChannel(userId, msg.networkId, msg.channel);
         break;
