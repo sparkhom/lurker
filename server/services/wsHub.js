@@ -7,8 +7,8 @@ import highlightRulesService from './highlightRulesService.js';
 import * as pushService from './pushService.js';
 import { findSession } from '../db/sessions.js';
 import { findUserById, touchUserLastSeen } from '../db/users.js';
-import { listMessages, listBufferTargets, listSpeakers, countNewer, countHighlightsNewer } from '../db/messages.js';
-import { listReadStateForUser, setReadState } from '../db/bufferReads.js';
+import { listMessages, listBufferTargets, listSpeakers, countNewer, countHighlightsNewer, COUNTABLE_TYPES } from '../db/messages.js';
+import { listReadStateForUser, getReadState, setReadState } from '../db/bufferReads.js';
 import { addEntry as addInputHistory, listRecent as listRecentInputHistory } from '../db/inputHistory.js';
 import {
   closeBuffer,
@@ -181,6 +181,23 @@ export function attachWsHub(httpServer, sessionSecret) {
     return false;
   }
 
+  // Single path for "tell every tab of this user what the buffer's unread
+  // counts are now." Used by mark-read echo and by the live IRC-event fan-out
+  // below — the client doesn't increment locally anymore, so this is the
+  // only source of badge state.
+  function broadcastReadState(userId, networkId, target, lastReadId) {
+    const counts = computeUnreadFor(userId, networkId, target, lastReadId);
+    fanOut(userId, {
+      kind: 'read-state',
+      networkId,
+      target,
+      lastReadId: counts.lastReadId,
+      unread: counts.unread,
+      highlights: counts.highlights,
+      highlightsCapped: counts.highlightsCapped,
+    });
+  }
+
   function maybePush(userId, decorated) {
     if (!decorated || (!decorated.matched && !decorated.dm)) return;
     if (decorated.self) return;
@@ -218,6 +235,15 @@ export function attachWsHub(httpServer, sessionSecret) {
     }
     fanOut(decorated.userId, { ...decorated, kind: 'irc' });
     maybePush(decorated.userId, decorated);
+
+    // Countable persisted events change the buffer's unread/highlight counts
+    // for this user. Broadcast the recomputed read-state so every tab —
+    // including inactive ones — reflects the new badge without the client
+    // having to mirror the server's counting logic.
+    if (decorated.id != null && decorated.target && COUNTABLE_TYPES.has(decorated.type)) {
+      const lastReadId = getReadState(decorated.userId, decorated.networkId, decorated.target);
+      broadcastReadState(decorated.userId, decorated.networkId, decorated.target, lastReadId);
+    }
 
     if (event.type === 'chanlist-end' && event.networkId) {
       chanlistInFlight.delete(event.networkId);
@@ -548,20 +574,7 @@ export function attachWsHub(httpServer, sessionSecret) {
         const requested = Number(msg.messageId);
         if (!networkId || !target || !Number.isFinite(requested) || requested <= 0) break;
         const lastReadId = setReadState(userId, networkId, target, requested);
-        // Counts are guaranteed 0/0 here (we just advanced the pointer to the
-        // requested id, and the requested id is the client's view of the
-        // current max), but recompute to handle the race where a new message
-        // arrived between client send and server apply.
-        const counts = computeUnreadFor(userId, networkId, target, lastReadId);
-        fanOut(userId, {
-          kind: 'read-state',
-          networkId,
-          target,
-          lastReadId: counts.lastReadId,
-          unread: counts.unread,
-          highlights: counts.highlights,
-          highlightsCapped: counts.highlightsCapped,
-        });
+        broadcastReadState(userId, networkId, target, lastReadId);
         break;
       }
       case 'input-history-add': {

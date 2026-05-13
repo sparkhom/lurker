@@ -256,18 +256,18 @@ export const useBuffersStore = defineStore('buffers', {
       buf.joined = !!joined;
     },
     // Server is the source of truth for lastReadId / unread / highlights.
-    // Apply on backlog (initial snapshot) and on every read-state broadcast
-    // (mark-read from this or another device).
+    // Applied on backlog (initial snapshot) and on every read-state broadcast
+    // — the server fires one after each countable message and after every
+    // mark-read, so badges stay in sync without client-side increments.
     applyReadState(networkId, target, payload) {
       const buf = ensureBuffer(this, networkId, target);
       const lastReadId = Number(payload?.lastReadId) || 0;
       const networks = useNetworksStore();
       const isActive = networks.activeKey === `${networkId}::${target}`;
-      // Suppress the unread badge for the buffer the user is sitting in. We
-      // intentionally don't fire mark-read until switch-away, so the server's
-      // count for the active buffer can be > 0 right after a reconnect (new
-      // messages arrived while disconnected). The badge would otherwise
-      // appear on a buffer they're actively viewing.
+      // Suppress the unread badge for the buffer the user is sitting in.
+      // A read-state broadcast can briefly carry a non-zero unread for the
+      // active buffer when an IRC event lands before the mark-read echo;
+      // the badge shouldn't flash on the buffer the user is reading.
       buf.unread = isActive ? 0 : (Number(payload?.unread) || 0);
       buf.highlighted = isActive ? 0 : (Number(payload?.highlights) || 0);
       buf.highlightsCapped = isActive ? false : !!payload?.highlightsCapped;
@@ -276,16 +276,6 @@ export const useBuffersStore = defineStore('buffers', {
       // deactivate; the count refreshes live, the divider stays pinned.
       if (buf.dividerAfterId == null) buf.lastReadId = lastReadId;
       else buf.lastReadId = Math.max(buf.lastReadId, lastReadId);
-    },
-    markUnread(networkId, target) {
-      const buf = this.buffers[key(networkId, target)];
-      if (!buf) return;
-      buf.unread += 1;
-    },
-    markHighlight(networkId, target) {
-      const buf = this.buffers[key(networkId, target)];
-      if (!buf) return;
-      buf.highlighted += 1;
     },
     // Switch to a buffer. We mark the entered buffer read on focus-IN (not
     // on focus-OUT of the previous one) so that a tab close / reload / lost

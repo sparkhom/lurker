@@ -53,8 +53,10 @@ function applyEvent(event) {
     case 'message':
     case 'action': {
       // pushMessage returns false on dedupe (a replayed event we already had).
-      // Skip the speaker/unread/highlight side effects in that case — replaying
-      // them would inflate unread counts and re-seed speakers with stale times.
+      // Skip the speaker side effect in that case — replaying would re-seed
+      // speakers with stale times. Unread/highlight counts come from the
+      // server's read-state broadcast (fired after every countable event),
+      // so we don't increment them here.
       if (!buffers.pushMessage(event)) break;
       // Speakers feeds tab-complete and the nick-picker. Our own messages
       // would just clutter our own suggestions, so they don't count as
@@ -63,24 +65,10 @@ function applyEvent(event) {
         buffers.recordSpeaker(event.networkId, event.target, event.nick,
           Date.parse(event.time) || Date.now());
       }
-      if (!event.self && networks.activeKey !== `${event.networkId}::${event.target}`) {
-        buffers.markUnread(event.networkId, event.target);
-        // DMs notify but aren't visually flagged as highlights — they
-        // already have their own buffer + unread badge as the signal.
-        if (event.matched) {
-          buffers.markHighlight(event.networkId, event.target);
-        }
-      }
       break;
     }
     case 'notice':
-      if (!buffers.pushMessage(event)) break;
-      if (!event.self && networks.activeKey !== `${event.networkId}::${event.target}`) {
-        buffers.markUnread(event.networkId, event.target);
-        if (event.matched) {
-          buffers.markHighlight(event.networkId, event.target);
-        }
-      }
+      buffers.pushMessage(event);
       break;
     // For events that carry an id AND mutate buffer state (member list,
     // topic), run the dedupe in pushMessage first. On a replay the mutation

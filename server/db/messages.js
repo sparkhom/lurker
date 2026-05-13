@@ -102,7 +102,8 @@ export function countOlder(networkId, target, beforeId) {
 // the live unread path in useSocket.applyEvent uses the same allowlist, and
 // we need the SQL paths to match so backlog/read-state recomputes don't snap
 // the count to an inflated number.
-const COUNTABLE_TYPES_SQL = `('message','action','notice')`;
+export const COUNTABLE_TYPES = new Set(['message', 'action', 'notice']);
+const COUNTABLE_TYPES_SQL = `('${[...COUNTABLE_TYPES].join("','")}')`;
 
 export function countNewer(networkId, target, afterId) {
   return db.prepare(
