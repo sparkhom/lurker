@@ -473,6 +473,14 @@ watch(
     const grew = newLen > prevLen;
     const firstChanged = prevLen > 0 && newFirstId !== oldFirstId;
     const lastChanged = prevLen > 0 && newLastId !== oldLastId;
+    // A live append that lands while the buffer is at MAX_PER_BUFFER evicts
+    // the oldest row, so firstId shifts too — but the previous tail message
+    // is still in the array. A wholesale re-snapshot also shifts both ends,
+    // yet replaces that tail. Use the surviving tail to tell them apart, so a
+    // capped buffer isn't misread as a re-snapshot (and force-scrolled to the
+    // bottom) on every single message.
+    const appended = lastChanged && oldLastId != null
+      && messages.value.some((m) => m.id === oldLastId);
     // Pure prepend: anchor by element ID so re-flow from changing column
     // widths or differing message heights doesn't drift the math. With the
     // loading notice gone from the template, the OLD DOM and NEW DOM share
@@ -495,8 +503,10 @@ watch(
       ensureViewportFilled();
       return;
     }
-    // Wholesale replace (fresh backlog from a re-snapshot): both ends shifted.
-    const replaced = firstChanged && lastChanged;
+    // Wholesale replace (fresh backlog from a re-snapshot): both ends shifted
+    // and the previous tail is gone — distinct from a cap-evicting append,
+    // which shifts both ends but keeps the tail (see `appended` above).
+    const replaced = firstChanged && lastChanged && !appended;
     await nextTick();
     if (replaced) {
       stickToBottom.value = true;
@@ -505,11 +515,11 @@ watch(
       ensureViewportFilled();
       return;
     }
-    // Live append (new message arrived). When the user is pinned, scroll
-    // along; otherwise track the unread-below count so the status bar can
-    // surface "[N new ↓]". `lastChanged` filters to the case where the last
-    // message id actually moved — pure prepends and id renumbers won't bump.
-    if (lastChanged && grew) {
+    // Live append (new message arrived) — including the case where the
+    // buffer was at its cap and the oldest row was evicted. When the user is
+    // pinned, scroll along; otherwise track the unread-below count so the
+    // status bar can surface "[N new ↓]".
+    if (appended) {
       if (stickToBottom.value) scrollToBottom();
       else bumpNewBelow();
     }
