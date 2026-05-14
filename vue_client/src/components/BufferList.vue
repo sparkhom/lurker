@@ -14,7 +14,7 @@
           class="badge highlight"
           :title="`${serverHighlights(net.id)} highlight${serverHighlights(net.id) === 1 ? '' : 's'}`"
         >●</span>
-        <span v-if="serverUnread(net.id) > 0" class="badge">{{ serverUnread(net.id) }}</span>
+        <span v-if="serverUnread(net.id) > 0" class="badge">{{ unreadLabel(serverUnread(net.id)) }}</span>
       </div>
 
       <draggable
@@ -42,7 +42,7 @@
               class="badge highlight"
               :title="`${buf.highlighted} highlight${buf.highlighted === 1 ? '' : 's'}`"
             >●</span>
-            <span v-if="buf.unread > 0" class="badge">{{ buf.unread }}</span>
+            <span v-if="buf.unread > 0" class="badge">{{ unreadLabel(buf.unread) }}</span>
           </li>
         </template>
       </draggable>
@@ -69,7 +69,7 @@
             class="badge highlight"
             :title="`${buf.highlighted} highlight${buf.highlighted === 1 ? '' : 's'}`"
           >●</span>
-          <span v-if="buf.unread > 0" class="badge">{{ buf.unread }}</span>
+          <span v-if="buf.unread > 0" class="badge">{{ unreadLabel(buf.unread) }}</span>
         </li>
       </ul>
     </div>
@@ -122,6 +122,12 @@ function serverUnread(networkId) {
 
 function serverHighlights(networkId) {
   return serverBuf(networkId)?.highlighted || 0;
+}
+
+// Keep the unread chip narrow — a four-figure count would stretch the row
+// and isn't more actionable than "a lot".
+function unreadLabel(count) {
+  return count > 999 ? '>999' : String(count);
 }
 
 function labelStyle(buf) {

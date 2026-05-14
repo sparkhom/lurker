@@ -58,7 +58,7 @@
       </label>
       <label class="check">
         <input v-model="form.autoconnect" type="checkbox" />
-        <span>Connect on server startup</span>
+        <span>Reconnect automatically</span>
       </label>
       <p v-if="error" class="error">{{ error }}</p>
       <div class="actions">
