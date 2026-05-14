@@ -450,10 +450,6 @@
             connected on the server, and every device picks up where you left off.
           </p>
           <p class="muted small">version {{ appVersion }}</p>
-          <p class="about-warning">
-            Lurker is free and source-available — anyone can host it themselves at
-            no cost. If you're paying for it, be sure you know why.
-          </p>
           <ul class="about-links">
             <li>
               <span class="about-label">source</span>
@@ -468,6 +464,10 @@
               <a href="ircs://irc.libera.chat/lurker" target="_blank" rel="noopener noreferrer">#lurker on Libera.Chat</a>
             </li>
           </ul>
+          <p class="about-warning">
+            Lurker is free and source-available — anyone can host it themselves at
+            no cost. If you're paying for it, be sure you know why.
+          </p>
         </section>
       </main>
     </div>
