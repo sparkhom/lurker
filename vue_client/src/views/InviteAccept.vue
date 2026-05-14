@@ -21,24 +21,10 @@
       </template>
 
       <template v-else>
-        <p class="subtitle">Welcome — pick a username, then a sign-in method.</p>
+        <p class="subtitle">Welcome — pick a username and password.</p>
         <p class="warning">
           Only use a Lurker instance belonging to yourself or a close friend!
         </p>
-        <div class="method-toggle">
-          <button
-            type="button"
-            class="link toggle-btn"
-            :class="{ active: method === 'passkey' }"
-            @click="method = 'passkey'"
-          >passkey</button>
-          <button
-            type="button"
-            class="link toggle-btn"
-            :class="{ active: method === 'password' }"
-            @click="method = 'password'"
-          >password</button>
-        </div>
         <form @submit.prevent="onAccept">
           <label>
             <span>Username</span>
@@ -51,19 +37,17 @@
             />
           </label>
           <p class="hint">Your Lurker account login — not the nick you'll use on IRC networks.</p>
-          <template v-if="method === 'password'">
-            <label>
-              <span>Password</span>
-              <input
-                v-model="password"
-                type="password"
-                autocomplete="new-password"
-                required
-                minlength="8"
-              />
-            </label>
-            <p class="hint">8+ characters. You can add a passkey later in settings.</p>
-          </template>
+          <label>
+            <span>Password</span>
+            <input
+              v-model="password"
+              type="password"
+              autocomplete="new-password"
+              required
+              minlength="8"
+            />
+          </label>
+          <p class="hint">8+ characters. You can add a passkey later in settings.</p>
           <button type="submit" :disabled="working || !canSubmit">
             {{ submitLabel }}
           </button>
@@ -88,18 +72,14 @@ const checking = ref(true);
 const username = ref('');
 const password = ref('');
 const working = ref(false);
-const method = ref('passkey');
 
 const canSubmit = computed(() => {
   if (!username.value.trim()) return false;
-  if (method.value === 'password' && !password.value) return false;
+  if (!password.value) return false;
   return true;
 });
 
-const submitLabel = computed(() => {
-  if (!working.value) return 'Create account';
-  return method.value === 'password' ? 'Creating account…' : 'Creating passkey…';
-});
+const submitLabel = computed(() => (working.value ? 'Creating account…' : 'Create account'));
 
 onMounted(async () => {
   try {
@@ -116,15 +96,11 @@ async function onAccept() {
   if (!canSubmit.value) return;
   working.value = true;
   try {
-    if (method.value === 'password') {
-      await auth.acceptInviteWithPassword({
-        token: route.params.token,
-        username: name,
-        password: password.value,
-      });
-    } else {
-      await auth.acceptInvite({ token: route.params.token, username: name });
-    }
+    await auth.acceptInviteWithPassword({
+      token: route.params.token,
+      username: name,
+      password: password.value,
+    });
     router.replace('/');
   } catch (_) {
     // surfaced via auth.error
@@ -165,18 +141,5 @@ label span { text-transform: uppercase; letter-spacing: 0.04em; }
 button { cursor: pointer; padding: 8px 12px; }
 .error { margin: 0; color: var(--bad); }
 .link { color: var(--accent); }
-.method-toggle { display: flex; gap: 8px; align-items: center; }
-.toggle-btn {
-  background: none;
-  border: 1px solid var(--border);
-  color: var(--fg-muted);
-  padding: 4px 10px;
-  text-transform: lowercase;
-  cursor: pointer;
-}
-.toggle-btn.active {
-  color: var(--accent);
-  border-color: var(--accent);
-}
 .hint { margin: 0; color: var(--fg-muted); font-size: 0.9em; }
 </style>

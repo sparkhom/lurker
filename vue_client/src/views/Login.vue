@@ -14,24 +14,10 @@
 
       <!-- First-run bootstrap: empty DB, ask for admin username -->
       <template v-else-if="setup?.needsSetup">
-        <p class="subtitle">First run — pick a username, then a sign-in method.</p>
+        <p class="subtitle">First run — pick a username and password.</p>
         <p class="warning">
           Only use a Lurker instance belonging to yourself or a close friend!
         </p>
-        <div class="method-toggle">
-          <button
-            type="button"
-            class="link toggle-btn"
-            :class="{ active: setupMethod === 'passkey' }"
-            @click="setupMethod = 'passkey'"
-          >passkey</button>
-          <button
-            type="button"
-            class="link toggle-btn"
-            :class="{ active: setupMethod === 'password' }"
-            @click="setupMethod = 'password'"
-          >password</button>
-        </div>
         <form @submit.prevent="onCreateUser">
           <label>
             <span>Username</span>
@@ -44,19 +30,17 @@
             />
           </label>
           <p class="hint">Your Lurker account login — not the nick you'll use on IRC networks.</p>
-          <template v-if="setupMethod === 'password'">
-            <label>
-              <span>Password</span>
-              <input
-                v-model="password"
-                type="password"
-                autocomplete="new-password"
-                required
-                minlength="8"
-              />
-            </label>
-            <p class="hint">8+ characters. You can add a passkey later in settings.</p>
-          </template>
+          <label>
+            <span>Password</span>
+            <input
+              v-model="password"
+              type="password"
+              autocomplete="new-password"
+              required
+              minlength="8"
+            />
+          </label>
+          <p class="hint">8+ characters. You can add a passkey later in settings.</p>
           <button type="submit" :disabled="working">
             {{ submitLabel }}
           </button>
@@ -120,14 +104,10 @@ const router = useRouter();
 const route = useRoute();
 const setup = ref(null);
 const authMethods = ref({ passkey: false });
-const setupMethod = ref('passkey');
 const showPasswordForm = ref(false);
 const loginMode = ref(null);
 
-const submitLabel = computed(() => {
-  if (!working.value) return 'Create account';
-  return setupMethod.value === 'password' ? 'Creating account…' : 'Creating passkey…';
-});
+const submitLabel = computed(() => (working.value ? 'Creating account…' : 'Create account'));
 
 onMounted(async () => {
   setup.value = await auth.fetchSetupStatus();
@@ -175,18 +155,13 @@ async function onPasswordLogin() {
 }
 
 async function onCreateUser() {
-  if (!username.value.trim()) return;
+  if (!username.value.trim() || !password.value) return;
   working.value = true;
   try {
-    if (setupMethod.value === 'password') {
-      if (!password.value) return;
-      await auth.setupFirstPassword({
-        username: username.value.trim(),
-        password: password.value,
-      });
-    } else {
-      await auth.setupFirstPasskey({ username: username.value.trim() });
-    }
+    await auth.setupFirstPassword({
+      username: username.value.trim(),
+      password: password.value,
+    });
     router.replace(nextDestination());
   } catch (_) {
     // displayed via auth.error
@@ -227,22 +202,6 @@ label span { text-transform: uppercase; letter-spacing: 0.04em; }
 button { cursor: pointer; }
 button.primary { padding: 8px 12px; }
 .error { margin: 0; color: var(--bad); }
-.method-toggle {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-.toggle-btn {
-  background: none;
-  border: 1px solid var(--border);
-  color: var(--fg-muted);
-  padding: 4px 10px;
-  text-transform: lowercase;
-}
-.toggle-btn.active {
-  color: var(--accent);
-  border-color: var(--accent);
-}
 .toggle-link {
   background: none;
   border: none;
