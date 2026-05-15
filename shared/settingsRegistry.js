@@ -605,6 +605,21 @@ export const REGISTRY = Object.freeze([
     default: 60,
     description: 'Playback volume for the highlight sound, 0–100.',
   },
+
+  // ─── System / locale ──────────────────────────────────────────────────
+  {
+    key: 'system.timezone',
+    category: 'system',
+    group: 'locale',
+    type: 'string',
+    default: '',
+    description:
+      'IANA timezone name (e.g. "America/Chicago") used when the server formats ' +
+      'human-readable timestamps for you — currently the timestamp baked into the ' +
+      'auto-away message. The client auto-detects and syncs this on bootstrap, so ' +
+      'travelling updates it on next connect. Leave blank to fall back to the ' +
+      "server's local time.",
+  },
 ]);
 
 const BY_KEY = new Map(REGISTRY.map((opt) => [opt.key, opt]));

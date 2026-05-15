@@ -38,23 +38,56 @@ function effectiveSetting(userId, key) {
   return defaultsAsObject()[key];
 }
 
+function isValidTimeZone(tz) {
+  if (!tz || typeof tz !== 'string') return false;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Wall-clock parts (year/month/day/hour/minute/second) of `date` in the given
+// IANA timezone, or in the server's local zone when `timeZone` is falsy/invalid.
+function wallClockParts(date, timeZone) {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    ...(timeZone ? { timeZone } : {}),
+    hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+  const out = {};
+  for (const p of dtf.formatToParts(date)) if (p.type !== 'literal') out[p.type] = p.value;
+  // Some locales render midnight as "24" instead of "00"; normalize so the
+  // offset math below doesn't blow up on Date.UTC.
+  if (out.hour === '24') out.hour = '00';
+  return out;
+}
+
+function tzOffsetMinutes(date, timeZone) {
+  if (!timeZone) return -date.getTimezoneOffset();
+  const p = wallClockParts(date, timeZone);
+  const asUTC = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);
+  return Math.round((asUTC - date.getTime()) / 60000);
+}
+
 // "afk since 2026-05-09 15:30:00-0500" — mirrors screen_away.py's default
-// time_format. Local time + numeric tz offset.
-function fmtAwayTimestamp(date) {
+// time_format. Renders in `timeZone` when provided, otherwise server local.
+function fmtAwayTimestamp(date, timeZone) {
+  const tz = isValidTimeZone(timeZone) ? timeZone : null;
+  const p = wallClockParts(date, tz);
+  const off = tzOffsetMinutes(date, tz);
   const pad = (n) => String(n).padStart(2, '0');
-  const off = -date.getTimezoneOffset();
   const sign = off >= 0 ? '+' : '-';
   const aoff = Math.abs(off);
-  return (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
-    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}` +
-    `${sign}${pad(Math.floor(aoff / 60))}${pad(aoff % 60)}`
-  );
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}${sign}${pad(Math.floor(aoff / 60))}${pad(aoff % 60)}`;
 }
 
 function buildAutoAwayMessage(userId) {
   const base = (effectiveSetting(userId, 'away.auto.message') || 'afk').trim() || 'afk';
-  return `${base} since ${fmtAwayTimestamp(new Date())}`;
+  const tz = effectiveSetting(userId, 'system.timezone');
+  return `${base} since ${fmtAwayTimestamp(new Date(), tz)}`;
 }
 
 const DM_ELIGIBLE_TYPES = new Set(['message', 'action', 'notice']);

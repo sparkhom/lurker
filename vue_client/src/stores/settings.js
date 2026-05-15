@@ -46,8 +46,30 @@ export const useSettingsStore = defineStore('settings', {
       })();
       try {
         await this.loading;
+        this.syncDetectedTimezone().catch(() => {});
       } finally {
         this.loading = null;
+      }
+    },
+    // The server uses system.timezone when formatting time strings for the
+    // user (e.g. the timestamp baked into the auto-away message), and that
+    // formatting runs when no client is connected — so the value has to live
+    // server-side. Push the browser's current zone on every bootstrap so the
+    // setting tracks the user across devices and travel.
+    async syncDetectedTimezone() {
+      let detected;
+      try {
+        detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      } catch {
+        return;
+      }
+      if (!detected) return;
+      const current = this.values['system.timezone'];
+      if (current === detected) return;
+      try {
+        await this.setValue('system.timezone', detected);
+      } catch {
+        // Non-critical — fall through silently.
       }
     },
     async setValue(key, value) {
