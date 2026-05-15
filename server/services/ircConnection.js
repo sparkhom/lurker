@@ -432,8 +432,34 @@ export class IrcConnection {
       this.publishUserModes();
     });
 
+    // irc-framework fires 'user updated' for both CHGHOST (ident/host change)
+    // and SETNAME (realname change). The cloaked-vhost case after SASL on
+    // Libera arrives as a CHGHOST, but only when we've requested the chghost
+    // cap (see the client constructor). Surface self changes in the server
+    // buffer so users see "your host became X" the way other clients do.
+    c.on('user updated', (event) => {
+      if (!event || !c.user.nick || event.nick?.toLowerCase() !== c.user.nick.toLowerCase()) return;
+      if (event.new_hostname || event.new_ident) {
+        const ident = event.new_ident || event.ident || '';
+        const host = event.new_hostname || event.hostname || '';
+        const mask = ident ? `${ident}@${host}` : host;
+        if (mask) {
+          this.publish({
+            type: 'motd',
+            target: this.serverTarget(),
+            text: `Your hostmask: ${mask}`,
+          });
+        }
+      }
+    });
+
     c.on('motd', (event) => {
-      this.publish({ type: 'motd', target: this.serverTarget(), text: event.motd });
+      // irc-framework also fires 'motd' for ERR_NOMOTD (no MOTD configured)
+      // with `error` instead of `motd`, and for servers with an empty MOTD
+      // file `motd` is just ''. Skip the blank-line publish either way.
+      const text = event.motd || event.error || '';
+      if (!text.trim()) return;
+      this.publish({ type: 'motd', target: this.serverTarget(), text });
     });
 
     c.on('message', (event) => {
@@ -447,10 +473,31 @@ export class IrcConnection {
       if (event.nick && me && event.nick.toLowerCase() === me.toLowerCase()) return;
       const isServer = !event.nick;
       const targetIsChannel = event.target && event.target.startsWith('#');
+      const isNotice = event.type === 'notice';
 
       let target;
       if (isServer) target = `:server:${this.network.id}`;
       else if (targetIsChannel) target = event.target;
+      else if (isNotice) {
+        // NOTICE routing: keep replies inside an active conversation if the
+        // user has one open (e.g. they /msg'd ChanServ and ChanServ is
+        // NOTICE'ing back — those belong in the ChanServ buffer), but route
+        // unsolicited NOTICEs (NickServ cloak alert on connect, server-wide
+        // wallops, oper notices) to the server buffer the way IRCCloud and
+        // most modern clients do. "Active" = there's history for that
+        // target on this network AND the user hasn't explicitly closed it.
+        // IRC nicks are case-insensitive at the protocol layer but the DB
+        // stores whatever case the buffer was created with, so match
+        // case-insensitively and use the persisted casing as the routing
+        // target so we don't accidentally split history across "ChanServ"
+        // and "chanserv".
+        const dmLower = event.nick.toLowerCase();
+        const existingTarget = listBufferTargets(this.network.id)
+          .find((t) => t.toLowerCase() === dmLower);
+        const hasOpenDm = existingTarget
+          && !isBufferClosed(this.network.user_id, this.network.id, existingTarget);
+        target = hasOpenDm ? existingTarget : `:server:${this.network.id}`;
+      }
       else target = event.nick;
 
       const type = event.type === 'action' ? 'action' : event.type === 'notice' ? 'notice' : 'message';
@@ -464,14 +511,12 @@ export class IrcConnection {
         kind: event.type,
         self: false,
       });
-      // An incoming DM is itself the moment this nick becomes a tracked DM
-      // peer — add them via trackDmPeer so MONITOR + fires too. For channel
-      // chatter, only flip presence for peers we already track (everyone
-      // else's JOIN/SPEAK isn't relevant to any open DM buffer). We
-      // deliberately don't touch their away flag here — most ircds don't
-      // auto-/back on PRIVMSG, and the ones that do emit a 'back' event
-      // via away-notify which the dedicated handler picks up.
-      if (event.nick && !isServer && !targetIsChannel) {
+      // An incoming PRIVMSG (not NOTICE) is the moment this nick becomes a
+      // tracked DM peer — add them via trackDmPeer so MONITOR + fires too.
+      // NOTICEs go to the server buffer above, so there's no DM peer to
+      // track for them. Channel chatter still flips presence only for peers
+      // we already track.
+      if (event.nick && !isServer && !targetIsChannel && !isNotice) {
         this.trackDmPeer(event.nick);
       }
       if (event.nick) this.markPeerEvent(event.nick, 'online');
@@ -611,6 +656,17 @@ export class IrcConnection {
           else if (sign === '-' && this.userModes.delete(letter)) { changed = true; }
         }
         if (changed) this.publishUserModes();
+        // Solanum-style servers (Libera) send self-modes as a MODE command
+        // after MOTD instead of RPL_UMODEIS (221). The raw-numeric forwarder
+        // catches 221; this surfaces the MODE path so the user mode lands in
+        // the server buffer either way.
+        if (event.raw_modes) {
+          this.publish({
+            type: 'motd',
+            target: this.serverTarget(),
+            text: `Your user mode: ${event.raw_modes}`,
+          });
+        }
         return;
       }
 
@@ -1143,6 +1199,11 @@ export class IrcConnection {
       account,
       auto_reconnect: true,
       auto_reconnect_max_retries: 0,
+      // Request the `chghost` cap so SASL-cloaked vhost changes (Libera et al.)
+      // arrive as CHGHOST events instead of silently. Must go through connect()
+      // — irc-framework overwrites client.options with this dict, so passing
+      // it to the constructor doesn't survive. See client.js:202.
+      enable_chghost: true,
     });
   }
 
