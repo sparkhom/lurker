@@ -18,10 +18,10 @@
   --bad: #ed6c89;
   --border: #2c2a2e;
 
-  /* Buffer-list state colors. Defaults inherit --fg / --warn so the very-first
-     paint matches the previous hard-coded behavior; useTheme() then overwrites
-     them from look.color.buffer.* once the settings store loads. */
-  --buffer-unread: var(--fg);
+  /* Buffer-list state colors. Match the registry defaults so first paint is
+     consistent before settings load; useTheme() then overwrites them from
+     look.color.buffer.* once the settings store loads. */
+  --buffer-unread: var(--accent);
   --buffer-highlight: var(--warn);
 
   /* Member-list mode prefix colors */

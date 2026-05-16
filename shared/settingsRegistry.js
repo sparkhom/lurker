@@ -218,11 +218,12 @@ export const REGISTRY = Object.freeze([
     category: 'appearance',
     group: 'buffer-list',
     type: 'color',
-    default: 'var(--fg)',
+    default: 'var(--accent)',
     description:
       'Color applied to channel/DM rows that have unread messages but no ' +
-      'highlights. Defaults to the foreground color (visually quiet); set it ' +
-      'to a distinct hue for weechat-style two-color buffer states.',
+      'highlights. Defaults to the accent color so unread rows stand out from ' +
+      'quiet rows at a glance; set it to var(--fg) for a more subdued look, ' +
+      'or any other CSS color for weechat-style two-color buffer states.',
   },
   {
     key: 'look.color.buffer.highlight',
@@ -239,11 +240,11 @@ export const REGISTRY = Object.freeze([
     category: 'appearance',
     group: 'buffer-list',
     type: 'bool',
-    default: true,
+    default: false,
     description:
       'Render channel/DM row labels in bold when they have unread messages or ' +
-      'highlights. On by default; turn off if you prefer to signal unread ' +
-      'state through color alone.',
+      'highlights. Off by default — color already carries the signal; turn on ' +
+      'for an extra weight cue on top of the color.',
   },
   {
     key: 'look.buffer_list.unread_display',
