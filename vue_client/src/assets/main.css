@@ -40,17 +40,23 @@
   :root { --font-size: 16px; }
 }
 
-/* Zero the home-indicator inset whenever a text input has focus on this
-   page. The JS visualViewport-based override in useViewport handles this
-   for in-Safari browsing, but in PWA standalone mode visualViewport.height
-   doesn't always shrink the way it does in Safari (so the heuristic never
-   fires). Focus state is an unambiguous proxy: on iOS, focusing a text
-   input means the soft keyboard is up, period. :has() is supported on
-   Safari 15.4+, which covers every iOS version that supports PWAs we'd
-   care about. Inline --safe-bottom from useViewport still wins when set
-   (cascade order: inline beats stylesheet), so the two layers compose. */
-:root:has(input:focus, textarea:focus, [contenteditable]:focus) {
-  --safe-bottom: 0px;
+/* Home-indicator clearance: needed only in PWA standalone mode (no browser
+   chrome below the content, so without this the input bar would sit on top
+   of the iOS gesture zone at the bottom of the screen). Safari proper has
+   its own bottom chrome that already keeps content above the home indicator,
+   so applying env(safe-area-inset-bottom) there just leaves a redundant gap
+   below the input and can let Safari's bottom chrome clip the input when
+   the keyboard is up. Inside this @media, focus state zeroes the padding —
+   on iOS, a focused text input means the keyboard is up and there's no home
+   indicator to clear. */
+@media (display-mode: standalone) {
+  .mchat {
+    box-sizing: border-box;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  :root:has(input:focus, textarea:focus, [contenteditable]:focus) .mchat {
+    padding-bottom: 0;
+  }
 }
 
 * { box-sizing: border-box; }
