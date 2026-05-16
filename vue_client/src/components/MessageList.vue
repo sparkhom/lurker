@@ -440,9 +440,27 @@ function ensureViewportFilled() {
 // deciding the user is genuinely at the top.
 let pendingHistoryTimer = null;
 
+// Last seen scroller clientHeight, used to detect resize-induced scroll
+// events. When the scroller shrinks (input grows, keyboard slides up,
+// window resizes), browsers can fire a synthetic scroll event from
+// scrollTop clamping or scroll anchoring — and that event arrives BEFORE
+// the ResizeObserver callback. If onScroll runs the normal stick-to-bottom
+// math on those values (new clientHeight, old scrollTop), it crosses the
+// 30px threshold and falsely marks the user as scrolled-up. We compare
+// clientHeight against this and skip the user-scroll logic when it differs;
+// the resize handler is responsible for the snap in that path.
+// (Pattern from stackblitz-labs/use-stick-to-bottom — "Scroll events may
+// come before a ResizeObserver event".)
+let lastClientHeight = 0;
+
 function onScroll() {
   const el = scroller.value;
   if (!el) return;
+  const ch = el.clientHeight;
+  if (ch !== lastClientHeight) {
+    lastClientHeight = ch;
+    return;
+  }
   stickToBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 30;
   setStuckToBottom(stickToBottom.value);
   if (pendingHistoryTimer) clearTimeout(pendingHistoryTimer);
@@ -586,29 +604,37 @@ watch(scrollToBottomToken, async () => {
   scrollToBottom();
 });
 
-// When the iOS soft keyboard slides up, the .mchat shell shrinks via
-// --viewport-h, MessageList's clientHeight shrinks too, but scrollTop doesn't
-// move — so a user who was glued to the bottom ends up scrolled away from the
-// most recent message. A clientHeight change doesn't fire a scroll event, so
-// stickToBottom is still true from the last real scroll; rAF defers the snap
-// until after layout settles to the new viewport.
-function onVisualViewportResize() {
+// Anything that shrinks MessageList's clientHeight (iOS soft keyboard sliding
+// up via --viewport-h; the message-input textarea auto-growing past one row;
+// the desktop window resizing) shrinks the visible window from the bottom
+// without moving scrollTop — so a user pinned to the latest message ends up
+// with the tail of the conversation hidden behind whatever just grew.
+// ResizeObserver fires after layout settles, so scrollHeight is current; the
+// snap is done synchronously here so any scroll event the snap triggers is
+// observed against the freshly-updated lastClientHeight (i.e. classified as
+// not-a-user-scroll). Pairs with the resize-induced-scroll guard in onScroll.
+let scrollerObserver = null;
+function onScrollerResize() {
+  const el = scroller.value;
+  if (!el) return;
+  lastClientHeight = el.clientHeight;
   if (!stickToBottom.value) return;
-  requestAnimationFrame(() => {
-    if (stickToBottom.value) scrollToBottom();
-  });
+  el.scrollTop = el.scrollHeight;
 }
 
 onMounted(() => {
-  if (typeof window !== 'undefined' && window.visualViewport) {
-    window.visualViewport.addEventListener('resize', onVisualViewportResize);
+  if (typeof ResizeObserver !== 'undefined' && scroller.value) {
+    lastClientHeight = scroller.value.clientHeight;
+    scrollerObserver = new ResizeObserver(onScrollerResize);
+    scrollerObserver.observe(scroller.value);
   }
   nowTimer = setInterval(() => { now.value = Date.now(); }, 60_000);
 });
 
 onBeforeUnmount(() => {
-  if (typeof window !== 'undefined' && window.visualViewport) {
-    window.visualViewport.removeEventListener('resize', onVisualViewportResize);
+  if (scrollerObserver) {
+    scrollerObserver.disconnect();
+    scrollerObserver = null;
   }
   if (nowTimer) { clearInterval(nowTimer); nowTimer = null; }
 });

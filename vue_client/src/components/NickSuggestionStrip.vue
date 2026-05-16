@@ -10,15 +10,20 @@
     @pointerdown.stop
     @mousedown.prevent.stop
   >
-    <button
+    <!-- Plain <div> on purpose: <button> is focusable on iOS Safari, and a
+         tap moves focus to it before pointerdown.prevent / mousedown.prevent
+         get a chance to run — which blurs the textarea and dismisses the
+         soft keyboard. A non-focusable element with role=button preserves
+         keyboard focus on the input. Mirrors NickPicker.vue's row pattern. -->
+    <div
       v-for="row in rows"
       :key="row.lc"
-      type="button"
+      role="button"
       class="chip"
       :style="row.color ? { color: row.color } : null"
       @pointerdown.prevent="emit('select', row.nick)"
       @mousedown.prevent
-    >{{ row.nick }}</button>
+    >{{ row.nick }}</div>
   </div>
 </template>
 

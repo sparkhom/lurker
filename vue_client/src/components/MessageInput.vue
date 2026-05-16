@@ -626,6 +626,10 @@ watch(active, (newActive, oldActive) => {
   } else {
     setComposingState({ chunks: 0, isAction: false });
   }
+  // Force a fresh natural-height measurement on the new buffer's draft. The
+  // textarea may currently be sized for the previous buffer's content; the
+  // grow-only autoResize won't shrink it on its own.
+  lastMeasuredLen = null;
 });
 
 function onPagehide() {
@@ -668,13 +672,30 @@ function insertUrlAtCaret(url) {
 }
 
 // Resize the textarea to fit its content up to the CSS max-height (16 rows).
-// The 'auto' → scrollHeight dance shrinks the box first so the second read
-// reflects the natural content height rather than a previously-grown box.
+// The 'auto' reset would normally come first so scrollHeight reads the
+// natural content height rather than `max(content, currentHeight)`. But
+// `style.height='auto'` shrinks the textarea to its intrinsic (rows="1")
+// size, which during the synchronous `scrollHeight` read forces the
+// message-list to briefly expand into the freed space. The browser clamps
+// the message-list's scrollTop to the new (smaller) max, then we restore
+// the textarea height — and scrollTop stays at the clamped value, drifting
+// the user off the bottom by `(current_height - one_row)` per keystroke
+// past the first wrapping. (ResizeObserver doesn't fire because the
+// message-list's *net* clientHeight is unchanged.) So skip the 'auto' on
+// growth: scrollHeight already reports the content height accurately when
+// content overflows the current rendered height, which is the only
+// situation where growth is needed. Only 'auto' when the text might have
+// shrunk relative to what we last measured.
+let lastMeasuredLen = null;
 function autoResize() {
   const el = inputEl.value;
   if (!el) return;
-  el.style.height = 'auto';
+  const len = text.value.length;
+  if (lastMeasuredLen === null || len < lastMeasuredLen) {
+    el.style.height = 'auto';
+  }
   el.style.height = `${el.scrollHeight}px`;
+  lastMeasuredLen = len;
 }
 
 // Watch the text computed so every change source — typing, paste, history
