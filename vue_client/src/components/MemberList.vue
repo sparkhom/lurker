@@ -14,7 +14,7 @@
         @contextmenu.prevent="onRowContextMenu($event, m)"
       >
         <span class="prefix">{{ prefixOf(m) }}</span>
-        <span class="nick" :style="nickStyle(m)">{{ nickOf(m) }}</span>
+        <span class="nick" :style="nickStyle(m)" :title="nickOf(m)">{{ nickOf(m) }}</span>
         <button
           v-if="!isSelf(m)"
           type="button"
@@ -169,19 +169,28 @@ li {
   align-items: baseline;
   gap: 2px;
   padding: 1px 10px;
+  min-width: 0;
   user-select: none;
   cursor: pointer;
   position: relative;
 }
 li:hover { background: var(--bg-soft); }
 
-/* Hover affordance — invisible until the row is hovered, then drops in from
-   the right edge of the row. Hidden entirely on touch breakpoints; mobile
-   uses tap-anywhere-on-row to open the same menu. */
+/* Hover affordance — floats over the right edge of the row instead of taking
+   a flex slot, so long nicks aren't pushed into a narrower column when the
+   button is hidden. A short gradient fade behind the icon (matched to the
+   row's hover background) keeps the glyph readable on top of any nick that
+   gets truncated under it. Hidden entirely on touch breakpoints; mobile uses
+   tap-anywhere-on-row to open the same menu. */
 .row-actions {
-  margin-left: auto;
-  padding: 0 2px;
-  background: none;
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 8px 0 16px;
+  background: linear-gradient(to right, transparent 0, var(--bg-soft) 12px);
   border: none;
   color: var(--fg-muted);
   cursor: pointer;
@@ -196,13 +205,20 @@ li:hover .row-actions,
 @media (max-width: 768px) {
   .row-actions { display: none; }
 }
-.prefix { width: 10px; text-align: center; color: var(--fg-muted); }
+.prefix { width: 10px; flex: 0 0 auto; text-align: center; color: var(--fg-muted); }
 li.mode-\~ .prefix { color: var(--member-owner); }
 li.mode-\& .prefix { color: var(--member-admin); }
 li.mode-\@ .prefix { color: var(--member-op); }
 li.mode-\% .prefix { color: var(--member-halfop); }
 li.mode-\+ .prefix { color: var(--member-voice); }
-.nick { color: var(--accent); }
+.nick {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--accent);
+}
 /* Away nicks lose all per-user color and render in a flat muted gray. The
    rule overrides the inline nickStyle (which is suppressed for away anyway)
    and the prefix mode colors so the whole row reads as inert. */

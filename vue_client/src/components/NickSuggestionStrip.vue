@@ -8,6 +8,7 @@
     class="nick-suggestion-strip"
     :class="{ visible: rows.length > 0 }"
     @pointerdown.stop
+    @mousedown.prevent.stop
   >
     <button
       v-for="row in rows"
@@ -16,6 +17,7 @@
       class="chip"
       :style="row.color ? { color: row.color } : null"
       @pointerdown.prevent="emit('select', row.nick)"
+      @mousedown.prevent
     >{{ row.nick }}</button>
   </div>
 </template>

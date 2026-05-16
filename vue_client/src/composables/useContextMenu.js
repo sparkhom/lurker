@@ -19,21 +19,29 @@ const state = reactive({
   x: 0,
   y: 0,
   items: [],
+  // The element that opened the menu, if any. Used by ContextMenu's
+  // click-outside listener to recognize a re-click on the same trigger and
+  // swallow it — without this, the listener closes the menu but the trigger's
+  // own click handler then reopens it on the same gesture, so the menu never
+  // toggles closed.
+  triggerEl: null,
 });
 
 export function useContextMenu() {
   return {
     state,
-    open(items, x, y) {
+    open(items, x, y, triggerEl = null) {
       if (!Array.isArray(items) || items.length === 0) return;
       state.items = items;
       state.x = x;
       state.y = y;
+      state.triggerEl = triggerEl;
       state.open = true;
     },
     close() {
       state.open = false;
       state.items = [];
+      state.triggerEl = null;
     },
   };
 }

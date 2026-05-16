@@ -51,11 +51,14 @@ export function useBufferActions() {
 
   // Anchor the menu to the bottom-left of a triggering button so it drops down
   // from the cog rather than appearing at the cursor — keeps the menu visually
-  // tethered to the affordance that opened it.
+  // tethered to the affordance that opened it. The buttonEl is also handed to
+  // useContextMenu so re-clicking the same trigger toggles the menu closed.
   function openMenuFromButton(buf, buttonEl) {
     if (!buttonEl) return;
+    const items = buildItems(buf);
+    if (items.length === 0) return;
     const rect = buttonEl.getBoundingClientRect();
-    openMenuFor(buf, rect.left, rect.bottom + 2);
+    menu.open(items, rect.left, rect.bottom + 2, buttonEl);
   }
 
   return { buildItems, openMenuFor, openMenuFromButton };

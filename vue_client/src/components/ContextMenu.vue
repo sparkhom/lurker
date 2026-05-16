@@ -77,6 +77,15 @@ function activate(item) {
 function onWindowMouseDown(e) {
   if (!state.open) return;
   if (menuEl.value && menuEl.value.contains(e.target)) return;
+  // Re-clicking the same trigger should close (toggle behavior). Without
+  // swallowing the event, the trigger's own @click handler runs next and
+  // immediately reopens the menu on the same gesture.
+  if (state.triggerEl && state.triggerEl.contains(e.target)) {
+    e.preventDefault();
+    e.stopPropagation();
+    menu.close();
+    return;
+  }
   menu.close();
 }
 function onWindowKey(e) {

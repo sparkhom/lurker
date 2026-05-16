@@ -42,10 +42,15 @@ export function useMemberActions() {
     menu.open(items, x, y);
   }
 
+  // Hand buttonEl to useContextMenu so re-clicking the same trigger toggles
+  // the menu closed instead of letting the click-outside listener close and
+  // the trigger's own handler reopen on the same gesture.
   function openMenuFromButton(member, ctx, buttonEl) {
     if (!buttonEl) return;
+    const items = buildItems(member, ctx);
+    if (items.length === 0) return;
     const rect = buttonEl.getBoundingClientRect();
-    openMenuFor(member, ctx, rect.left, rect.bottom + 2);
+    menu.open(items, rect.left, rect.bottom + 2, buttonEl);
   }
 
   return { buildItems, openMenuFor, openMenuFromButton };

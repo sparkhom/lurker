@@ -265,6 +265,13 @@ useChatBootstrap({ onJump: onJumpToMessage });
   left: 0;
   right: 0;
   height: var(--viewport-h, 100dvh);
+  /* Bottom inset clears the iOS home indicator when the keyboard is closed.
+     env(safe-area-inset-bottom) is the fallback for browsers without
+     visualViewport; useVisualViewportHeight overrides --safe-bottom to 0px
+     while the keyboard is open (env() doesn't update on its own — see
+     webkit.org/b/217754). */
+  box-sizing: border-box;
+  padding-bottom: var(--safe-bottom, env(safe-area-inset-bottom));
   transform: translateY(var(--viewport-y, 0));
   display: flex;
   flex-direction: column;

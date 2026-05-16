@@ -151,8 +151,14 @@ const placeholder = computed(() => {
 // autocapitalize rides on input.autocorrect because Safari silently re-applies
 // sentence-start capitalization whenever autocorrect is on, regardless of any
 // autocapitalize="off" hint — so toggling autocorrect off has to kill both.
+// The mobile-force override OR's in on touch breakpoints regardless of the
+// desktop preference, so a user who keeps autocorrect off on their hardware
+// keyboard can still get phone-typing assistance back.
 const systemFeatures = computed(() => {
-  const autocorrectOn = settings.effective('input.autocorrect') !== false;
+  const baseAutocorrect = settings.effective('input.autocorrect') !== false;
+  const forceMobile = isMobile.value
+    && settings.effective('input.autocorrect_force_mobile') === true;
+  const autocorrectOn = baseAutocorrect || forceMobile;
   return {
     spellcheck: settings.effective('input.spellcheck') !== false,
     autocorrect: autocorrectOn ? 'on' : 'off',

@@ -790,6 +790,19 @@ export const REGISTRY = Object.freeze([
       'sentence-start auto-capitalize behavior, which Safari otherwise re-applies ' +
       'regardless of any autocapitalize attribute.',
   },
+  {
+    key: 'input.autocorrect_force_mobile',
+    category: 'input',
+    group: 'system_features',
+    type: 'bool',
+    default: false,
+    description:
+      'On touch devices, force autocorrect on regardless of the desktop ' +
+      'preference above. Useful if you keep autocorrect off on a hardware ' +
+      'keyboard but want phone-typing assistance back on a soft keyboard. ' +
+      'Re-enables the sentence-start auto-capitalize behavior too, since ' +
+      'they ride together.',
+  },
 
   // ─── Input bar (autocomplete UI) ──────────────────────────────────────
   {
