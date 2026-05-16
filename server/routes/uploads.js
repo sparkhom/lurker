@@ -129,10 +129,12 @@ router.get('/', (req, res) => {
   const limit = req.query.limit ? Number(req.query.limit) : 50;
   const rows = listUploads(req.user.id, { before, limit });
   res.json({
-    items: rows.map((r) => ({
-      ...r,
-      thumbnail_url: `/api/uploads/${r.id}/thumb`,
-    })),
+    items: rows.map((r) => {
+      const { has_thumbnail, ...rest } = r;
+      return has_thumbnail
+        ? { ...rest, thumbnail_url: `/api/uploads/${r.id}/thumb` }
+        : rest;
+    }),
     providers: providerIds,
   });
 });

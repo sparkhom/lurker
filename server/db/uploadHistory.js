@@ -26,9 +26,12 @@ export function insertUpload(userId, row) {
 
 export function listUploads(userId, { before = null, limit = 50 } = {}) {
   const lim = Math.max(1, Math.min(200, Number(limit) || 50));
+  // `has_thumbnail` lets the API decide whether to advertise a thumbnail_url
+  // without ever shipping the (potentially large) blob in the list response.
   if (before) {
     return db.prepare(`
-      SELECT id, provider, url, filename, mime, byte_size, width, height, created_at
+      SELECT id, provider, url, filename, mime, byte_size, width, height, created_at,
+             (thumbnail IS NOT NULL) AS has_thumbnail
       FROM upload_history
       WHERE user_id = ? AND id < ?
       ORDER BY id DESC
@@ -36,7 +39,8 @@ export function listUploads(userId, { before = null, limit = 50 } = {}) {
     `).all(userId, Number(before), lim);
   }
   return db.prepare(`
-    SELECT id, provider, url, filename, mime, byte_size, width, height, created_at
+    SELECT id, provider, url, filename, mime, byte_size, width, height, created_at,
+           (thumbnail IS NOT NULL) AS has_thumbnail
     FROM upload_history
     WHERE user_id = ?
     ORDER BY id DESC

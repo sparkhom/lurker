@@ -11,7 +11,10 @@
       <ul v-if="uploads.recent.length" class="list">
         <li v-for="u in uploads.recent" :key="u.id" class="row">
           <a :href="u.url" target="_blank" rel="noreferrer noopener" class="thumb-link" :title="u.url">
-            <img :src="u.thumbnail_url" class="thumb" alt="" loading="lazy" />
+            <img v-if="u.thumbnail_url" :src="u.thumbnail_url" class="thumb" alt="" loading="lazy" />
+            <div v-else class="thumb thumb-placeholder">
+              <i class="fa-solid fa-file-lines fa-2x"></i>
+            </div>
           </a>
           <div class="meta">
             <div class="filename" :title="u.filename || ''">{{ u.filename || '(pasted)' }}</div>
@@ -121,7 +124,10 @@ function formatBytes(n) {
 .row {
   display: grid;
   grid-template-columns: 80px 1fr max-content;
-  gap: 12px;
+  /* Tight column-gap so the thumb hugs the meta text. The meta→actions
+     edge gets its own breathing room via margin-left on .row-actions. */
+  column-gap: 4px;
+  row-gap: 8px;
   align-items: center;
   padding: 8px 0;
   border-bottom: 1px solid var(--border);
@@ -133,6 +139,12 @@ function formatBytes(n) {
   object-fit: cover;
   background: var(--bg-soft);
   border: 1px solid var(--border);
+}
+.thumb-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-muted);
 }
 .meta { min-width: 0; }
 .filename {
@@ -157,6 +169,23 @@ function formatBytes(n) {
   display: flex;
   gap: 8px;
   align-items: center;
+  margin-left: 12px;
+}
+
+/* Phone widths: stack the actions under the thumb+meta block instead of
+   trying to fit a third column. Bumps the tap target padding so the
+   tiny text links aren't a coin-toss to hit with a thumb. */
+@media (max-width: 768px) {
+  .row {
+    grid-template-columns: 80px 1fr;
+    row-gap: 8px;
+  }
+  .row-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+    margin-left: 0;
+  }
+  .row-actions .link { padding: 6px 10px; }
 }
 
 .empty {

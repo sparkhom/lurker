@@ -50,15 +50,18 @@ export const useUploadsStore = defineStore('uploads', {
         });
         emitInsert(result.url);
         // Prepend the new row optimistically without a refetch. The list shape
-        // matches the server's GET response (sans `thumbnail_url`, which we
-        // synthesise the same way).
+        // matches the server's GET response (sans `thumbnail_url`, which the
+        // server only advertises when a thumbnail blob actually exists — same
+        // gate we apply here based on the file's mime).
         if (this.loaded) {
+          const isImage = typeof file.type === 'string' && file.type.startsWith('image/');
           this.recent.unshift({
             id: result.id,
             provider: undefined, // server-only field; recent-uploads modal will re-fetch if it cares
             url: result.url,
             filename,
-            thumbnail_url: `/api/uploads/${result.id}/thumb`,
+            mime: file.type || null,
+            ...(isImage ? { thumbnail_url: `/api/uploads/${result.id}/thumb` } : {}),
           });
         }
         return result;
