@@ -10,19 +10,25 @@
     @pointerdown.stop
     @mousedown.prevent.stop
   >
-    <!-- Plain <div> on purpose: <button> is focusable on iOS Safari, and a
-         tap moves focus to it before pointerdown.prevent / mousedown.prevent
-         get a chance to run — which blurs the textarea and dismisses the
-         soft keyboard. A non-focusable element with role=button preserves
-         keyboard focus on the input. Mirrors NickPicker.vue's row pattern. -->
+    <!-- iOS keyboard preservation:
+         - Fire the action on `click` (end of the touch sequence). Emitting on
+           pointerdown closes the strip (v-show → display:none) *mid-touch*, so
+           the subsequent mousedown lands on whatever's underneath (StatusBar)
+           instead of this chip — defeating @mousedown.prevent and dismissing
+           the soft keyboard.
+         - @mousedown.prevent is the canonical iOS hook that prevents the
+           browser from shifting focus away from the textarea on tap. It must
+           fire on the chip itself, which is why the action moved to click.
+         - Plain <div>, not <button>: a <button> is focusable, so iOS would
+           still steal focus during the touch before mousedown.prevent runs. -->
     <div
       v-for="row in rows"
       :key="row.lc"
       role="button"
       class="chip"
       :style="row.color ? { color: row.color } : null"
-      @pointerdown.prevent="emit('select', row.nick)"
       @mousedown.prevent
+      @click="emit('select', row.nick)"
     >{{ row.nick }}</div>
   </div>
 </template>
@@ -99,5 +105,9 @@ const rows = computed(() => {
   color: var(--fg);
   cursor: pointer;
   user-select: none;
+  /* Disables the iOS double-tap-zoom heuristic, which can otherwise insert a
+     ~300ms delay before click fires — long enough for an impatient user to
+     have already tapped again or for layout to shift under the touch. */
+  touch-action: manipulation;
 }
 </style>
