@@ -19,3 +19,4 @@ vue_client/dist/
 .vscode/
 .idea/
 *.swp
+.claude/
