@@ -14,6 +14,10 @@ export const useNetworksStore = defineStore('networks', {
     networkById: (state) => (id) => state.networks.find((n) => n.id === id) || null,
     activeBuffer(state) {
       if (!state.activeKey) return null;
+      // The system-console sentinel is a flat key (no `::`). Treat it as
+      // "no IRC buffer active" — the SystemConsole view drives its own
+      // header and rendering off the system-log store directly.
+      if (!state.activeKey.includes('::')) return null;
       const [networkId, name] = state.activeKey.split('::');
       const id = Number(networkId);
       return { networkId: id, target: name, network: state.networks.find((n) => n.id === id) };
@@ -72,6 +76,13 @@ export const useNetworksStore = defineStore('networks', {
     },
     setActive(networkId, target) {
       this.activeKey = `${networkId}::${target}`;
+    },
+    // System console is the only "buffer" that isn't tied to an IRC network —
+    // it's the per-user log of server lifecycle events surfaced via the
+    // "lurker" sidebar header. Uses a flat sentinel key (no `::`) so the
+    // existing `${networkId}::${target}` parsers ignore it.
+    activateSystem() {
+      this.activeKey = ':system:';
     },
     applySnapshot(networks) {
       const map = {};

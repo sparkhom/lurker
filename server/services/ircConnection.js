@@ -14,6 +14,7 @@ import {
 } from '../db/peerPresence.js';
 import highlightRulesService from './highlightRulesService.js';
 import { matchEvent } from './highlightEngine.js';
+import systemLog from './systemLog.js';
 import { IRC_VERSION, APP_VERSION } from '../utils/userAgent.js';
 
 // Shown to peers as the QUIT reason on a clean disconnect. Most IRC clients
@@ -200,6 +201,26 @@ export class IrcConnection {
   setState(state, extra = {}) {
     this.state = state;
     this.publish({ type: 'state', state, ...extra });
+    this._logState(state, extra);
+  }
+
+  _scope() { return `net:${this.network.name}`; }
+
+  _logState(state, extra) {
+    let text;
+    switch (state) {
+      case 'connecting': text = 'Connecting…'; break;
+      case 'connected': text = extra?.nick ? `Connected as ${extra.nick}` : 'Connected'; break;
+      case 'reconnecting': text = 'Reconnecting'; break;
+      case 'disconnected': text = 'Disconnected'; break;
+      default: text = `State: ${state}`;
+    }
+    systemLog.log({
+      userId: this.network.user_id,
+      scope: this._scope(),
+      level: state === 'disconnected' ? 'warn' : 'info',
+      text,
+    });
   }
 
   bind() {
@@ -376,13 +397,25 @@ export class IrcConnection {
       this.useMonitor = true;
       this.monitorLimit = limit;
       console.log(`[presence:${this.network.id}] MONITOR detected (limit ${limit})`);
+      systemLog.log({
+        userId: this.network.user_id,
+        scope: this._scope(),
+        text: `MONITOR (IRCv3 presence) supported, watch limit ${limit}`,
+      });
       if (this.pendingRegainSetup && this.regainNick) {
         this.pendingRegainSetup = false;
         try { this.client.addMonitor(this.regainNick); } catch (_) { /* ignore */ }
       }
       if (this.pendingMonitorSeed) {
         this.pendingMonitorSeed = false;
-        if (this.trackedDmPeers.size > 0) this._seedMonitorWatch();
+        if (this.trackedDmPeers.size > 0) {
+          systemLog.log({
+            userId: this.network.user_id,
+            scope: this._scope(),
+            text: `Seeding MONITOR with ${this.trackedDmPeers.size} DM peer${this.trackedDmPeers.size === 1 ? '' : 's'}`,
+          });
+          this._seedMonitorWatch();
+        }
       }
     });
 
@@ -394,6 +427,13 @@ export class IrcConnection {
     c.on('users online', (event) => {
       const nicks = Array.isArray(event?.nicks) ? event.nicks : [];
       console.log(`[presence:${this.network.id}] users online: [${nicks.join(', ')}]`);
+      if (nicks.length > 0) {
+        systemLog.log({
+          userId: this.network.user_id,
+          scope: this._scope(),
+          text: `Presence: ${nicks.join(', ')} online`,
+        });
+      }
       for (const nick of nicks) {
         if (typeof nick === 'string') this.markPeerEvent(nick, 'online');
       }
@@ -410,6 +450,13 @@ export class IrcConnection {
     c.on('users offline', (event) => {
       const nicks = Array.isArray(event?.nicks) ? event.nicks : [];
       console.log(`[presence:${this.network.id}] users offline: [${nicks.join(', ')}]`);
+      if (nicks.length > 0) {
+        systemLog.log({
+          userId: this.network.user_id,
+          scope: this._scope(),
+          text: `Presence: ${nicks.join(', ')} offline`,
+        });
+      }
       if (this.regainNick) {
         const target = this.regainNick.toLowerCase();
         if (nicks.some((n) => typeof n === 'string' && n.toLowerCase() === target)) {
@@ -440,10 +487,17 @@ export class IrcConnection {
       if (err && (err.message || err.code)) {
         const code = err.code ? `${err.code}: ` : '';
         const where = `${this.network.host}:${this.network.port}`;
+        const text = `Connection failed (${where}): ${code}${err.message || 'unknown error'}`;
         this.publish({
           type: 'error',
           target: this.serverTarget(),
-          text: `Connection failed (${where}): ${code}${err.message || 'unknown error'}`,
+          text,
+        });
+        systemLog.log({
+          userId: this.network.user_id,
+          scope: this._scope(),
+          level: 'error',
+          text,
         });
       }
     });
@@ -588,6 +642,11 @@ export class IrcConnection {
       }
       if (event.nick === c.user.nick) {
         this.publish({ type: 'channel-joined', target: event.channel });
+        systemLog.log({
+          userId: this.network.user_id,
+          scope: this._scope(),
+          text: `Joined ${event.channel}`,
+        });
         // Most servers volunteer 324 on join, but a few don't. Request it so
         // the channel's mode flags reach the status bar consistently.
         try { c.raw('MODE', event.channel); } catch (_) { /* ignore */ }
@@ -607,6 +666,11 @@ export class IrcConnection {
       if (event.nick === c.user.nick) {
         this.channels.delete(event.channel.toLowerCase());
         this.publish({ type: 'channel-parted', target: event.channel });
+        systemLog.log({
+          userId: this.network.user_id,
+          scope: this._scope(),
+          text: event.message ? `Parted ${event.channel}: ${event.message}` : `Parted ${event.channel}`,
+        });
       }
     });
 

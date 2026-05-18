@@ -8,7 +8,7 @@
     <!-- Screen: channel list -->
     <section v-if="screen === 'list'" class="screen list">
       <header class="bar">
-        <span class="logo">lurker</span>
+        <button type="button" class="logo" title="Open system console" @click="openSystemConsole">lurker</button>
         <span v-if="!connected" class="status off" title="Disconnected">●</span>
         <span class="spacer"></span>
         <button class="icon" title="Search messages" @click="showSearch = true">
@@ -41,7 +41,7 @@
         <button class="icon back" title="Back" @click="goList">
           <i class="fa-solid fa-arrow-left"></i>
         </button>
-        <span class="title">{{ bufferLabel }}</span>
+        <span class="title">{{ isSystemConsole ? 'System console' : bufferLabel }}</span>
         <span class="spacer"></span>
         <button
           v-if="topic"
@@ -84,9 +84,10 @@
           @click="screen = 'members'"
         ><i class="fa-solid fa-users"></i></button>
       </header>
-      <MessageList :pending-scroll-id="pendingScrollId" />
+      <SystemConsole v-if="isSystemConsole" />
+      <MessageList v-else :pending-scroll-id="pendingScrollId" />
       <StatusBar compact />
-      <MessageInput ref="messageInputRef" />
+      <MessageInput v-if="!isSystemConsole" ref="messageInputRef" />
     </section>
 
     <!-- Screen: members -->
@@ -146,6 +147,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
 import { useBuffersStore } from '../stores/buffers.js';
+import { useNetworksStore } from '../stores/networks.js';
 import { useSocket } from '../composables/useSocket.js';
 import { useVisualViewportHeight } from '../composables/useViewport.js';
 import { useChatBootstrap } from '../composables/useChatBootstrap.js';
@@ -153,6 +155,7 @@ import { useActiveBuffer } from '../composables/useActiveBuffer.js';
 import { useBufferActions } from '../composables/useBufferActions.js';
 import BufferList from '../components/BufferList.vue';
 import MessageList from '../components/MessageList.vue';
+import SystemConsole from '../components/SystemConsole.vue';
 import MessageInput from '../components/MessageInput.vue';
 import MemberList from '../components/MemberList.vue';
 import StatusBar from '../components/StatusBar.vue';
@@ -168,10 +171,20 @@ import { useNickNotesStore } from '../stores/nickNotes.js';
 import { useJumpToMessage } from '../composables/useJumpToMessage.js';
 
 const buffers = useBuffersStore();
+const networks = useNetworksStore();
 const { connected } = useSocket();
-const { active, activeKey, activeBuf, isChannel, isServerBuffer, bufferLabel, topic } = useActiveBuffer();
+const { active, activeKey, activeBuf, isChannel, isServerBuffer, bufferLabel, topic, isSystemConsole } = useActiveBuffer();
 const bufferActions = useBufferActions();
 const nickNotes = useNickNotesStore();
+
+function openSystemConsole() {
+  networks.activateSystem();
+  // The activeKey watcher only fires on value change. If the user is
+  // already on `:system:` (e.g. they hit Back to the list, then re-tap
+  // the logo), the watcher won't advance them — drive the screen
+  // directly so the second tap behaves like the first.
+  screen.value = 'buffer';
+}
 
 // Pin --viewport-h to the visualViewport height so the shell stays glued to
 // the visible region when the iOS soft keyboard pushes content up.
@@ -303,7 +316,15 @@ useChatBootstrap({ onJump: onJumpToMessage });
   border-bottom: 1px solid var(--border);
   flex: 0 0 auto;
 }
-.logo { color: var(--accent); font-weight: bold; }
+.logo {
+  color: var(--accent);
+  font-weight: bold;
+  background: transparent;
+  border: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
 .status.off { color: var(--bad); }
 .title {
   color: var(--accent);

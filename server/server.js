@@ -21,6 +21,7 @@ import uploadsRouter from './routes/uploads.js';
 import draftsRouter from './routes/drafts.js';
 import ircManager from './services/ircManager.js';
 import { attachWsHub } from './services/wsHub.js';
+import systemLog from './services/systemLog.js';
 import { purgeExpiredSessions } from './db/sessions.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -75,14 +76,18 @@ attachWsHub(server, SESSION_SECRET);
 purgeExpiredSessions();
 setInterval(purgeExpiredSessions, 60 * 60 * 1000).unref();
 
+systemLog.log({ scope: 'server', text: 'Lurker server starting up' });
+
 ircManager.initAll();
 
 server.listen(PORT, () => {
   console.log(`[lurker] listening on http://localhost:${PORT}`);
+  systemLog.log({ scope: 'server', text: `Listening on port ${PORT}` });
 });
 
 function shutdown(signal) {
   console.log(`[lurker] received ${signal}, shutting down`);
+  systemLog.log({ scope: 'server', level: 'warn', text: `Received ${signal}, shutting down` });
   ircManager.shutdown();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 5000).unref();

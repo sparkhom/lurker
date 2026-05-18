@@ -17,6 +17,7 @@ import { useChannelNotifyStore } from '../stores/channelNotify.js';
 import { useIgnoresStore } from '../stores/ignores.js';
 import { useNickNotesStore } from '../stores/nickNotes.js';
 import { useBookmarksStore } from '../stores/bookmarks.js';
+import { useSystemLogStore } from '../stores/systemLog.js';
 import { notifyForEvent } from './useHighlightNotifier.js';
 
 let socket = null;
@@ -384,6 +385,16 @@ function handleMessage(raw) {
   if (payload.kind === 'send-result') {
     const resolver = pendingAcks.get(payload.clientId);
     if (resolver) resolver({ ok: !!payload.ok, error: payload.error });
+    return;
+  }
+  if (payload.kind === 'system-log-snapshot') {
+    const systemLog = useSystemLogStore();
+    systemLog.applySnapshot(payload.lines || []);
+    return;
+  }
+  if (payload.kind === 'system-log') {
+    const systemLog = useSystemLogStore();
+    systemLog.applyLine(payload.line);
     return;
   }
 }

@@ -3,6 +3,7 @@
 
 import { EventEmitter } from 'events';
 import { IrcConnection } from './ircConnection.js';
+import systemLog from './systemLog.js';
 import { listNetworksForUser, getNetwork, listChannels, upsertChannel, deleteChannel } from '../db/networks.js';
 import { reopenBuffer } from '../db/closedBuffers.js';
 import { getUserAwayState, writeAwayMarker, writeBackMarker } from '../db/userAwayState.js';
@@ -75,6 +76,11 @@ class IrcManager extends EventEmitter {
       onEvent: (event) => this.emit('event', event),
     });
     this._userMap(userId).set(networkId, conn);
+    systemLog.log({
+      userId,
+      scope: `net:${network.name}`,
+      text: `Starting connection to ${network.host}:${network.port}${network.tls ? ' (TLS)' : ''}`,
+    });
     // Seed self-presence from the per-user truth before the IRC handshake. The
     // 'registered' handler in IrcConnection re-asserts AWAY off of this state,
     // so it must be in place before connect() resolves the socket.
@@ -83,6 +89,13 @@ class IrcManager extends EventEmitter {
 
     conn.client.on('registered', () => {
       const names = listChannels(networkId).filter((c) => c.joined).map((c) => c.name);
+      if (names.length > 0) {
+        systemLog.log({
+          userId,
+          scope: `net:${network.name}`,
+          text: `Auto-joining ${names.length} ${names.length === 1 ? 'channel' : 'channels'}: ${names.join(', ')}`,
+        });
+      }
       // Send JOINs as comma-separated batches per IRC line. A tight loop of
       // single JOINs trips Libera's per-connection flood limit ("Closing Link:
       // ... (Excess Flood)"), so we coalesce into one line and chunk well under
@@ -109,6 +122,11 @@ class IrcManager extends EventEmitter {
   stopNetwork(userId, networkId, reason) {
     const conn = this.getConnection(userId, networkId);
     if (!conn) return;
+    systemLog.log({
+      userId,
+      scope: `net:${conn.network.name}`,
+      text: reason ? `Stopping: ${reason}` : 'Stopping',
+    });
     conn.disconnect(reason);
     this._userMap(userId).delete(networkId);
   }
@@ -116,6 +134,11 @@ class IrcManager extends EventEmitter {
   disposeNetwork(userId, networkId, reason) {
     const conn = this.getConnection(userId, networkId);
     if (!conn) return;
+    systemLog.log({
+      userId,
+      scope: `net:${conn.network.name}`,
+      text: reason ? `Disposing: ${reason}` : 'Disposing',
+    });
     conn.dispose(reason);
     this._userMap(userId).delete(networkId);
   }

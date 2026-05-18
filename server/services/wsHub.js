@@ -8,6 +8,7 @@ import ircManager from './ircManager.js';
 import settingsService from './settingsService.js';
 import highlightRulesService from './highlightRulesService.js';
 import draftsService from './draftsService.js';
+import systemLog from './systemLog.js';
 import * as pushService from './pushService.js';
 import { matchesAny as matchesIgnoreMask } from './maskMatch.js';
 import { listMasks as listIgnoredMasks } from '../db/ignoredMasks.js';
@@ -436,6 +437,19 @@ export function attachWsHub(httpServer, sessionSecret) {
     fanOut(userId, { kind: 'highlight-rules-changed' });
   });
 
+  // System-console fan-out. User-scoped lines reach just that user's tabs;
+  // global lines (server startup, etc.) reach every connected user — they
+  // describe shared infrastructure, not per-user state.
+  systemLog.on('line', (line) => {
+    if (line.userId == null) {
+      for (const userId of socketsByUser.keys()) {
+        fanOut(userId, { kind: 'system-log', line });
+      }
+      return;
+    }
+    fanOut(line.userId, { kind: 'system-log', line });
+  });
+
   // Drafts fan out to every tab of the same user. `originWs` is the socket
   // that triggered the change (if any) and gets excluded so the originator
   // doesn't clobber its own optimistic state with a stale echo. HTTP-driven
@@ -455,12 +469,14 @@ export function attachWsHub(httpServer, sessionSecret) {
   // here so any in-flight message handlers stop firing.
   ircManager.on('user-disposed', ({ userId }) => {
     const set = socketsByUser.get(userId);
-    if (!set) return;
-    for (const ws of [...set]) {
-      try { ws.close(1000, 'user removed'); } catch (_) { /* ignore */ }
+    if (set) {
+      for (const ws of [...set]) {
+        try { ws.close(1000, 'user removed'); } catch (_) { /* ignore */ }
+      }
+      socketsByUser.delete(userId);
     }
-    socketsByUser.delete(userId);
     clearAutoAwayTimer(userId);
+    systemLog.dropUser(userId);
   });
 
   function parseSinceParam(rawUrl) {
@@ -542,6 +558,11 @@ export function attachWsHub(httpServer, sessionSecret) {
     // snapshot exists solely so the message context menu can flip its label
     // ("Save" ↔ "Remove bookmark") without a network round-trip.
     send(ws, { kind: 'bookmark-ids-snapshot', ids: listBookmarkIdsForUser(userId) });
+    // System console seed: ring contents up to the current moment. Live
+    // lines after this point arrive via the `system-log` fan-out. The
+    // client store dedupes by id, so a redundant re-snapshot on visibility-
+    // return resync is harmless.
+    send(ws, { kind: 'system-log-snapshot', lines: systemLog.getRecent(userId) });
     const readState = listReadStateForUser(userId);
     const closed = closedKeySetForUser(userId);
     let maxSentId = ws.sinceId || 0;

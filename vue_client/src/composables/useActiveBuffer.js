@@ -12,9 +12,11 @@ export function useActiveBuffer() {
   const { activeKey } = storeToRefs(networks);
 
   const active = computed(() => networks.activeBuffer);
-  const activeBuf = computed(() =>
-    activeKey.value ? buffers.byKey(activeKey.value) : null
-  );
+  const isSystemConsole = computed(() => activeKey.value === ':system:');
+  const activeBuf = computed(() => {
+    if (!activeKey.value || isSystemConsole.value) return null;
+    return buffers.byKey(activeKey.value);
+  });
   const topic = computed(() => activeBuf.value?.topic);
   const isServerBuffer = computed(
     () => !!active.value?.target?.startsWith(':server:')
@@ -27,5 +29,5 @@ export function useActiveBuffer() {
     return t;
   });
 
-  return { activeKey, active, activeBuf, topic, isServerBuffer, isChannel, bufferLabel };
+  return { activeKey, active, activeBuf, topic, isServerBuffer, isChannel, bufferLabel, isSystemConsole };
 }

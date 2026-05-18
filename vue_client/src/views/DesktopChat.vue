@@ -6,13 +6,19 @@
 <template>
   <div
     class="chat"
-    :class="{ 'sidebar-collapsed': !showChannels, 'members-collapsed': !showMembers }"
+    :class="{ 'sidebar-collapsed': !showChannels, 'members-collapsed': !showMembers, 'system-active': isSystemConsole }"
     @click="onChatClick"
   >
     <aside class="sidebar" :class="{ collapsed: !showChannels }">
       <div class="sidebar-head">
         <template v-if="showChannels">
-          <span class="logo">lurker</span>
+          <button
+            type="button"
+            class="logo"
+            :class="{ active: isSystemConsole }"
+            title="Open system console"
+            @click="openSystemConsole"
+          >lurker</button>
           <span v-if="!connected" class="status off" title="Disconnected">●</span>
           <span class="head-spacer"></span>
         </template>
@@ -35,7 +41,10 @@
       </div>
     </aside>
 
-    <header v-if="active" class="topic">
+    <header v-if="isSystemConsole" class="topic">
+      <span class="buffer">System console</span>
+    </header>
+    <header v-else-if="active" class="topic">
       <span class="buffer">{{ bufferLabel }}</span>
       <button
         v-if="isServerBuffer"
@@ -77,12 +86,13 @@
         :title="`${memberCount} ${memberCount === 1 ? 'user' : 'users'} in channel`"
       >{{ memberCount }}</span>
     </header>
-    <div v-if="active" class="topic-divider"></div>
+    <div v-if="active || isSystemConsole" class="topic-divider"></div>
 
-    <MessageList ref="messageListRef" :pending-scroll-id="pendingScrollId" />
-    <MemberList v-if="showMembers" />
+    <SystemConsole v-if="isSystemConsole" />
+    <MessageList v-else ref="messageListRef" :pending-scroll-id="pendingScrollId" />
+    <MemberList v-if="showMembers && !isSystemConsole" />
     <StatusBar />
-    <MessageInput ref="messageInputRef" />
+    <MessageInput v-if="!isSystemConsole" ref="messageInputRef" />
 
     <NetworkForm
       v-if="showNetworkForm"
@@ -138,12 +148,14 @@
 <script setup>
 import { computed, ref } from 'vue';
 import { useBuffersStore } from '../stores/buffers.js';
+import { useNetworksStore } from '../stores/networks.js';
 import { useSocket } from '../composables/useSocket.js';
 import { useChatBootstrap } from '../composables/useChatBootstrap.js';
 import { useActiveBuffer } from '../composables/useActiveBuffer.js';
 import { useSettingsStore } from '../stores/settings.js';
 import BufferList from '../components/BufferList.vue';
 import MessageList from '../components/MessageList.vue';
+import SystemConsole from '../components/SystemConsole.vue';
 import MessageInput from '../components/MessageInput.vue';
 import MemberList from '../components/MemberList.vue';
 import StatusBar from '../components/StatusBar.vue';
@@ -165,8 +177,13 @@ import { useBufferActions } from '../composables/useBufferActions.js';
 import { useJumpToMessage } from '../composables/useJumpToMessage.js';
 
 const buffers = useBuffersStore();
+const networks = useNetworksStore();
 const { connected } = useSocket();
-const { active, activeBuf, topic, isServerBuffer, isChannel, bufferLabel } = useActiveBuffer();
+const { active, activeBuf, topic, isServerBuffer, isChannel, bufferLabel, isSystemConsole } = useActiveBuffer();
+
+function openSystemConsole() {
+  networks.activateSystem();
+}
 const settings = useSettingsStore();
 const nicklistCollapse = useNicklistCollapseStore();
 const nickNotes = useNickNotesStore();
@@ -320,6 +337,9 @@ useChatBootstrap({ onJump: onJumpToMessage });
 /* Members column fully collapses — no rail. The reopen toggle lives in the
    topic bar on the right, so there's nothing to leave behind. */
 .chat.members-collapsed { --members-w: 0px; }
+/* System console has no member list — collapse the rail so the log pane
+   spans the full content width instead of leaving an empty column. */
+.chat.system-active { --members-w: 0px; }
 /* min-height/min-width 0 lets flex/scrolling children stay inside their row. */
 .chat > * { min-width: 0; min-height: 0; }
 
@@ -337,7 +357,17 @@ useChatBootstrap({ onJump: onJumpToMessage });
   gap: 8px;
 }
 .head-spacer { flex: 1; }
-.logo { color: var(--accent); font-weight: bold; }
+.logo {
+  color: var(--accent);
+  font-weight: bold;
+  background: transparent;
+  border: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+.logo:hover { text-decoration: underline; }
+.logo.active { text-decoration: underline; }
 .status.off { color: var(--bad); }
 /* Pin the cog (settings) flush-left and the plus (add network) flush-right;
    the middle icons distribute evenly between them. Flex with space-between
