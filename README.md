@@ -65,6 +65,10 @@ npm run dev
 - Follow what's planned and in progress on the [project kanban](https://kanban.bradroot.me/projects/12/45#share-auth-token=heTq3lrceDTKVlNYHKTH6MPaDqA2pJowusiqETTL).
 - Say hi — I'm **amiantos** on Libera.Chat and [MansionNET](https://inthemansion.com).
 
+# Why does this exist?
+
+When I got back into IRC, I started off with [thelounge](https://github.com/thelounge/thelounge) but felt like it was kind of ugly, push notifications were very flaky, it was missing features, and development seemed to be stagnant. So I switched to [weechat](https://github.com/weechat) + [tmux](https://github.com/tmux/tmux) for a while, which looked and felt a lot better, but I missed being able to use IRC from my phone. Long story short, I had no choice but to make my own client, and with the help of some new friends on IRC, I believe I likely made one of the nicest IRC clients you've ever used. Try it out, and let me know what you think.
+
 # License
 Elastic License 2.0 — see [LICENSE](LICENSE). Source-available: you can use, copy, modify, and redistribute it, but you may not offer it to third parties as a hosted or managed service.
 
