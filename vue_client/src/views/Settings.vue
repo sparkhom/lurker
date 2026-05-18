@@ -119,6 +119,19 @@ onMounted(() => {
   }
 });
 
+// Switching panels swaps the pane component inside the same scrolling
+// .content container, so the previous pane's scrollTop carries over to the
+// new one — leaving long panes (Appearance, Notifications) scrolled into
+// their middle when first revealed. Snap to the top on every category change,
+// unless the route carries a hash (the hash watcher below will scroll the
+// targeted row into view itself).
+watch(activeCategoryId, async () => {
+  await nextTick();
+  if (route.hash) return;
+  const root = contentEl.value;
+  if (root) root.scrollTop = 0;
+});
+
 // Search-results in the sidebar route to /settings/<cat>#<setting.key>. When
 // the hash changes (or the route resolves with a hash), find the row tagged
 // with [data-setting-key="<key>"] inside the active pane and scroll it into
