@@ -34,23 +34,29 @@ Lurker runs as an always-on server that stays connected to IRC on your behalf, k
 # Installation
 
 ## Install (Docker — Recommended)
-```
-cp .env.example .env # set this up
-docker-compose up --detach
+
+```bash
+curl -O https://raw.githubusercontent.com/amiantos/lurker/main/docker-compose.yml
+docker compose up -d
 ```
 
-## Manual Install
-```
-cp .env.example .env # set this up
-npm install
+Then open <http://localhost:8015> and create your admin account. Username + password is the default; passkeys are optional. See [SELF_HOSTING.md](SELF_HOSTING.md) for the full guide — reverse proxy + HTTPS, enabling passkeys, push notifications, updating, and backups.
+
+## Manual Install (without Docker)
+
+```bash
+npm run install:all
 npm run client:build
 npm start
 ```
 
+The server listens on port 8010 by default and stores everything in `./data/`. Override with the envvars documented in [`.env.example`](.env.example).
+
 ## Development
-```
+
+```bash
 npm run install:all
-cp .env.example .env   # edit SESSION_SECRET; defaults assume the local hostname below
+cp .env.example .env   # defaults assume the local hostname documented in the file
 npm run dev
 ```
 

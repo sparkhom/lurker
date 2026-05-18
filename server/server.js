@@ -24,15 +24,15 @@ import ircManager from './services/ircManager.js';
 import { attachWsHub } from './services/wsHub.js';
 import systemLog from './services/systemLog.js';
 import { purgeExpiredSessions } from './db/sessions.js';
+import { resolveSessionSecret } from './utils/sessionSecret.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = Number(process.env.PORT || 8010);
-const SESSION_SECRET = process.env.SESSION_SECRET;
-if (!SESSION_SECRET) {
-  console.error('[lurker] SESSION_SECRET is required. See .env.example.');
-  process.exit(1);
+const { secret: SESSION_SECRET, source: sessionSecretSource } = resolveSessionSecret();
+if (sessionSecretSource === 'generated') {
+  console.log('[lurker] generated new session secret in data/session-secret.key');
 }
 
 const app = express();

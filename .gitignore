@@ -1,6 +1,7 @@
 node_modules/
 .env
 .env.local
+docker-compose.override.yml
 *.log
 npm-debug.log*
 

@@ -1,30 +1,59 @@
 # Copyright (c) 2026 Brad Root
 # SPDX-License-Identifier: Elastic-2.0
+#
+# Lurker self-hosted — download and run:
+#   curl -O https://raw.githubusercontent.com/amiantos/lurker/main/docker-compose.yml
+#   docker compose up -d
+#
+# Then open http://localhost:8015 and create your admin account.
+#
+# See SELF_HOSTING.md for the full setup guide, including how to enable
+# passkeys, web push notifications, and an HTTPS reverse proxy.
 
 services:
   lurker:
-    build: .
-    container_name: lurker-server
+    image: ghcr.io/amiantos/lurker:latest
+    container_name: lurker
     ports:
       - "8015:8015"
     volumes:
+      # All persistent state — SQLite database, session secret, uploads —
+      # lives here. Back this directory up to back up Lurker.
       - ./data:/app/data
     environment:
       - NODE_ENV=production
       - PORT=8015
       - DATABASE_PATH=/app/data/lurker.db
-      # Set in .env next to this compose file (gitignored).
-      - SESSION_SECRET=${SESSION_SECRET}
-      # Public hostname served via your reverse proxy. Set all of these in .env.
-      - CORS_ORIGIN=${CORS_ORIGIN}
-      - WEBAUTHN_RP_ID=${WEBAUTHN_RP_ID}
-      - WEBAUTHN_RP_NAME=${WEBAUTHN_RP_NAME}
-      - WEBAUTHN_ORIGIN=${WEBAUTHN_ORIGIN}
-      - VAPID_SUBJECT=${VAPID_SUBJECT}
+      #
+      # ───── Optional: Passkeys (WebAuthn) ─────────────────────────────────
+      # Lurker uses username + password by default. To additionally allow
+      # passkey login, set the three vars below to match the public origin
+      # your browsers hit. Passkeys require HTTPS for any non-localhost
+      # hostname — most operators put Lurker behind Caddy or another
+      # reverse proxy first (see SELF_HOSTING.md).
+      # - WEBAUTHN_RP_ID=lurker.example.com
+      # - WEBAUTHN_RP_NAME=Lurker
+      # - WEBAUTHN_ORIGIN=https://lurker.example.com
+      #
+      # ───── Optional: Web Push notifications ──────────────────────────────
+      # Required only if you want push notifications. Must be a valid mailto:
+      # with a real domain (APNs/Safari rejects single-label domains).
+      # - VAPID_SUBJECT=mailto:you@example.com
+      #
+      # ───── Optional: CORS ────────────────────────────────────────────────
+      # Only needed if you serve the API and the static UI from different
+      # origins (e.g. when developing). For the bundled image, Express
+      # serves both from the same origin and CORS isn't needed.
+      # - CORS_ORIGIN=https://lurker.example.com
+      #
+      # ───── Optional: outbound contact info ───────────────────────────────
+      # Embedded in our outgoing User-Agent and CTCP VERSION reply so the
+      # operators of services Lurker talks to can reach you if needed.
+      # - USER_AGENT_CONTACT=https://lurker.example.com
+      #
+      # ───── Optional: custom session secret ───────────────────────────────
+      # By default Lurker generates a 64-byte secret on first boot and
+      # writes it to data/session-secret.key. Set this only if you want
+      # to supply your own (e.g. from a secrets manager).
+      # - SESSION_SECRET=replace-me-with-a-long-random-string
     restart: unless-stopped
-    networks:
-      - proxy-network
-
-networks:
-  proxy-network:
-    external: true

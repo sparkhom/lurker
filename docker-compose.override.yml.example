@@ -1,0 +1,39 @@
+# Copyright (c) 2026 Brad Root
+# SPDX-License-Identifier: Elastic-2.0
+#
+# OPTIONAL override file for advanced setups. Docker Compose auto-merges
+# `docker-compose.override.yml` (if it exists, gitignored) on top of
+# `docker-compose.yml`, so this is the place to layer in your own settings
+# without touching the main file (which you'll want to keep upstream-clean
+# so `git pull` doesn't conflict).
+#
+# To use:
+#   cp docker-compose.override.yml.example docker-compose.override.yml
+#   # edit values, then:
+#   docker compose up -d
+#
+# The example below shows the pattern the upstream maintainer uses:
+# pulling secrets and the public hostname from a `.env` file alongside
+# this compose, and attaching to an externally-managed reverse-proxy
+# network (Caddy / Traefik) instead of publishing the port on the host.
+
+services:
+  lurker:
+    # Drop the published port from the public compose — the reverse proxy
+    # talks to the container over the shared Docker network.
+    ports: !reset []
+    environment:
+      # Public hostname served via your reverse proxy.
+      - CORS_ORIGIN=${CORS_ORIGIN}
+      - WEBAUTHN_RP_ID=${WEBAUTHN_RP_ID}
+      - WEBAUTHN_RP_NAME=${WEBAUTHN_RP_NAME}
+      - WEBAUTHN_ORIGIN=${WEBAUTHN_ORIGIN}
+      - VAPID_SUBJECT=${VAPID_SUBJECT}
+      # Supply your own session secret instead of letting the server generate one.
+      - SESSION_SECRET=${SESSION_SECRET}
+    networks:
+      - proxy-network
+
+networks:
+  proxy-network:
+    external: true
