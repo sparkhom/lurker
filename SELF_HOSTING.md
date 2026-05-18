@@ -152,6 +152,20 @@ Lurker supports background push notifications for highlights and DMs, delivered 
 
 If you change `VAPID_SUBJECT` later, existing subscriptions continue to work — the subject only affects new push JWTs, not the keypair.
 
+### Secure cookies
+
+Lurker's session cookies are **not** flagged `Secure` by default. This sounds wrong but is correct for the common self-hosted shapes:
+
+- LAN / Tailscale / `*.local` hostnames over plain HTTP — browsers drop Secure cookies on non-localhost HTTP origins
+- Cloudflare Tunnel, reverse proxies, etc. — the *browser* sees HTTPS, but the container sees plain HTTP from the proxy, so even with TLS in front the cookie travels cleartext over Docker's internal network (which is fine — that traffic never leaves the host)
+
+If you genuinely serve Lurker over end-to-end HTTPS (Express terminating TLS directly), set:
+
+```yaml
+environment:
+  - COOKIE_SECURE=true
+```
+
 ### Custom session secret
 
 By default Lurker generates a random 64-byte secret on first boot and writes it to `data/session-secret.key` (mode `0600`). All session cookies are signed with it. If you'd rather supply your own (e.g. pulled from a secrets manager), set:

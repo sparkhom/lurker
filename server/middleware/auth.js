@@ -7,11 +7,17 @@ import { findUserById, touchUserLastSeen } from '../db/users.js';
 export const SESSION_COOKIE = 'lurker_session';
 
 export function getCookieOptions() {
-  const isProd = process.env.NODE_ENV === 'production';
+  // Secure is opt-in via COOKIE_SECURE=true. Tying it to NODE_ENV silently
+  // breaks the common self-hosted shapes: LAN hostnames over plain HTTP, and
+  // proxies (Cloudflare Tunnel, reverse proxies) that terminate TLS upstream
+  // and connect to the container in cleartext — in both cases the browser
+  // drops Secure cookies and the user appears logged in but the session
+  // cookie never lands. Operators serving Lurker over true end-to-end HTTPS
+  // can flip this on to harden against cleartext-network eavesdropping.
   return {
     httpOnly: true,
     sameSite: 'lax',
-    secure: isProd,
+    secure: process.env.COOKIE_SECURE === 'true',
     signed: true,
     path: '/',
     maxAge: 30 * 24 * 60 * 60 * 1000,

@@ -56,4 +56,11 @@ services:
       # writes it to data/session-secret.key. Set this only if you want
       # to supply your own (e.g. from a secrets manager).
       # - SESSION_SECRET=replace-me-with-a-long-random-string
+      #
+      # ───── Optional: Secure cookie flag ──────────────────────────────────
+      # Off by default so cookies work over plain HTTP (localhost / LAN) and
+      # behind TLS-terminating proxies (Cloudflare Tunnel, Caddy, etc.)
+      # where the container itself sees cleartext. Flip on only if you serve
+      # Lurker over true end-to-end HTTPS.
+      # - COOKIE_SECURE=true
     restart: unless-stopped
