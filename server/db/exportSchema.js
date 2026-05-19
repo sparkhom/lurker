@@ -262,6 +262,11 @@ export const EXPORT_TABLES = Object.freeze({
     reason: 'admin/instance-scoped invitation state, not user data',
   },
 
+  api_tokens: {
+    mode: 'skip',
+    reason: 'bearer-token credentials bound to this instance; user re-issues tokens on the target instance',
+  },
+
   peer_presence_state: {
     mode: 'skip',
     reason: 'transient cache; rebuilt by IRC events on next connect',

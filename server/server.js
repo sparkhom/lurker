@@ -20,8 +20,12 @@ import adminRouter from './routes/admin.js';
 import uploadsRouter from './routes/uploads.js';
 import draftsRouter from './routes/drafts.js';
 import { exportsRouter, importRouter } from './routes/exports.js';
+import apiTokensRouter from './routes/apiTokens.js';
 import ircManager from './services/ircManager.js';
 import { attachWsHub } from './services/wsHub.js';
+import './services/verbs/index.js';
+import mcpRouter from './services/mcpServer.js';
+import { requireApiAuth } from './middleware/apiAuth.js';
 import systemLog from './services/systemLog.js';
 import { purgeExpiredSessions } from './db/sessions.js';
 import { resolveSessionSecret } from './utils/sessionSecret.js';
@@ -54,6 +58,9 @@ app.use('/api/uploads', uploadsRouter);
 app.use('/api/drafts', draftsRouter);
 app.use('/api/exports', exportsRouter);
 app.use('/api/imports', importRouter);
+app.use('/api/api-tokens', apiTokensRouter);
+
+app.use('/mcp', requireApiAuth, mcpRouter);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });

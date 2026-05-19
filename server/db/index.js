@@ -392,6 +392,24 @@ function migrate() {
     );
     CREATE INDEX IF NOT EXISTS idx_user_bookmarks_user_msg
       ON user_bookmarks(user_id, message_id DESC);
+
+    -- Per-user bearer tokens for the HTTP API + MCP server. token_hash is the
+    -- hex SHA-256 of the raw token; the raw value is shown once at creation
+    -- time and never stored. scope is 'read' (read-only verbs) or 'read-write'
+    -- (also allows send/set verbs). Revocation is soft via revoked_at so the
+    -- admin UI can still display the token name in the historical list.
+    CREATE TABLE IF NOT EXISTS api_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      scope TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_used_at TEXT,
+      revoked_at TEXT,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id);
   `);
 }
 

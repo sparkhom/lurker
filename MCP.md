@@ -1,0 +1,201 @@
+# Lurker MCP & HTTP API
+
+Lurker exposes its data and IRC actions through an authenticated
+[Model Context Protocol](https://modelcontextprotocol.io/) endpoint so
+external programs — LLM-driven agents, scripts, or anything else — can drive
+your bouncer without a browser open.
+
+This document covers the operator side: how to mint a token, point an
+MCP-aware client at your Lurker, and what tools are available.
+
+## Quick start
+
+1. **Mint a token** in your settings (`/settings/api-tokens`). Choose
+   read-only or read-write at creation time. The raw token is shown
+   exactly once; copy it now.
+2. **Configure your MCP client** with the token and the endpoint
+   (`https://<your-lurker>/mcp`). See [Claude Desktop](#claude-desktop)
+   below for a worked example.
+3. **Verify** with `curl`:
+   ```sh
+   curl -X POST https://<your-lurker>/mcp \
+     -H "Authorization: Bearer <your-token>" \
+     -H "Content-Type: application/json" \
+     -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+   ```
+
+## Scopes
+
+| scope | what it grants |
+|---|---|
+| `read` | All read verbs. The token can list networks, browse buffers, fetch backlog, search history, and read your nick notes. |
+| `read-write` | Everything `read` does, plus sending messages, sending CTCP actions, and writing nick notes. |
+
+Scopes are coarse on purpose. Per-verb scopes are not implemented because
+the threat model assumes the operator is the only person holding tokens for
+their own account.
+
+## Tokens are HTTP-only
+
+API tokens authenticate the HTTP endpoint (`/mcp` and `/api/api-tokens`). The
+WebSocket endpoint used by the browser is cookie-only and does not accept
+bearer tokens. There is no way to drive the browser-style stateful protocol
+(presence, drafts, snapshot resume) from an MCP client — that surface is
+deliberately out of scope.
+
+## Tools (MCP verbs)
+
+All eight tools come back through `tools/list` with full JSON Schemas for
+their inputs. A read-only token only sees the five read tools.
+
+### `list_networks`  *(read)*
+Networks configured for your account, with live connection state and the
+current nick.
+
+### `list_buffers`  *(read)*
+Channels and DMs you have history for, with the most recent message
+timestamp. Optionally filter by `networkId`. Server pseudo-buffers
+(`:server:*`) are deliberately excluded — they're a UI plumbing concept,
+not data agents should reason about.
+
+### `recent_messages`  *(read)*
+Window of recent messages for one buffer, oldest-first. Paginate backwards
+by passing the lowest id from a previous result as `before`. Limit defaults
+to 100, capped at 500.
+
+### `search_messages`  *(read)*
+Full-text search across your message history. Free-text `query` runs through
+SQLite FTS5 (multiple terms are ANDed). Optional structured filters:
+`networkId`, `target`, `nick`. Limit defaults to 50, capped at 100.
+
+### `get_nick_note`  *(read)*
+Read your free-form note about a nick on a network. Empty string when no
+note exists.
+
+### `set_nick_note`  *(read-write)*
+Write a free-form note. Pass an empty string to delete. Notes are capped at
+4096 chars. Writes fan out to any open browser tabs so the UI reflects the
+change immediately.
+
+### `send_message`  *(read-write)*
+Send a PRIVMSG to a channel or peer. Returns
+`{ ok: false, error: "not-connected" }` when the network is offline; this
+comes back as a normal tool result (not a JSON-RPC error) so agents can
+branch on the value instead of catching.
+
+### `send_action`  *(read-write)*
+Send a CTCP ACTION (`/me ...`). Same shape and error semantics as
+`send_message`.
+
+## Wire format
+
+Transport is MCP's Streamable HTTP profile: a single `POST /mcp` with a
+JSON-RPC 2.0 envelope. Each request reauthenticates via the `Authorization`
+header — there is no Mcp-Session-Id state on the server side.
+
+We implement four methods:
+
+- `initialize` — capability handshake. Returns `protocolVersion`,
+  `capabilities: { tools: {} }`, and `serverInfo`.
+- `notifications/initialized` — client ack. No response.
+- `tools/list` — enumerates verbs the token can invoke.
+- `tools/call` — invokes a verb by name with arguments.
+
+Verb-level failures (insufficient scope, unknown network, IRC offline) are
+returned as a tool result with `isError: true` and a structured payload, not
+as JSON-RPC errors. JSON-RPC errors are reserved for protocol problems:
+malformed envelope, unknown method, missing tool name.
+
+## Examples
+
+### Claude Code
+
+Claude Code's MCP client speaks streamable HTTP natively, so the setup is a
+single command — no stdio bridge needed:
+
+```sh
+claude mcp add --transport http lurker https://<your-lurker>/mcp \
+  --header "Authorization: Bearer <your-token>"
+```
+
+`claude mcp list` confirms the entry. MCP servers load at session start, so
+restart Claude Code (start a new session) before the eight Lurker tools
+appear in tool calls. To remove it later, `claude mcp remove lurker`.
+
+### Claude Desktop
+
+Add an entry under `mcpServers` in your Claude Desktop config (the exact
+path depends on your OS; see Claude Desktop's docs). Since the transport is
+HTTP, use the [`mcp-remote`](https://www.npmjs.com/package/mcp-remote)
+bridge to expose it as a local MCP stdio server:
+
+```json
+{
+  "mcpServers": {
+    "lurker": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://<your-lurker>/mcp",
+        "--header",
+        "Authorization: Bearer <your-token>"
+      ]
+    }
+  }
+}
+```
+
+After restarting Claude Desktop, the eight Lurker tools appear in the
+tool picker and can be invoked directly.
+
+### curl roundtrip
+
+```sh
+# Initialize.
+curl -X POST https://<your-lurker>/mcp \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+
+# List the eight tools.
+curl -X POST https://<your-lurker>/mcp \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+
+# Read the last 20 messages in #lurker on network 1.
+curl -X POST https://<your-lurker>/mcp \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc":"2.0","id":3,"method":"tools/call",
+    "params":{"name":"recent_messages",
+              "arguments":{"networkId":1,"target":"#lurker","limit":20}}
+  }'
+```
+
+## Revocation
+
+Revoke a token from the settings pane at any time. Soft revocation: the
+row stays in the listing with a `revoked` marker (so you can see whether a
+specific name was previously issued and torn down). The token immediately
+stops authenticating against `/mcp`. There is no token rotation flow —
+revoke the old one and mint a new one.
+
+## What's not here
+
+Intentionally outside the scope of this surface:
+
+- **Streaming subscriptions** (`subscribe_events`, push notifications over
+  MCP). Agents that want to react to live activity should poll
+  `recent_messages` with a `before`/since cursor on a schedule.
+- **Channel membership** (`join_channel`, `part_channel`). The operator
+  manages this through the browser UI; agents that join channels without
+  the operator noticing are a footgun.
+- **Per-message read state** (`mark_read`, `get_unread`). Defer until a
+  concrete agent needs it.
+- **WHOIS / channel-member listings**. Derive from `recent_messages`; IRC
+  member lists are unstable anyway.
+- **REST endpoints for non-MCP HTTP clients.** MCP is the only HTTP
+  surface here. If you need a non-MCP HTTP integration, file an issue
+  describing the use case.
