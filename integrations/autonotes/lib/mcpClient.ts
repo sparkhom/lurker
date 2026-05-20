@@ -5,8 +5,34 @@
 // pulling in @modelcontextprotocol/sdk) so the sample stays readable and the
 // transport doesn't drift if the upstream SDK rev-locks.
 
+// JSON-RPC 2.0 envelope returned by the server.
+export interface McpEnvelope {
+  jsonrpc: "2.0";
+  id: number;
+  result?: unknown;
+  error?: {
+    code: number;
+    message: string;
+    data?: unknown;
+  };
+}
+
+// A tool descriptor returned by tools/list.
+export interface McpTool {
+  name: string;
+  description?: string;
+  input_schema?: unknown;
+}
+
+export interface McpToolsListResult {
+  tools: McpTool[];
+}
+
 export class McpError extends Error {
-  constructor(message, { code, data } = {}) {
+  code: number | undefined;
+  data: unknown;
+
+  constructor(message: string, { code, data }: { code?: number; data?: unknown } = {}) {
     super(message);
     this.name = "McpError";
     this.code = code;
@@ -15,7 +41,9 @@ export class McpError extends Error {
 }
 
 export class McpToolError extends Error {
-  constructor(message, { payload } = {}) {
+  payload: unknown;
+
+  constructor(message: string, { payload }: { payload?: unknown } = {}) {
     super(message);
     this.name = "McpToolError";
     this.payload = payload;
@@ -23,7 +51,11 @@ export class McpToolError extends Error {
 }
 
 export class McpClient {
-  constructor({ url, token }) {
+  private url: string;
+  private token: string;
+  private rpcId: number;
+
+  constructor({ url, token }: { url: string; token: string }) {
     if (!url) throw new Error("McpClient: url is required");
     if (!token) throw new Error("McpClient: token is required");
     this.url = url.replace(/\/$/, "");
@@ -31,7 +63,7 @@ export class McpClient {
     this.rpcId = 0;
   }
 
-  async call(method, params = {}) {
+  async call(method: string, params: Record<string, unknown> = {}): Promise<unknown> {
     const id = ++this.rpcId;
     const res = await fetch(this.url, {
       method: "POST",
@@ -50,7 +82,7 @@ export class McpClient {
       });
     }
 
-    const envelope = await res.json();
+    const envelope = (await res.json()) as McpEnvelope;
     if (envelope.error) {
       throw new McpError(envelope.error.message ?? "MCP error", {
         code: envelope.error.code,
@@ -60,30 +92,31 @@ export class McpClient {
     return envelope.result;
   }
 
-  async toolsList() {
-    return this.call("tools/list", {});
+  async toolsList(): Promise<McpToolsListResult> {
+    return this.call("tools/list", {}) as Promise<McpToolsListResult>;
   }
 
   // Returns the unwrapped tool payload (parsed JSON from the first text block).
   // Throws McpToolError when the tool replied with isError: true.
-  async toolCall(name, args = {}) {
+  async toolCall(name: string, args: Record<string, unknown> = {}): Promise<unknown> {
     const result = await this.call("tools/call", { name, arguments: args });
     const payload = extractToolPayload(result);
-    if (result?.isError) {
+    if ((result as { isError?: boolean } | null)?.isError) {
       throw new McpToolError(`MCP tool ${name} returned error`, { payload });
     }
     return payload;
   }
 }
 
-function extractToolPayload(result) {
-  const block = Array.isArray(result?.content) ? result.content[0] : null;
-  if (!block || block.type !== "text" || typeof block.text !== "string") {
+function extractToolPayload(result: unknown): unknown {
+  const r = result as { content?: unknown[] } | null;
+  const block = Array.isArray(r?.content) ? r.content[0] : null;
+  if (!block || (block as { type?: string }).type !== "text" || typeof (block as { text?: unknown }).text !== "string") {
     return result;
   }
   try {
-    return JSON.parse(block.text);
+    return JSON.parse((block as { text: string }).text);
   } catch {
-    return { text: block.text };
+    return { text: (block as { text: string }).text };
   }
 }

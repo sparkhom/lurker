@@ -1,7 +1,7 @@
 import "dotenv/config";
 import express from "express";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import type { Request, Response, NextFunction } from "express";
+import { resolve } from "node:path";
 
 import { loadConfig, saveConfig, maskToken } from "./lib/config.js";
 import { McpClient, McpError } from "./lib/mcpClient.js";
@@ -16,23 +16,23 @@ import {
 } from "./lib/scans.js";
 
 const PORT = Number(process.env.PORT) || 5173;
-const here = dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
-app.use(express.static(resolve(here, "public")));
+app.use(express.static(resolve(import.meta.dirname, "public")));
 
-async function buildMcpClient() {
+async function buildMcpClient(): Promise<McpClient> {
   const cfg = await loadConfig();
   if (!cfg.lurkerUrl || !cfg.lurkerToken) {
-    const err = new Error("Lurker URL and token are not configured");
-    err.statusCode = 400;
+    const err = Object.assign(new Error("Lurker URL and token are not configured"), {
+      statusCode: 400,
+    });
     throw err;
   }
   return new McpClient({ url: cfg.lurkerUrl, token: cfg.lurkerToken });
 }
 
-app.get("/api/config", async (_req, res, next) => {
+app.get("/api/config", async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const cfg = await loadConfig();
     res.json({
@@ -49,7 +49,7 @@ app.get("/api/config", async (_req, res, next) => {
   }
 });
 
-app.post("/api/config", async (req, res, next) => {
+app.post("/api/config", async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     // Trim — pasted URLs and tokens routinely carry a trailing newline, which
     // saves a "valid-looking" config that then fails auth later.
@@ -57,7 +57,8 @@ app.post("/api/config", async (req, res, next) => {
     const lurkerToken =
       typeof req.body?.lurkerToken === "string" ? req.body.lurkerToken.trim() : "";
     if (!lurkerUrl || !lurkerToken) {
-      return res.status(400).json({ error: "lurkerUrl and lurkerToken are required" });
+      res.status(400).json({ error: "lurkerUrl and lurkerToken are required" });
+      return;
     }
     const probe = new McpClient({ url: lurkerUrl, token: lurkerToken });
     const tools = await probe.toolsList();
@@ -68,58 +69,62 @@ app.post("/api/config", async (req, res, next) => {
     res.json({ ok: true, scope, toolNames });
   } catch (err) {
     if (err instanceof McpError) {
-      return res.status(400).json({ error: err.message });
+      res.status(400).json({ error: err.message });
+      return;
     }
     next(err);
   }
 });
 
-app.get("/api/networks", async (_req, res, next) => {
+app.get("/api/networks", async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const mcp = await buildMcpClient();
     const result = await mcp.toolCall("list_networks", {});
-    res.json(Array.isArray(result) ? result : result?.networks ?? []);
+    const r = result as { networks?: unknown[] } | null;
+    res.json(Array.isArray(result) ? result : r?.networks ?? []);
   } catch (err) {
     next(err);
   }
 });
 
-app.get("/api/buffers", async (req, res, next) => {
+app.get("/api/buffers", async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const mcp = await buildMcpClient();
     const networkId = req.query.networkId ? Number(req.query.networkId) : undefined;
-    const args = networkId ? { networkId } : {};
+    const args: Record<string, unknown> = networkId ? { networkId } : {};
     const result = await mcp.toolCall("list_buffers", args);
-    res.json(Array.isArray(result) ? result : result?.buffers ?? []);
+    const r = result as { buffers?: unknown[] } | null;
+    res.json(Array.isArray(result) ? result : r?.buffers ?? []);
   } catch (err) {
     next(err);
   }
 });
 
-app.post("/api/scan", async (req, res, next) => {
+app.post("/api/scan", async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { networkId, depth } = req.body ?? {};
+    const { networkId, depth } = (req.body ?? {}) as { networkId?: unknown; depth?: unknown };
     // Number.isFinite rather than typeof — NaN/Infinity are both "number".
     const target = typeof req.body?.target === "string" ? req.body.target.trim() : "";
     if (!Number.isFinite(networkId) || !target) {
-      return res.status(400).json({ error: "networkId (number) and target (string) are required" });
+      res.status(400).json({ error: "networkId (number) and target (string) are required" });
+      return;
     }
     const cleanDepth = Math.max(1, Math.min(500, Number(depth) || 200));
 
-    const scan = createScan({ networkId, target, depth: cleanDepth });
-    await saveConfig({ lastNetworkId: networkId, lastTarget: target, lastDepth: cleanDepth });
+    const scan = createScan({ networkId: networkId as number, target, depth: cleanDepth });
+    await saveConfig({ lastNetworkId: networkId as number, lastTarget: target, lastDepth: cleanDepth });
     res.json({ scanId: scan.id });
 
     // Fire-and-forget: agent runs while the HTTP response has already returned.
     // The UI polls /api/scan/:id for progress.
-    (async () => {
+    void (async () => {
       try {
         const mcp = await buildMcpClient();
         const { proposals, messages } = await runScan({
           scan,
           mcpClient: mcp,
-          onProgress: (s) => updateScan(s.id, { toolCallCount: s.toolCallCount }),
-          onEvent: (ev) => appendEvent(scan.id, ev),
+          onProgress: (s) => { updateScan(s.id, { toolCallCount: s.toolCallCount }); },
+          onEvent: (ev) => { appendEvent(scan.id, ev); },
         });
         finishScan(scan.id, { proposals, messages });
       } catch (err) {
@@ -132,9 +137,12 @@ app.post("/api/scan", async (req, res, next) => {
   }
 });
 
-app.get("/api/scan/:id", (req, res) => {
+app.get("/api/scan/:id", (req: Request, res: Response): void => {
   const scan = getScan(req.params.id);
-  if (!scan) return res.status(404).json({ error: "scan not found" });
+  if (!scan) {
+    res.status(404).json({ error: "scan not found" });
+    return;
+  }
   res.json({
     id: scan.id,
     status: scan.status,
@@ -151,18 +159,22 @@ app.get("/api/scan/:id", (req, res) => {
   });
 });
 
-app.post("/api/apply", async (req, res, next) => {
+app.post("/api/apply", async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { scanId, items } = req.body ?? {};
-    const scan = getScan(scanId);
-    if (!scan) return res.status(404).json({ error: "scan not found" });
+    const { scanId, items } = (req.body ?? {}) as { scanId?: unknown; items?: unknown };
+    const scan = getScan(scanId as string);
+    if (!scan) {
+      res.status(404).json({ error: "scan not found" });
+      return;
+    }
     if (!Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ error: "items must be a non-empty array" });
+      res.status(400).json({ error: "items must be a non-empty array" });
+      return;
     }
 
     const mcp = await buildMcpClient();
-    const results = [];
-    for (const item of items) {
+    const results: Array<{ nick: unknown; ok: boolean; error?: string; note?: unknown }> = [];
+    for (const item of items as Array<Record<string, unknown>>) {
       if (typeof item?.nick !== "string" || typeof item?.note !== "string") {
         results.push({ nick: item?.nick, ok: false, error: "invalid item" });
         continue;
@@ -173,9 +185,10 @@ app.post("/api/apply", async (req, res, next) => {
           nick: item.nick,
           note: item.note,
         });
-        results.push({ nick: item.nick, ok: true, note: written?.note ?? item.note });
+        const w = written as { note?: unknown } | null;
+        results.push({ nick: item.nick, ok: true, note: w?.note ?? item.note });
       } catch (err) {
-        results.push({ nick: item.nick, ok: false, error: err.message });
+        results.push({ nick: item.nick, ok: false, error: (err as Error).message });
       }
     }
     res.json({ results });
@@ -184,11 +197,13 @@ app.post("/api/apply", async (req, res, next) => {
   }
 });
 
-app.use((err, _req, res, _next) => {
+const errorHandler: express.ErrorRequestHandler = (err: unknown, _req, res, _next) => {
   console.error(err);
-  const status = err.statusCode ?? 500;
-  res.status(status).json({ error: err.message ?? "internal error" });
-});
+  const e = err as { statusCode?: number; message?: string };
+  const status = e.statusCode ?? 500;
+  res.status(status).json({ error: e.message ?? "internal error" });
+};
+app.use(errorHandler);
 
 // Bind localhost by default — this app has no auth and holds the operator's
 // Lurker + Anthropic credentials, so it must not be reachable from the LAN

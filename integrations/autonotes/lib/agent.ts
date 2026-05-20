@@ -1,5 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
+import type { McpClient } from "./mcpClient.js";
 import { McpToolError } from "./mcpClient.js";
+import type { Scan, Proposal, IrcMessage, ScanEvent } from "./scans.js";
 
 // Sonnet 4.6 is well-matched to this workload (structured analysis with
 // tools, not intelligence-demanding). Opus 4.7 works but burns ~3x the cost
@@ -13,7 +15,7 @@ const MAX_TOKENS = 16000;
 // tools/list (server/services/verbs/*.js). Hardcoded rather than fetched at
 // runtime so the prompt prefix stays byte-identical across scans — that's
 // what makes prompt caching on the system block actually pay off.
-const TOOLS = [
+const TOOLS: Anthropic.Tool[] = [
   {
     name: "recent_messages",
     description:
@@ -114,25 +116,44 @@ When you have finished investigating, stop calling tools and emit exactly one fi
 
 If you have nothing useful to propose for this scan, emit \`{ "proposals": [] }\` — that is a valid outcome.`;
 
-export async function runScan({ scan, mcpClient, onProgress, onEvent }) {
+interface UsageTotals {
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens: number;
+  cache_read_input_tokens: number;
+}
+
+interface RunScanOptions {
+  scan: Scan;
+  mcpClient: McpClient;
+  onProgress?: (scan: Scan) => void;
+  onEvent?: (ev: Omit<ScanEvent, "at">) => void;
+}
+
+interface RunScanResult {
+  proposals: Proposal[];
+  messages: Record<number, IrcMessage>;
+}
+
+export async function runScan({ scan, mcpClient, onProgress, onEvent }: RunScanOptions): Promise<RunScanResult> {
   if (!process.env.ANTHROPIC_API_KEY) {
     throw new Error("ANTHROPIC_API_KEY is not set in the integration's environment");
   }
   const client = new Anthropic();
-  const emit = (ev) => onEvent?.(ev);
+  const emit = (ev: Omit<ScanEvent, "at">): void => { onEvent?.(ev); };
 
   // Track every message Claude sees, keyed by id, so the review UI can render
   // the evidence linked to each proposal without re-fetching.
-  const messageCache = new Map();
+  const messageCache = new Map<number, IrcMessage>();
 
-  const totals = {
+  const totals: UsageTotals = {
     input_tokens: 0,
     output_tokens: 0,
     cache_creation_input_tokens: 0,
     cache_read_input_tokens: 0,
   };
 
-  const messages = [
+  const messages: Anthropic.MessageParam[] = [
     {
       role: "user",
       content: `Analyze the buffer \`${scan.target}\` on network ${scan.networkId} at depth ${scan.depth}. Start with recent_messages.`,
@@ -141,7 +162,11 @@ export async function runScan({ scan, mcpClient, onProgress, onEvent }) {
 
   for (let turn = 0; turn < MAX_TOOL_CALLS + 2; turn++) {
     const turnStartedAt = Date.now();
-    const response = await client.messages.create({
+    // thinking: { type: 'adaptive' } and output_config: { effort: 'high' } are
+    // real API features not yet reflected in the SDK's MessageCreateParamsNonStreaming
+    // type. Build the params as a plain object and cast so the runtime payload
+    // stays intact while the call type-checks.
+    const params = {
       model: MODEL,
       max_tokens: MAX_TOKENS,
       thinking: { type: "adaptive" },
@@ -155,7 +180,10 @@ export async function runScan({ scan, mcpClient, onProgress, onEvent }) {
       ],
       tools: TOOLS,
       messages,
-    });
+    };
+    const response = await client.messages.create(
+      params as Anthropic.MessageCreateParamsNonStreaming,
+    );
 
     accumulateUsage(totals, response.usage);
     emit({
@@ -208,8 +236,9 @@ export async function runScan({ scan, mcpClient, onProgress, onEvent }) {
       );
     }
 
-    const toolResults = [];
+    const toolResults: Anthropic.ToolResultBlockParam[] = [];
     for (const tu of toolUses) {
+      if (tu.type !== "tool_use") continue;
       const { resultBlock, summary, isError } = await invokeTool(
         mcpClient,
         tu,
@@ -234,9 +263,22 @@ export async function runScan({ scan, mcpClient, onProgress, onEvent }) {
   throw new Error("Agent loop ran past safety bound without producing proposals");
 }
 
-async function invokeTool(mcpClient, toolUse, messageCache) {
+interface InvokeToolResult {
+  resultBlock: Anthropic.ToolResultBlockParam;
+  summary: string;
+  isError: boolean;
+}
+
+async function invokeTool(
+  mcpClient: McpClient,
+  toolUse: Anthropic.ToolUseBlock,
+  messageCache: Map<number, IrcMessage>,
+): Promise<InvokeToolResult> {
   try {
-    const payload = await mcpClient.toolCall(toolUse.name, toolUse.input ?? {});
+    const payload = await mcpClient.toolCall(
+      toolUse.name,
+      (toolUse.input ?? {}) as Record<string, unknown>,
+    );
     cacheMessagesFromPayload(toolUse.name, payload, messageCache);
     return {
       resultBlock: {
@@ -248,43 +290,44 @@ async function invokeTool(mcpClient, toolUse, messageCache) {
       isError: false,
     };
   } catch (err) {
-    const payload = err instanceof McpToolError ? err.payload : { error: err.message };
+    const payload = err instanceof McpToolError ? err.payload : { error: (err as Error).message };
     return {
       resultBlock: {
         type: "tool_result",
         tool_use_id: toolUse.id,
-        content: JSON.stringify(payload ?? { error: err.message }),
+        content: JSON.stringify(payload ?? { error: (err as Error).message }),
         is_error: true,
       },
-      summary: `error: ${err.message}`,
+      summary: `error: ${(err as Error).message}`,
       isError: true,
     };
   }
 }
 
-function summarizeToolResult(name, payload) {
+function summarizeToolResult(name: string, payload: unknown): string {
   if (!payload || typeof payload !== "object") return String(payload).slice(0, 120);
+  const p = payload as Record<string, unknown>;
 
   if (name === "recent_messages" || name === "search_messages") {
-    const msgs = Array.isArray(payload.messages) ? payload.messages : [];
+    const msgs = Array.isArray(p.messages) ? (p.messages as Array<Record<string, unknown>>) : [];
     if (msgs.length === 0) return "0 messages";
     const nicks = new Set(msgs.map((m) => m.nick).filter(Boolean));
     // Derive the range from the timestamps, not array position: recent_messages
     // returns oldest-first but search_messages returns newest-first.
-    const times = msgs.map((m) => m.time).filter((t) => typeof t === "number");
+    const times = msgs.map((m) => m.time).filter((t) => typeof t === "number") as number[];
     const oldest = formatTs(times.length ? Math.min(...times) : undefined);
     const newest = formatTs(times.length ? Math.max(...times) : undefined);
     const more =
-      "hasOlder" in payload
-        ? `hasOlder=${payload.hasOlder}`
-        : "hasMore" in payload
-          ? `hasMore=${payload.hasMore}`
+      "hasOlder" in p
+        ? `hasOlder=${p.hasOlder}`
+        : "hasMore" in p
+          ? `hasMore=${p.hasMore}`
           : "";
     return `${msgs.length} msgs from ${nicks.size} nicks (${oldest} → ${newest})${more ? `, ${more}` : ""}`;
   }
 
   if (name === "get_nick_note") {
-    const note = String(payload.note ?? "");
+    const note = String(p.note ?? "");
     return note ? `note: ${truncate(note, 100)}` : "(no existing note)";
   }
 
@@ -293,79 +336,88 @@ function summarizeToolResult(name, payload) {
   return truncate(JSON.stringify(payload), 120);
 }
 
-function formatTs(t) {
+function formatTs(t: number | undefined): string {
   if (typeof t !== "number") return "?";
   return new Date(t).toISOString().slice(0, 16).replace("T", " ");
 }
 
-function truncate(s, n) {
+function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }
 
-function accumulateUsage(totals, usage) {
+function accumulateUsage(totals: UsageTotals, usage: Anthropic.Usage | null | undefined): void {
   if (!usage) return;
-  for (const k of Object.keys(totals)) {
-    totals[k] += usage[k] || 0;
-  }
+  totals.input_tokens += usage.input_tokens || 0;
+  totals.output_tokens += usage.output_tokens || 0;
+  totals.cache_creation_input_tokens += (usage.cache_creation_input_tokens as number) || 0;
+  totals.cache_read_input_tokens += (usage.cache_read_input_tokens as number) || 0;
 }
 
-function pickUsage(usage) {
+function pickUsage(usage: Anthropic.Usage | null | undefined): UsageTotals | null {
   if (!usage) return null;
-  const { input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens } =
-    usage;
   return {
-    input_tokens: input_tokens || 0,
-    output_tokens: output_tokens || 0,
-    cache_creation_input_tokens: cache_creation_input_tokens || 0,
-    cache_read_input_tokens: cache_read_input_tokens || 0,
+    input_tokens: usage.input_tokens || 0,
+    output_tokens: usage.output_tokens || 0,
+    cache_creation_input_tokens: (usage.cache_creation_input_tokens as number) || 0,
+    cache_read_input_tokens: (usage.cache_read_input_tokens as number) || 0,
   };
 }
 
-function cacheMessagesFromPayload(toolName, payload, messageCache) {
+function cacheMessagesFromPayload(
+  toolName: string,
+  payload: unknown,
+  messageCache: Map<number, IrcMessage>,
+): void {
   if (toolName !== "recent_messages" && toolName !== "search_messages") return;
-  const list = Array.isArray(payload?.messages) ? payload.messages : [];
+  const p = payload as { messages?: unknown } | null;
+  const list = Array.isArray(p?.messages) ? (p.messages as unknown[]) : [];
   for (const m of list) {
-    if (typeof m?.id === "number") messageCache.set(m.id, m);
+    const msg = m as { id?: unknown } & IrcMessage;
+    if (typeof msg?.id === "number") messageCache.set(msg.id, msg);
   }
 }
 
-function messageCacheToObject(messageCache) {
-  const out = {};
+function messageCacheToObject(messageCache: Map<number, IrcMessage>): Record<number, IrcMessage> {
+  const out: Record<number, IrcMessage> = {};
   for (const [id, msg] of messageCache) out[id] = msg;
   return out;
 }
 
-function extractProposals(content) {
+function extractProposals(content: Anthropic.ContentBlock[]): Proposal[] {
   const text = content
     .filter((b) => b.type === "text")
-    .map((b) => b.text)
+    .map((b) => (b as Anthropic.TextBlock).text)
     .join("\n");
 
   const fence = text.match(/```json\s*([\s\S]*?)```/);
   const jsonStr = fence ? fence[1].trim() : text.trim();
 
-  let parsed;
+  let parsed: unknown;
   try {
     parsed = JSON.parse(jsonStr);
   } catch (err) {
-    throw new Error(`Agent did not return parseable JSON: ${err.message}`);
+    throw new Error(`Agent did not return parseable JSON: ${(err as Error).message}`);
   }
-  if (!parsed || !Array.isArray(parsed.proposals)) {
+  const p = parsed as { proposals?: unknown[] } | null;
+  if (!p || !Array.isArray(p.proposals)) {
     throw new Error("Agent JSON missing 'proposals' array");
   }
-  return parsed.proposals
-    .map((p) => ({
-      nick: String(p.nick ?? "").trim(),
-      currentNote: String(p.currentNote ?? ""),
-      proposedNote: String(p.proposedNote ?? "").trim(),
-      rationale: String(p.rationale ?? ""),
-      evidence: Array.isArray(p.evidence)
-        ? p.evidence.filter((id) => typeof id === "number")
-        : [],
-    }))
+  return p.proposals
+    .map((raw) => {
+      const item = raw as Record<string, unknown>;
+      return {
+        nick: String(item.nick ?? "").trim(),
+        currentNote: String(item.currentNote ?? ""),
+        proposedNote: String(item.proposedNote ?? "").trim(),
+        rationale: String(item.rationale ?? ""),
+        evidence: Array.isArray(item.evidence)
+          ? (item.evidence as unknown[]).filter((id): id is number => typeof id === "number")
+          : [],
+      };
+    })
     // Drop malformed proposals — an empty nick or note would render a broken
     // review card and make /api/apply call set_nick_note with junk. Evidence
     // is required too: the prompt forbids proposing without it, and the review
     // UI is built around showing the cited messages per card.
-    .filter((p) => p.nick && p.proposedNote && p.evidence.length > 0);
+    .filter((proposal) => proposal.nick && proposal.proposedNote && proposal.evidence.length > 0);
 }
