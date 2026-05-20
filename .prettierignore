@@ -1,6 +1,0 @@
-# Prettier already honors .gitignore (so node_modules/, dist/, coverage/,
-# data/ are skipped). Listed here: tracked files that must not be reformatted.
-package-lock.json
-vue_client/package-lock.json
-integrations/autonotes/package-lock.json
-LICENSE

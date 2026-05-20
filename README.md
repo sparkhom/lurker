@@ -31,7 +31,7 @@ Lurker runs as an always-on server that stays connected to IRC on your behalf, k
 
 - **Server** — TypeScript on Node (run via `tsx`), Express, `irc-framework`, `ws`, `better-sqlite3`, `sharp`, `web-push`
 - **Client** — TypeScript, Vue 3, Vite, Pinia, `vue-router`
-- **Tooling** — Vitest, oxlint, Prettier
+- **Tooling** — Vitest, oxlint, oxfmt
 
 # Installation
 
