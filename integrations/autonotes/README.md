@@ -67,7 +67,9 @@ go through the app's own MCP client.
 
 - Persist scans across restarts. In-memory only.
 - Stream Claude's tokens to the browser. The UI polls every 2s.
-- Concurrent scans. One at a time per operator.
+- Guard against concurrent scans. Nothing rejects a second `POST /api/scan`
+  while one is running — the app just assumes a single operator runs one
+  scan at a time.
 - Automated tests. The agent is non-deterministic; verify by hand against
   a low-traffic channel.
 

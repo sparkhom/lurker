@@ -350,11 +350,17 @@ function extractProposals(content) {
   if (!parsed || !Array.isArray(parsed.proposals)) {
     throw new Error("Agent JSON missing 'proposals' array");
   }
-  return parsed.proposals.map((p) => ({
-    nick: String(p.nick ?? ""),
-    currentNote: String(p.currentNote ?? ""),
-    proposedNote: String(p.proposedNote ?? ""),
-    rationale: String(p.rationale ?? ""),
-    evidence: Array.isArray(p.evidence) ? p.evidence.filter((id) => typeof id === "number") : [],
-  }));
+  return parsed.proposals
+    .map((p) => ({
+      nick: String(p.nick ?? "").trim(),
+      currentNote: String(p.currentNote ?? ""),
+      proposedNote: String(p.proposedNote ?? "").trim(),
+      rationale: String(p.rationale ?? ""),
+      evidence: Array.isArray(p.evidence)
+        ? p.evidence.filter((id) => typeof id === "number")
+        : [],
+    }))
+    // Drop malformed proposals — an empty nick or note would render a broken
+    // review card and make /api/apply call set_nick_note with junk.
+    .filter((p) => p.nick && p.proposedNote);
 }

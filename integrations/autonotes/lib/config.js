@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, chmod } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
@@ -26,7 +26,14 @@ export async function loadConfig() {
 export async function saveConfig(patch) {
   const current = await loadConfig();
   const next = { ...current, ...patch };
-  await writeFile(CONFIG_PATH, JSON.stringify(next, null, 2) + "\n", "utf8");
+  // config.json holds the Lurker API token — keep it owner-only. The mode on
+  // writeFile only applies when the file is created, so chmod afterwards to
+  // also tighten a file that already existed.
+  await writeFile(CONFIG_PATH, JSON.stringify(next, null, 2) + "\n", {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  await chmod(CONFIG_PATH, 0o600);
   return next;
 }
 

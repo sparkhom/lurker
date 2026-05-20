@@ -51,7 +51,11 @@ app.get("/api/config", async (_req, res, next) => {
 
 app.post("/api/config", async (req, res, next) => {
   try {
-    const { lurkerUrl, lurkerToken } = req.body ?? {};
+    // Trim — pasted URLs and tokens routinely carry a trailing newline, which
+    // saves a "valid-looking" config that then fails auth later.
+    const lurkerUrl = typeof req.body?.lurkerUrl === "string" ? req.body.lurkerUrl.trim() : "";
+    const lurkerToken =
+      typeof req.body?.lurkerToken === "string" ? req.body.lurkerToken.trim() : "";
     if (!lurkerUrl || !lurkerToken) {
       return res.status(400).json({ error: "lurkerUrl and lurkerToken are required" });
     }

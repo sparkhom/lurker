@@ -42,6 +42,7 @@ const state = {
   pollHandle: null,
   renderedEventCount: 0, // index up to which the trace has been rendered
   turnEls: new Map(), // turn number -> { container, body }
+  isApplyingAll: false, // true while the apply-all loop is in flight
 };
 
 async function api(path, opts = {}) {
@@ -157,7 +158,10 @@ function populateNetworks(lastNetworkId, lastTarget, lastDepth) {
     netSel.value = String(lastNetworkId);
   }
   els.scanForm.depth.value = lastDepth || 200;
-  netSel.addEventListener("change", () => loadBuffers(null));
+  // Assign rather than addEventListener — populateNetworks() runs on every
+  // visit to the Scan view, and addEventListener would stack a new handler
+  // each time.
+  netSel.onchange = () => loadBuffers(null);
   loadBuffers(lastTarget || null);
 }
 
@@ -214,6 +218,7 @@ els.scanForm.addEventListener("submit", async (e) => {
 
 function enterReview(scanId) {
   showView("review");
+  stopPolling();
   state.cards.clear();
   state.renderedEventCount = 0;
   state.turnEls.clear();
@@ -519,7 +524,10 @@ function rejectCard(nick) {
 
 function updateApplyAll() {
   const remaining = [...state.cards.values()].filter((e) => e.status === "pending");
-  els.applyAll.disabled = remaining.length === 0;
+  // Stay disabled while an apply-all loop is running — each applyCard() call
+  // ends in updateApplyAll(), which would otherwise re-enable the button
+  // mid-loop and allow a second, overlapping run.
+  els.applyAll.disabled = remaining.length === 0 || state.isApplyingAll;
   els.applyAll.textContent =
     remaining.length === 0
       ? "Nothing left to apply"
@@ -528,11 +536,17 @@ function updateApplyAll() {
 
 els.applyAll.addEventListener("click", async () => {
   const remaining = [...state.cards.values()].filter((e) => e.status === "pending");
-  if (remaining.length === 0) return;
+  if (remaining.length === 0 || state.isApplyingAll) return;
+  state.isApplyingAll = true;
   els.applyAll.disabled = true;
-  for (const entry of remaining) {
-    // serial so the UI updates card-by-card and Lurker sees the writes in order
-    await applyCard(entry.proposal.nick, entry.card.textarea.value);
+  try {
+    for (const entry of remaining) {
+      // serial so the UI updates card-by-card and Lurker sees the writes in order
+      await applyCard(entry.proposal.nick, entry.card.textarea.value);
+    }
+  } finally {
+    state.isApplyingAll = false;
+    updateApplyAll();
   }
 });
 
