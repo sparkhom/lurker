@@ -14,6 +14,9 @@ COPY vue_client/ ./
 # so the shared/ tree has to land at /app/shared regardless of which stage
 # is doing the work.
 COPY shared/ /app/shared/
+# vue_client/tsconfig.json extends ../tsconfig.base.json; Vite reads the
+# resolved tsconfig during build, so the base file has to land at /app too.
+COPY tsconfig.base.json /app/tsconfig.base.json
 RUN npm run build
 
 # Stage 2: Install server dependencies
