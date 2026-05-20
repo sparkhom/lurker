@@ -45,6 +45,7 @@ RUN apt-get update \
 
 COPY --from=server-deps /app/node_modules ./node_modules
 COPY package*.json ./
+COPY tsconfig*.json ./
 COPY server/ ./server/
 COPY shared/ ./shared/
 COPY --from=vue-builder /app/vue_client/dist ./vue_client/dist
@@ -53,5 +54,7 @@ RUN mkdir -p /app/data
 
 EXPOSE 8015
 
+# The server runs directly from TypeScript via tsx (no build step). tsx is a
+# runtime dependency, so it lands in the production node_modules above.
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["node", "server/server.js"]
+CMD ["node_modules/.bin/tsx", "server/server.ts"]

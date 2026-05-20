@@ -13,7 +13,7 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [20.x]
+        node-version: [22.x]
 
     steps:
       - name: Checkout code
@@ -30,6 +30,18 @@ jobs:
 
       - name: Install client dependencies
         run: npm install --prefix vue_client
+
+      - name: Type-check (server)
+        run: npm run typecheck
+
+      - name: Type-check (client)
+        run: npm run typecheck:client
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Check formatting
+        run: npm run format:check
 
       - name: Run tests
         run: npm test
