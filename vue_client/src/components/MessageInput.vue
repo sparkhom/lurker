@@ -399,9 +399,11 @@ function tokenAtCursor(
 
 // True when `before` (the text preceding a token) sits at the start of a
 // logical line — nothing but whitespace since the last newline, or the very
-// start of the input. A nick completed here is being *addressed*, so callers
-// append ': ' instead of a bare space. Shared by Tab-completion and both
-// @-driven selectors so the three paths agree, including on multi-line drafts.
+// start of the input. Callers use this to detect a nick that's being
+// *addressed* and so wants an opening ': '. Shared by Tab-completion and both
+// @-driven selectors so all three detect line starts identically, including
+// on multi-line drafts; what each appends *off* a line start still differs
+// (see the call sites).
 function isAtLineStart(before: string): boolean {
   return /(^|\n)\s*$/.test(before);
 }

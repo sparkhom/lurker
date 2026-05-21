@@ -105,6 +105,12 @@ function moveActive(delta: number) {
   const n = rows.value.length;
   if (n === 0) return;
   activeIndex.value = Math.min(Math.max(activeIndex.value + delta, 0), n - 1);
+  // Keyboard moves can land on a row scrolled out of the panel — pull it
+  // back in. Mouse hover also sets activeIndex (see @mouseenter) but a
+  // hovered row is necessarily already visible, so the scroll lives here
+  // rather than in a blanket watch(activeIndex) that would also fire — as a
+  // wasted no-op — on every cursor move across the list.
+  nextTick(scrollActiveIntoView);
 }
 
 function confirmActive() {
@@ -179,8 +185,6 @@ watch(rows, () => {
   activeIndex.value = 0;
   nextTick(scrollActiveIntoView);
 });
-
-watch(activeIndex, () => nextTick(scrollActiveIntoView));
 
 watch(
   () => props.open,
