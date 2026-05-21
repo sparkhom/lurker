@@ -203,7 +203,8 @@ if [ -n "$LURKER_DOMAIN" ]; then
   log "Lurker is running. If a DNS A record for ${LURKER_DOMAIN} isn't already"
   log "pointing at this droplet's IP, add it now — Caddy retries Let's Encrypt"
   log "until it resolves, then https://${LURKER_DOMAIN} serves over HTTPS."
-  log "To enable passkeys / web push, see SELF_HOSTING.md (Optional features)."
+  log "Passkeys and web push are already configured for this HTTPS deploy —"
+  log "just opt in per device from Lurker's settings once you've signed in."
 else
   PUBLIC_IP=$(curl -fsS --max-time 5 \
     http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address \

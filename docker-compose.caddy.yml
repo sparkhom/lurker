@@ -39,6 +39,16 @@ services:
     # the base file's `8015:8015` host binding is dropped here — Lurker is
     # then reachable only through Caddy, i.e. only over HTTPS.
     ports: !reset []
+    # A public domain with HTTPS is exactly what passkeys (WebAuthn) and web
+    # push need, so configure both here from the same .env values Caddy uses.
+    # An HTTPS deployment is then feature-complete with no further admin —
+    # users just opt in per device from Lurker's settings. These entries
+    # merge into the environment list from the base compose file.
+    environment:
+      - WEBAUTHN_RP_ID=${LURKER_DOMAIN}
+      - WEBAUTHN_RP_NAME=Lurker
+      - WEBAUTHN_ORIGIN=https://${LURKER_DOMAIN}
+      - VAPID_SUBJECT=mailto:${ACME_EMAIL:-admin@${LURKER_DOMAIN}}
 
 volumes:
   caddy_data:

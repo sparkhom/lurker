@@ -55,6 +55,8 @@ For a public, HTTPS-enabled Lurker on a fresh droplet — no SSH required:
 
 You don't need the droplet's IP before creating it: the droplet boots and starts Caddy _before_ DNS exists, and Caddy keeps retrying Let's Encrypt until your `A` record resolves — so HTTPS comes up automatically a few minutes after you set the DNS record. (If you'd rather the certificate be ready the moment the droplet boots, reserve a [Reserved IP](https://docs.digitalocean.com/products/networking/reserved-ips/) first, point DNS at it, then create the droplet and assign that Reserved IP.)
 
+Passkeys and web push are configured automatically on HTTPS deployments — the deploy derives the WebAuthn and push settings from your domain and contact email — so you can enable them per device from Lurker's in-app settings without touching the server.
+
 Leave `LURKER_DOMAIN` empty for a plain-HTTP deployment instead — skip the DNS steps and open `http://<droplet-ip>:8015` directly. Deploy progress is logged to `/var/log/lurker-deploy.log` on the droplet.
 
 **Updating:** SSH in (or open the DigitalOcean web console) and run:
