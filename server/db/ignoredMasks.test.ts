@@ -51,6 +51,6 @@ describe('listAllForUser', () => {
     mod.addMask({ userId: user.id, networkId: net1!.id, mask: '*!*@spam.example' });
     mod.addMask({ userId: user.id, networkId: net2!.id, mask: 'trolla' });
     const all = mod.listAllForUser(user.id);
-    expect(all.map((r) => r.mask).sort()).toEqual(['*!*@spam.example', 'trolla']);
+    expect(all.map((r) => r.mask).toSorted()).toEqual(['*!*@spam.example', 'trolla']);
   });
 });

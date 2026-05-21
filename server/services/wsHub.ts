@@ -14,7 +14,7 @@ import ircManager from './ircManager.js';
 import settingsService from './settingsService.js';
 import highlightRulesService from './highlightRulesService.js';
 import draftsService from './draftsService.js';
-import systemLog from './systemLog.js';
+import * as systemLog from './systemLog.js';
 import * as pushService from './pushService.js';
 import { matchesAny as matchesIgnoreMask } from './maskMatch.js';
 import { listMasks as listIgnoredMasks } from '../db/ignoredMasks.js';
@@ -87,7 +87,9 @@ function effectiveSetting(userId: number, key: string): unknown {
 function isValidTimeZone(tz: unknown): tz is string {
   if (!tz || typeof tz !== 'string') return false;
   try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    // Called without `new` purely for validation — it throws RangeError on an
+    // unknown time zone, which the catch below turns into a false return.
+    Intl.DateTimeFormat('en-US', { timeZone: tz });
     return true;
   } catch {
     return false;
@@ -122,13 +124,14 @@ function tzOffsetMinutes(date: Date, timeZone: string | null): number {
   return Math.round((asUTC - date.getTime()) / 60000);
 }
 
+const pad = (n: number) => String(n).padStart(2, '0');
+
 // "afk since 2026-05-09 15:30:00-0500" — mirrors screen_away.py's default
 // time_format. Renders in `timeZone` when provided, otherwise server local.
 function fmtAwayTimestamp(date: Date, timeZone: unknown): string {
   const tz = isValidTimeZone(timeZone) ? timeZone : null;
   const p = wallClockParts(date, tz);
   const off = tzOffsetMinutes(date, tz);
-  const pad = (n: number) => String(n).padStart(2, '0');
   const sign = off >= 0 ? '+' : '-';
   const aoff = Math.abs(off);
   return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}${sign}${pad(Math.floor(aoff / 60))}${pad(aoff % 60)}`;
@@ -257,6 +260,18 @@ function fanOut(userId: number, payload: WsPayload, opts: FanOutOpts = {}): void
 // the private fanOut; named to make the cross-module call site read clearly.
 export function fanOutToUser(userId: number, payload: WsPayload, opts: FanOutOpts = {}): void {
   fanOut(userId, payload, opts);
+}
+
+function parseSinceParam(rawUrl: string): number {
+  try {
+    const url = new URL(rawUrl, 'http://localhost');
+    const raw = url.searchParams.get('since');
+    if (!raw) return 0;
+    const n = Number.parseInt(raw, 10);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  } catch (_) {
+    return 0;
+  }
 }
 
 export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
@@ -557,18 +572,6 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
     clearAutoAwayTimer(userId);
     systemLog.dropUser(userId);
   });
-
-  function parseSinceParam(rawUrl: string): number {
-    try {
-      const url = new URL(rawUrl, 'http://localhost');
-      const raw = url.searchParams.get('since');
-      if (!raw) return 0;
-      const n = Number.parseInt(raw, 10);
-      return Number.isFinite(n) && n > 0 ? n : 0;
-    } catch (_) {
-      return 0;
-    }
-  }
 
   function authenticateRequest(req: IncomingMessage): User | null | undefined {
     const header = req.headers.cookie;

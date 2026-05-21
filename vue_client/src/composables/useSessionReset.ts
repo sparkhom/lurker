@@ -22,7 +22,7 @@ import { resetScrollState } from './useScrollState.js';
 export function resetSession(): void {
   resetSocket();
   const buffers = useBuffersStore();
-  buffers._resetTimers();
+  buffers.resetTimers();
   buffers.$reset();
   useNetworksStore().$reset();
   useSettingsStore().$reset();
@@ -30,7 +30,7 @@ export function resetSession(): void {
   useHighlightRulesStore().$reset();
   useInputHistoryStore().$reset();
   const drafts = useDraftStore();
-  drafts._resetTimers();
+  drafts.resetTimers();
   drafts.$reset();
   usePushSubscriptionsStore().$reset();
   usePinsStore().$reset();

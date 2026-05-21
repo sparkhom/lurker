@@ -98,13 +98,13 @@ const ignoreGroups = computed<IgnoreGroup[]>(() => {
       masks,
     });
   }
-  return groups.sort((a, b) => a.networkName.localeCompare(b.networkName));
+  return groups.toSorted((a, b) => a.networkName.localeCompare(b.networkName));
 });
 
 const ignoreNetworkOptions = computed<NetworkOption[]>(() => {
   return (networksStore.networks || [])
     .map((n) => ({ id: n.id, name: n.name }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .toSorted((a, b) => a.name.localeCompare(b.name));
 });
 
 const newIgnoreNetworkId = ref<number | null>(null);

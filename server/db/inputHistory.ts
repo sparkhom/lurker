@@ -30,5 +30,5 @@ export function listRecent(
 ): string[] {
   return (listRecentStmt.all(userId, networkId, target, limit) as Array<{ text: string }>)
     .map((row) => row.text)
-    .reverse();
+    .toReversed();
 }

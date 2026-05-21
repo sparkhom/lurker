@@ -135,6 +135,6 @@ export function callVerb(
 
 // Test-only: wipe the registry between cases. Real code should never call
 // this; the registry is intended to be populated once at process start.
-export function __resetForTests(): void {
+export function resetForTests(): void {
   verbs.clear();
 }

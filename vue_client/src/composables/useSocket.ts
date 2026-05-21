@@ -35,6 +35,10 @@ export interface SocketAPI {
 type AckResolver = (result: AckResult) => void;
 
 let socket: WebSocket | null = null;
+// Scopes the current socket's event listeners. Aborting it detaches all of
+// them at once — used by resetSocket to strip handlers before closing so the
+// 'close' reconnect arm can't fire.
+let socketListeners: AbortController | null = null;
 const connected = ref(false);
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 const openHandlers = new Set<() => void>();
@@ -445,49 +449,63 @@ function open() {
   )
     return;
   socket = new WebSocket(wsUrl());
-  socket.onopen = () => {
-    connected.value = true;
-    // Detached buffers won't survive a reconnect cleanly — the incoming
-    // snapshot/backlog would otherwise be short-circuited by replaceBacklog's
-    // detached guard, leaving the slice stale and the buffer cut off from
-    // live. Drop the detach (and wipe each slice) before any server message
-    // can arrive on the new socket so the snapshot reseeds them as live.
-    // Synchronous: messages from the new socket arrive on later event-loop
-    // turns, so the reseed sees the cleared state.
-    try {
-      const buffers = useBuffersStore();
-      for (const buf of buffers.list) {
-        if (buf.detached) {
-          buffers.clearDetached(buf.networkId, buf.target, { wipeMessages: true });
+  socketListeners = new AbortController();
+  const opts = { signal: socketListeners.signal };
+  socket.addEventListener(
+    'open',
+    () => {
+      connected.value = true;
+      // Detached buffers won't survive a reconnect cleanly — the incoming
+      // snapshot/backlog would otherwise be short-circuited by replaceBacklog's
+      // detached guard, leaving the slice stale and the buffer cut off from
+      // live. Drop the detach (and wipe each slice) before any server message
+      // can arrive on the new socket so the snapshot reseeds them as live.
+      // Synchronous: messages from the new socket arrive on later event-loop
+      // turns, so the reseed sees the cleared state.
+      try {
+        const buffers = useBuffersStore();
+        for (const buf of buffers.list) {
+          if (buf.detached) {
+            buffers.clearDetached(buf.networkId, buf.target, { wipeMessages: true });
+          }
+        }
+      } catch (_) {
+        /* store not yet initialized; nothing to clear */
+      }
+      for (const handler of openHandlers) {
+        try {
+          handler();
+        } catch (_) {
+          /* ignore */
         }
       }
-    } catch (_) {
-      /* store not yet initialized; nothing to clear */
-    }
-    for (const handler of openHandlers) {
-      try {
-        handler();
-      } catch (_) {
-        /* ignore */
+    },
+    opts,
+  );
+  socket.addEventListener('message', (ev) => handleMessage(ev.data), opts);
+  socket.addEventListener(
+    'close',
+    () => {
+      connected.value = false;
+      socket = null;
+      // Anything we were waiting on is gone with the socket. Settle every
+      // pending ACK as a disconnect so callers can surface the failure now
+      // instead of waiting out the timeout.
+      failAllPendingAcks('disconnected');
+      const auth = useAuthStore();
+      if (auth.user) {
+        reconnectTimer = setTimeout(open, 2000);
       }
-    }
-  };
-  socket.onmessage = (ev) => handleMessage(ev.data);
-  socket.onclose = () => {
-    connected.value = false;
-    socket = null;
-    // Anything we were waiting on is gone with the socket. Settle every
-    // pending ACK as a disconnect so callers can surface the failure now
-    // instead of waiting out the timeout.
-    failAllPendingAcks('disconnected');
-    const auth = useAuthStore();
-    if (auth.user) {
-      reconnectTimer = setTimeout(open, 2000);
-    }
-  };
-  socket.onerror = () => {
-    if (socket) socket.close();
-  };
+    },
+    opts,
+  );
+  socket.addEventListener(
+    'error',
+    () => {
+      if (socket) socket.close();
+    },
+    opts,
+  );
 }
 
 function send(payload: Record<string, unknown>): boolean {
@@ -526,21 +544,26 @@ export function socketSendWithAck(payload: Record<string, unknown>): Promise<Ack
   const clientId = makeClientId();
   const wire = { ...payload, clientId };
   return new Promise<AckResult>((resolve) => {
-    const timer = setTimeout(() => {
-      if (pendingAcks.delete(clientId)) resolve({ ok: false, error: 'timeout' });
-    }, ACK_TIMEOUT_MS);
-    pendingAcks.set(clientId, (result) => {
+    // Three racing paths can finish this send — server ACK, timeout, or a
+    // synchronous send failure. settle() lets whichever fires first win and
+    // makes the rest no-ops.
+    let settled = false;
+    const settle = (result: AckResult) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       pendingAcks.delete(clientId);
+      // The `settled` flag above already makes this resolve run exactly once;
+      // the linter just can't see the guard across settle()'s call sites.
+      // eslint-disable-next-line promise/no-multiple-resolved
       resolve(result);
-    });
+    };
+    const timer = setTimeout(() => settle({ ok: false, error: 'timeout' }), ACK_TIMEOUT_MS);
+    pendingAcks.set(clientId, settle);
     try {
       socket!.send(JSON.stringify(wire));
     } catch (_) {
-      if (pendingAcks.delete(clientId)) {
-        clearTimeout(timer);
-        resolve({ ok: false, error: 'disconnected' });
-      }
+      settle({ ok: false, error: 'disconnected' });
     }
   });
 }
@@ -554,10 +577,9 @@ export function resetSocket(): void {
     reconnectTimer = null;
   }
   if (socket) {
-    socket.onopen = null;
-    socket.onmessage = null;
-    socket.onclose = null;
-    socket.onerror = null;
+    // Detach every listener at once so the 'close' reconnect arm can't fire.
+    socketListeners?.abort();
+    socketListeners = null;
     try {
       socket.close();
     } catch (_) {

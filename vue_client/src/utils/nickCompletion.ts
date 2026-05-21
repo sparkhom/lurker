@@ -76,7 +76,7 @@ export function buildNickCandidates(
 
   const out: NickCandidate[] = [];
 
-  const speakers = Object.values(buf.speakers || {}).sort((a, b) => b.lastTime - a.lastTime);
+  const speakers = Object.values(buf.speakers || {}).toSorted((a, b) => b.lastTime - a.lastTime);
   for (const s of speakers) {
     const lc = s.nick.toLowerCase();
     if (seen.has(lc)) continue;
@@ -87,7 +87,7 @@ export function buildNickCandidates(
     out.push({ nick: s.nick, recent: true });
   }
 
-  const sortedMembers = memberNames.slice().sort((a, b) => a.localeCompare(b));
+  const sortedMembers = memberNames.toSorted((a, b) => a.localeCompare(b));
   for (const n of sortedMembers) {
     const lc = n.toLowerCase();
     if (seen.has(lc)) continue;

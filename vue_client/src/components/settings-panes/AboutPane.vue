@@ -43,7 +43,7 @@
 
 <script setup lang="ts">
 // Build-time constant injected by vite.config.js (define).
-const appVersion = __APP_VERSION__;
+const appVersion = APP_VERSION;
 </script>
 
 <style src="./panes.css"></style>

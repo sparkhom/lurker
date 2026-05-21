@@ -29,7 +29,7 @@ export default defineConfig(({ mode }) => {
     // Build-time constant so the About panel can show the app version without
     // an API round-trip.
     define: {
-      __APP_VERSION__: JSON.stringify(pkg.version),
+      APP_VERSION: JSON.stringify(pkg.version),
     },
     server: {
       host: lanHost ? true : host,

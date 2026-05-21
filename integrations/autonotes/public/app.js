@@ -70,11 +70,11 @@ function showView(name) {
 // ---------------- Router ----------------
 
 function route() {
-  const h = location.hash || '';
-  if (h.startsWith('#review/')) {
-    const id = h.slice('#review/'.length);
+  const hash = location.hash || '';
+  if (hash.startsWith('#review/')) {
+    const id = hash.slice('#review/'.length);
     enterReview(id);
-  } else if (h === '#scan') {
+  } else if (hash === '#scan') {
     enterScan();
   } else {
     enterConfig();
@@ -146,6 +146,12 @@ async function enterScan() {
   }
 }
 
+// Stable handler ref so populateNetworks can remove-then-add it idempotently
+// — the function runs on every visit to the Scan view.
+function onNetworkChange() {
+  loadBuffers(null);
+}
+
 function populateNetworks(lastNetworkId, lastTarget, lastDepth) {
   const netSel = els.scanForm.networkId;
   netSel.innerHTML = '';
@@ -159,10 +165,9 @@ function populateNetworks(lastNetworkId, lastTarget, lastDepth) {
     netSel.value = String(lastNetworkId);
   }
   els.scanForm.depth.value = lastDepth || 200;
-  // Assign rather than addEventListener — populateNetworks() runs on every
-  // visit to the Scan view, and addEventListener would stack a new handler
-  // each time.
-  netSel.onchange = () => loadBuffers(null);
+  // remove-then-add so repeated visits to the Scan view don't stack handlers.
+  netSel.removeEventListener('change', onNetworkChange);
+  netSel.addEventListener('change', onNetworkChange);
   loadBuffers(lastTarget || null);
 }
 

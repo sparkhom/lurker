@@ -54,6 +54,11 @@ export function setupTestDb(suffix = ''): TestDbContext {
   };
 }
 
+const errorHandler: ErrorRequestHandler = (err, _req, res, next) => {
+  if (res.headersSent) return next(err);
+  res.status(500).json({ error: (err as Error).message || 'internal error' });
+};
+
 // Build a minimal Express app that mirrors how server.js wires up middleware:
 // JSON body parsing, cookie-parser keyed to the test session secret, and the
 // requested router(s) mounted at their paths. routerMounts is { '/path':
@@ -66,10 +71,6 @@ export function createTestApp(routerMounts: Record<string, Router>): Express {
   for (const [mount, router] of Object.entries(routerMounts)) {
     app.use(mount, router);
   }
-  const errorHandler: ErrorRequestHandler = (err, _req, res, next) => {
-    if (res.headersSent) return next(err);
-    res.status(500).json({ error: (err as Error).message || 'internal error' });
-  };
   app.use(errorHandler);
   return app;
 }

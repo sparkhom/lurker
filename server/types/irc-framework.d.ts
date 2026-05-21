@@ -143,8 +143,8 @@ declare module 'irc-framework' {
 
   // Default export in the package is an object with a `Client` property.
   // ircConnection.ts imports it as: import IRC from 'irc-framework'
-  const _default: { Client: typeof Client; ircLineParser: typeof ircLineParser };
-  export default _default;
+  const defaultExport: { Client: typeof Client; ircLineParser: typeof ircLineParser };
+  export default defaultExport;
 }
 
 declare module 'irc-framework/src/linebreak.js' {

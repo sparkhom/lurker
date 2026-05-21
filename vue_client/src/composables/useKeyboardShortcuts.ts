@@ -16,6 +16,14 @@ export interface KeyboardShortcutsOptions {
   onScrollMessages?: (direction: number) => void;
 }
 
+function markAllRead(): void {
+  socketSend({ type: 'mark-all-read' });
+}
+
+function isCmd(e: KeyboardEvent): boolean {
+  return e.metaKey || e.ctrlKey;
+}
+
 // IRCCloud-style global shortcuts. Wired at the document level so they fire
 // even when focus is in the message input — preventDefault stops them from
 // also producing input-side effects (cursor by paragraph on Mac, etc.).
@@ -76,14 +84,6 @@ export function useKeyboardShortcuts({
     const next = (idx + delta + list.length) % list.length;
     const target = list[next];
     if (target) buffers.activate(target.networkId, target.target);
-  }
-
-  function markAllRead(): void {
-    socketSend({ type: 'mark-all-read' });
-  }
-
-  function isCmd(e: KeyboardEvent): boolean {
-    return e.metaKey || e.ctrlKey;
   }
 
   function onKeydown(e: KeyboardEvent): void {

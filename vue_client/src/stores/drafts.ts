@@ -16,7 +16,7 @@ function key(networkId: number | string, target: string) {
 
 // Debounce timers and the unflushed-pending tracker live module-local: they
 // aren't reactive state, and keeping them out of Pinia means $reset doesn't
-// have to handle non-serializable Map entries. `_resetTimers()` clears them
+// have to handle non-serializable Map entries. `resetTimers()` clears them
 // in concert with $reset on logout.
 const flushTimers = new Map<string, ReturnType<typeof setTimeout>>(); // key -> setTimeout id
 const pending = new Map<string, { networkId: number | string; target: string }>(); // key -> { networkId, target }
@@ -87,21 +87,21 @@ export const useDraftStore = defineStore('drafts', {
       if (text.length > 0) this.drafts[k] = text;
       else delete this.drafts[k];
       pending.set(k, { networkId, target });
-      this._scheduleFlush(networkId, target);
+      this.scheduleFlush(networkId, target);
     },
     // Force-flush a single buffer's pending write to the server immediately.
     // Called on buffer-switch, input blur, and right before clearing on send.
     flushBuffer(networkId: number | string, target: string) {
       const k = key(networkId, target);
       if (!pending.has(k)) return;
-      this._sendForBuffer(networkId, target);
+      this.sendForBuffer(networkId, target);
     },
     // Drop in-memory state for a closed buffer. The server-side row is also
     // cleared by wsHub's close-buffer handler, so no flush is needed.
     drop(networkId: number | string, target: string) {
       const k = key(networkId, target);
       delete this.drafts[k];
-      this._clearTimer(k);
+      this.clearTimer(k);
       pending.delete(k);
     },
     // Beacon path used on tab close: ship every un-flushed buffer in one POST
@@ -113,7 +113,7 @@ export const useDraftStore = defineStore('drafts', {
       for (const [k, ref] of pending) {
         const body = this.drafts[k] || '';
         drafts.push({ networkId: ref.networkId, target: ref.target, body });
-        this._clearTimer(k);
+        this.clearTimer(k);
       }
       pending.clear();
       try {
@@ -129,31 +129,31 @@ export const useDraftStore = defineStore('drafts', {
     },
     // Pinia's $reset wipes `drafts`, but the module-level timers/pending Maps
     // are out of band — useSessionReset calls this so they're cleared too.
-    _resetTimers() {
+    resetTimers() {
       for (const id of flushTimers.values()) clearTimeout(id);
       flushTimers.clear();
       pending.clear();
     },
-    _scheduleFlush(networkId: number | string, target: string) {
+    scheduleFlush(networkId: number | string, target: string) {
       const k = key(networkId, target);
-      this._clearTimer(k);
+      this.clearTimer(k);
       const id = setTimeout(() => {
         flushTimers.delete(k);
-        this._sendForBuffer(networkId, target);
+        this.sendForBuffer(networkId, target);
       }, FLUSH_DEBOUNCE_MS);
       flushTimers.set(k, id);
     },
-    _clearTimer(k: string) {
+    clearTimer(k: string) {
       const id = flushTimers.get(k);
       if (id) {
         clearTimeout(id);
         flushTimers.delete(k);
       }
     },
-    _sendForBuffer(networkId: number | string, target: string) {
+    sendForBuffer(networkId: number | string, target: string) {
       const k = key(networkId, target);
       pending.delete(k);
-      this._clearTimer(k);
+      this.clearTimer(k);
       const body = this.drafts[k] || '';
       if (body.length > 0) {
         socketSend({ type: 'draft-set', networkId, target, body });

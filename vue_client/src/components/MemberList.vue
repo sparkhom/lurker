@@ -157,7 +157,7 @@ const sorted = computed(() => {
         return !ignores.isIgnored(networkId, nick, userhost ?? '');
       })
     : list;
-  return [...filtered].sort((a, b) => {
+  return filtered.toSorted((a, b) => {
     const pa = PREFIX_ORDER.indexOf(prefixOf(a));
     const pb = PREFIX_ORDER.indexOf(prefixOf(b));
     if (pa !== pb) return pa - pb;

@@ -65,11 +65,11 @@ export function apiMultipart<T = any>(
     xhr.open('POST', url, true);
     xhr.withCredentials = true;
     xhr.responseType = 'text';
-    xhr.upload.onprogress = (e) => {
+    xhr.upload.addEventListener('progress', (e) => {
       if (!onProgress || !e.lengthComputable) return;
       onProgress(Math.min(100, Math.round((e.loaded / e.total) * 100)));
-    };
-    xhr.onload = () => {
+    });
+    xhr.addEventListener('load', () => {
       const text = xhr.responseText || '';
       let data: any = null;
       if (text) {
@@ -88,9 +88,9 @@ export function apiMultipart<T = any>(
         err.data = data;
         reject(err);
       }
-    };
-    xhr.onerror = () => reject(new Error('network error'));
-    xhr.onabort = () => reject(new Error('upload aborted'));
+    });
+    xhr.addEventListener('error', () => reject(new Error('network error')));
+    xhr.addEventListener('abort', () => reject(new Error('upload aborted')));
     xhr.send(formData);
   });
 }

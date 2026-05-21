@@ -150,7 +150,7 @@ describe('searchMessages', () => {
     chat(net!.id, '#a', 'carol', 'another deadline slipped');
 
     const hits = searchMessages(user.id, { query: 'deadline' });
-    expect(hits.map((m) => m.text).sort()).toEqual([
+    expect(hits.map((m) => m.text).toSorted()).toEqual([
       'another deadline slipped',
       'the release deadline is friday',
     ]);
@@ -241,7 +241,7 @@ describe('searchMessages', () => {
     chat(net!.id, '#a', 'bob', 'third');
 
     const hits = searchMessages(user.id, { nick: 'alice' });
-    expect(hits.map((m) => m.text).sort()).toEqual(['first', 'second']);
+    expect(hits.map((m) => m.text).toSorted()).toEqual(['first', 'second']);
   });
 
   it('returns nothing when there is no free text and no filter', () => {

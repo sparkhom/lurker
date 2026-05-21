@@ -33,9 +33,9 @@ describe('computeFallbackNick', () => {
   });
 });
 
-describe('formatServerNumeric', () => {
-  const fmt = (line: string) => formatServerNumeric(ircLineParser(line));
+const fmt = (line: string) => formatServerNumeric(ircLineParser(line));
 
+describe('formatServerNumeric', () => {
   it('renders RPL_WELCOME (001) trailing text', () => {
     expect(
       fmt(

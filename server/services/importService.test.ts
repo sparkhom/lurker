@@ -144,7 +144,7 @@ describe('importFromZipBuffer — roundtrip', () => {
     const bobChannels = db
       .prepare('SELECT * FROM channels WHERE network_id = ?')
       .all(bobNets[0].id) as Array<{ name: string }>;
-    expect(bobChannels.map((c) => c.name).sort()).toEqual(['#dev', '#general']);
+    expect(bobChannels.map((c) => c.name).toSorted()).toEqual(['#dev', '#general']);
 
     const bobMessages = db
       .prepare('SELECT * FROM messages WHERE network_id = ? ORDER BY id ASC')
@@ -347,11 +347,45 @@ describe('importFromZipBuffer — roundtrip', () => {
 // then compared row-for-row across the two accounts. Columns that are
 // expected to differ (rekeyed FKs, autoincrement PKs, last_seen_at on users)
 // are projected out so the comparison fails *only* if the payload diverged.
-describe('importFromZipBuffer — end-to-end equivalence', () => {
-  function uniqueUsername(prefix: string): string {
-    return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-  }
+function uniqueUsername(prefix: string): string {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
 
+// Internal helper type to access common properties across all table defs.
+type AnyTableDef = {
+  mode: string;
+  scope: string;
+  columns: string[];
+  pk?: string;
+  fkRekey?: Record<string, string>;
+  blobColumns?: string[];
+};
+
+// Columns that legitimately differ between the source and target accounts.
+// Per-table FK-rekey columns are taken from the registry; PKs of
+// autoincrement tables also differ; matched_rule_id can legitimately turn
+// to NULL on import if its rule wasn't carried over (it shouldn't here).
+function projectionFor(_table: string, def: AnyTableDef): string[] {
+  const skip = new Set<string>();
+  if (def.pk) skip.add(def.pk);
+  if (def.fkRekey) for (const col of Object.keys(def.fkRekey)) skip.add(col);
+  const blobColumns = def.blobColumns ?? [];
+  return def.columns.filter((c) => !skip.has(c) && !blobColumns.includes(c));
+}
+
+// Sort rows deterministically using their stable (non-rekeyed) columns so
+// the comparison doesn't depend on insertion order or autoincrement ids.
+function sortKey(row: Record<string, unknown>, keys: string[]): string {
+  return keys
+    .map((k) => {
+      const v = row[k];
+      if (v instanceof Buffer) return v.toString('base64');
+      return JSON.stringify(v ?? null);
+    })
+    .join('|');
+}
+
+describe('importFromZipBuffer — end-to-end equivalence', () => {
   // Seeds every table declared as 'export' or 'partial' so the equivalence
   // test exercises the full registry, not a subset.
   function seedComplete(): User {
@@ -465,28 +499,6 @@ describe('importFromZipBuffer — end-to-end equivalence', () => {
     return user;
   }
 
-  // Internal helper type to access common properties across all table defs.
-  type AnyTableDef = {
-    mode: string;
-    scope: string;
-    columns: string[];
-    pk?: string;
-    fkRekey?: Record<string, string>;
-    blobColumns?: string[];
-  };
-
-  // Columns that legitimately differ between the source and target accounts.
-  // Per-table FK-rekey columns are taken from the registry; PKs of
-  // autoincrement tables also differ; matched_rule_id can legitimately turn
-  // to NULL on import if its rule wasn't carried over (it shouldn't here).
-  function projectionFor(_table: string, def: AnyTableDef): string[] {
-    const skip = new Set<string>();
-    if (def.pk) skip.add(def.pk);
-    if (def.fkRekey) for (const col of Object.keys(def.fkRekey)) skip.add(col);
-    const blobColumns = def.blobColumns ?? [];
-    return def.columns.filter((c) => !skip.has(c) && !blobColumns.includes(c));
-  }
-
   function rowsFor(userId: number, table: string, def: AnyTableDef): Record<string, unknown>[] {
     let sql: string;
     switch (def.scope) {
@@ -510,18 +522,6 @@ describe('importFromZipBuffer — end-to-end equivalence', () => {
     return db.prepare(sql).all(userId) as Record<string, unknown>[];
   }
 
-  // Sort rows deterministically using their stable (non-rekeyed) columns so
-  // the comparison doesn't depend on insertion order or autoincrement ids.
-  function sortKey(row: Record<string, unknown>, keys: string[]): string {
-    return keys
-      .map((k) => {
-        const v = row[k];
-        if (v instanceof Buffer) return v.toString('base64');
-        return JSON.stringify(v ?? null);
-      })
-      .join('|');
-  }
-
   function projectRows(
     rows: Record<string, unknown>[],
     projection: string[],
@@ -532,7 +532,7 @@ describe('importFromZipBuffer — end-to-end equivalence', () => {
         for (const c of projection) out[c] = row[c];
         return out;
       })
-      .sort((a, b) => sortKey(a, projection).localeCompare(sortKey(b, projection)));
+      .toSorted((a, b) => sortKey(a, projection).localeCompare(sortKey(b, projection)));
   }
 
   // upload_history thumbnails ship as separate zip entries, but on the
@@ -543,7 +543,7 @@ describe('importFromZipBuffer — end-to-end equivalence', () => {
       .all(userId) as Array<{ thumbnail: Buffer | null }>;
     return rows
       .map((r) => (r.thumbnail ? Buffer.from(r.thumbnail).toString('base64') : null))
-      .sort();
+      .toSorted();
   }
 
   it('round-trips every exported table with payload-identical content', async () => {

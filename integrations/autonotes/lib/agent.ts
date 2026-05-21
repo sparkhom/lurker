@@ -396,7 +396,9 @@ function extractProposals(content: Anthropic.ContentBlock[]): Proposal[] {
   try {
     parsed = JSON.parse(jsonStr);
   } catch (err) {
-    throw new Error(`Agent did not return parseable JSON: ${(err as Error).message}`);
+    throw new Error(`Agent did not return parseable JSON: ${(err as Error).message}`, {
+      cause: err,
+    });
   }
   const p = parsed as { proposals?: unknown[] } | null;
   if (!p || !Array.isArray(p.proposals)) {

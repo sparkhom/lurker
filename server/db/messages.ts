@@ -167,7 +167,7 @@ export function listMessages(
     : `SELECT * FROM messages WHERE network_id = ? AND target = ? ORDER BY id DESC LIMIT ?`;
   const params = before ? [networkId, target, before, limit] : [networkId, target, limit];
   const rows = db.prepare(sql).all(...params) as MessageRow[];
-  return rows.map(rowToEvent).reverse();
+  return rows.map(rowToEvent).toReversed();
 }
 
 // Bounded context window around an arbitrary message id. Used by the

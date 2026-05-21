@@ -536,7 +536,7 @@ export const useBuffersStore = defineStore('buffers', {
     // every buffer (and therefore every typing indicator), but the
     // module-level Map of pending setTimeouts isn't part of Pinia state —
     // clear it explicitly so timers don't linger after logout.
-    _resetTimers() {
+    resetTimers() {
       for (const id of typingTimers.values()) clearTimeout(id);
       typingTimers.clear();
     },

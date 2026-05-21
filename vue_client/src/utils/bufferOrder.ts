@@ -74,7 +74,7 @@ export function flattenBufferOrder({
 
     const unpinned = all
       .filter((b) => !isServerTarget(b.target) && !pinnedSet.has(b.target))
-      .sort((a, b) => {
+      .toSorted((a, b) => {
         const oa = bufferOrder(a.target);
         const ob = bufferOrder(b.target);
         if (oa !== ob) return oa - ob;

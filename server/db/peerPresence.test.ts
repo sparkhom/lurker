@@ -50,7 +50,7 @@ describe('writePeerState / getPeerPresence', () => {
 describe('listPeerPresenceForNetwork', () => {
   it('returns every peer for the network', () => {
     const list = pp.listPeerPresenceForNetwork(net!.id);
-    const nicks = list.map((p) => p!.nick).sort();
+    const nicks = list.map((p) => p!.nick).toSorted();
     expect(nicks).toEqual(expect.arrayContaining(['Carol', 'bob']));
   });
 });

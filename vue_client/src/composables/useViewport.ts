@@ -39,6 +39,14 @@ export function useViewport(): ViewportState {
   return { isMobile };
 }
 
+function update(): void {
+  const vv = window.visualViewport;
+  const h = vv ? vv.height : window.innerHeight;
+  const y = vv ? vv.offsetTop : 0;
+  document.documentElement.style.setProperty('--viewport-h', `${h}px`);
+  document.documentElement.style.setProperty('--viewport-y', `${y}px`);
+}
+
 // visualViewport tracks the actual visible area, which on iOS Safari shrinks
 // when the soft keyboard opens. We write both:
 //
@@ -55,13 +63,6 @@ export function useViewport(): ViewportState {
 // Together with position: fixed on .mchat, these defeat the iOS quirk where
 // focusing an input pushes the whole app up and leaves a gray gutter below.
 export function useVisualViewportHeight(): void {
-  function update(): void {
-    const vv = window.visualViewport;
-    const h = vv ? vv.height : window.innerHeight;
-    const y = vv ? vv.offsetTop : 0;
-    document.documentElement.style.setProperty('--viewport-h', `${h}px`);
-    document.documentElement.style.setProperty('--viewport-y', `${y}px`);
-  }
   onMounted(() => {
     if (typeof window === 'undefined') return;
     update();

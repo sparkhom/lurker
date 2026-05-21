@@ -226,7 +226,7 @@ function unpinnedBufs(networkId: number): Buffer[] {
   return buffers
     .forNetwork(networkId)
     .filter((b) => !isServerBuffer(b) && !pinnedSet.has(b.target))
-    .sort((a, b) => {
+    .toSorted((a, b) => {
       const oa = bufferOrder(a);
       const ob = bufferOrder(b);
       if (oa !== ob) return oa - ob;

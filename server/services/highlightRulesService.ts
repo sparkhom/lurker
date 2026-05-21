@@ -78,7 +78,7 @@ class HighlightRulesService extends EventEmitter {
       case_sensitive: !!fields.case_sensitive,
       enabled: fields.enabled !== false,
     });
-    this._invalidate(userId);
+    this.invalidate(userId);
     return { ok: true, rule };
   }
 
@@ -120,7 +120,7 @@ class HighlightRulesService extends EventEmitter {
       if (regexErr) return { ok: false, error: regexErr };
     }
     const rule = updateRule(id, userId, update);
-    this._invalidate(userId);
+    this.invalidate(userId);
     return { ok: true, rule };
   }
 
@@ -131,7 +131,7 @@ class HighlightRulesService extends EventEmitter {
       return { ok: false, error: 'cannot delete auto-managed rule', status: 400 };
     }
     deleteRule(id, userId);
-    this._invalidate(userId);
+    this.invalidate(userId);
     return { ok: true };
   }
 
@@ -142,7 +142,7 @@ class HighlightRulesService extends EventEmitter {
   ): HighlightRule | null {
     if (!nick) return null;
     const rule = upsertAutoNickRule(userId, networkId, nick);
-    this._invalidate(userId);
+    this.invalidate(userId);
     return rule;
   }
 
@@ -155,7 +155,7 @@ class HighlightRulesService extends EventEmitter {
     return compiled;
   }
 
-  _invalidate(userId: number): void {
+  invalidate(userId: number): void {
     this.cache.delete(userId);
     this.emit('change', { userId });
   }

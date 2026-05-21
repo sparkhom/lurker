@@ -36,6 +36,10 @@ export interface MemberActionsAPI {
   ): void;
 }
 
+function nickOf(m: MemberLike | string): string {
+  return typeof m === 'string' ? m : m.nick;
+}
+
 // Shared menu items for a member of a channel. Exposed as a composable so
 // right-click, row-tap (mobile), and the hover three-dots (desktop) all
 // surface the same actions. The caller owns side-effect state that needs
@@ -48,10 +52,6 @@ export function useMemberActions(): MemberActionsAPI {
   const buffers = useBuffersStore();
   const nickNotes = useNickNotesStore();
   const menu = useContextMenu();
-
-  function nickOf(m: MemberLike | string): string {
-    return typeof m === 'string' ? m : m.nick;
-  }
 
   function buildItems(
     member: MemberLike | string | null | undefined,

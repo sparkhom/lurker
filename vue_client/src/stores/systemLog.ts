@@ -38,7 +38,7 @@ export const useSystemLogStore = defineStore('systemLog', {
       for (const line of lines) {
         if (line && typeof line.id === 'number') byId.set(line.id, line);
       }
-      const merged = Array.from(byId.values()).sort((a, b) => a.id - b.id);
+      const merged = Array.from(byId.values()).toSorted((a, b) => a.id - b.id);
       this.lines = merged;
       this.maxId = merged.length ? merged[merged.length - 1].id : 0;
       this.trim();

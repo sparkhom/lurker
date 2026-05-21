@@ -26,7 +26,7 @@ import { attachWsHub } from './services/wsHub.js';
 import './services/verbs/index.js';
 import mcpRouter from './services/mcpServer.js';
 import { requireApiAuth } from './middleware/apiAuth.js';
-import systemLog from './services/systemLog.js';
+import * as systemLog from './services/systemLog.js';
 import { purgeExpiredSessions } from './db/sessions.js';
 import { resolveSessionSecret } from './utils/sessionSecret.js';
 

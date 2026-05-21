@@ -47,13 +47,13 @@ describe('GET /api/push/config', () => {
   });
 });
 
-describe('POST /api/push/subscriptions', () => {
-  const validBody = (suffix = 'a') => ({
-    endpoint: `https://example.test/${suffix}`,
-    keys: { p256dh: 'p256-key', auth: 'auth-key' },
-    userAgent: 'TestAgent/1.0',
-  });
+const validBody = (suffix = 'a') => ({
+  endpoint: `https://example.test/${suffix}`,
+  keys: { p256dh: 'p256-key', auth: 'auth-key' },
+  userAgent: 'TestAgent/1.0',
+});
 
+describe('POST /api/push/subscriptions', () => {
   it('rejects missing endpoint/keys', async () => {
     const res = await aliceAgent.post('/api/push/subscriptions').send({});
     expect(res.status).toBe(400);

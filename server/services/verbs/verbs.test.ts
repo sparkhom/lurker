@@ -131,7 +131,7 @@ describe('list_buffers', () => {
       target: string;
       kind: string;
     }>;
-    const targets = result.map((b) => b.target).sort();
+    const targets = result.map((b) => b.target).toSorted();
     expect(targets).toEqual(['#chan', 'bob']);
     expect(result.find((b) => b.target === '#chan')!.kind).toBe('channel');
     expect(result.find((b) => b.target === 'bob')!.kind).toBe('dm');

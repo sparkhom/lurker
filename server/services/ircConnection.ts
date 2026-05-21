@@ -17,7 +17,7 @@ import {
 } from '../db/peerPresence.js';
 import highlightRulesService from './highlightRulesService.js';
 import { matchEvent } from './highlightEngine.js';
-import systemLog from './systemLog.js';
+import * as systemLog from './systemLog.js';
 import { IRC_VERSION, APP_VERSION } from '../utils/userAgent.js';
 
 // Shown to peers as the QUIT reason on a clean disconnect. Most IRC clients
@@ -298,14 +298,14 @@ export class IrcConnection {
   setState(state: string, extra: Record<string, unknown> = {}): void {
     this.state = state;
     this.publish({ type: 'state', state, ...extra });
-    this._logState(state, extra);
+    this.logState(state, extra);
   }
 
-  _scope(): string {
+  logScope(): string {
     return `net:${this.network.name}`;
   }
 
-  _logState(state: string, extra: Record<string, unknown>): void {
+  logState(state: string, extra: Record<string, unknown>): void {
     let text;
     switch (state) {
       case 'connecting':
@@ -325,7 +325,7 @@ export class IrcConnection {
     }
     systemLog.log({
       userId: this.network.user_id,
-      scope: this._scope(),
+      scope: this.logScope(),
       level: state === 'disconnected' ? 'warn' : 'info',
       text,
     });
@@ -408,7 +408,7 @@ export class IrcConnection {
       // CAP LS/REQ/ACK wire lines individually, but by the time 'registered'
       // fires the negotiated set is final on network.cap.enabled.
       try {
-        const enabled = (c.network?.cap?.enabled || []).slice().sort();
+        const enabled = (c.network?.cap?.enabled || []).toSorted();
         if (enabled.length > 0) {
           this.publish({
             type: 'motd',
@@ -529,7 +529,7 @@ export class IrcConnection {
       console.log(`[presence:${this.network.id}] MONITOR detected (limit ${limit})`);
       systemLog.log({
         userId: this.network.user_id,
-        scope: this._scope(),
+        scope: this.logScope(),
         text: `MONITOR (IRCv3 presence) supported, watch limit ${limit}`,
       });
       if (this.pendingRegainSetup && this.regainNick) {
@@ -545,10 +545,10 @@ export class IrcConnection {
         if (this.trackedDmPeers.size > 0) {
           systemLog.log({
             userId: this.network.user_id,
-            scope: this._scope(),
+            scope: this.logScope(),
             text: `Seeding MONITOR with ${this.trackedDmPeers.size} DM peer${this.trackedDmPeers.size === 1 ? '' : 's'}`,
           });
-          this._seedMonitorWatch();
+          this.seedMonitorWatch();
         }
       }
     });
@@ -564,7 +564,7 @@ export class IrcConnection {
       if (nicks.length > 0) {
         systemLog.log({
           userId: this.network.user_id,
-          scope: this._scope(),
+          scope: this.logScope(),
           text: `Presence: ${nicks.join(', ')} online`,
         });
       }
@@ -587,7 +587,7 @@ export class IrcConnection {
       if (nicks.length > 0) {
         systemLog.log({
           userId: this.network.user_id,
-          scope: this._scope(),
+          scope: this.logScope(),
           text: `Presence: ${nicks.join(', ')} offline`,
         });
       }
@@ -633,7 +633,7 @@ export class IrcConnection {
         });
         systemLog.log({
           userId: this.network.user_id,
-          scope: this._scope(),
+          scope: this.logScope(),
           level: 'error',
           text,
         });
@@ -798,7 +798,7 @@ export class IrcConnection {
         this.publish({ type: 'channel-joined', target: eventChannel });
         systemLog.log({
           userId: this.network.user_id,
-          scope: this._scope(),
+          scope: this.logScope(),
           text: `Joined ${eventChannel}`,
         });
         // Most servers volunteer 324 on join, but a few don't. Request it so
@@ -828,7 +828,7 @@ export class IrcConnection {
         this.publish({ type: 'channel-parted', target: eventChannel });
         systemLog.log({
           userId: this.network.user_id,
-          scope: this._scope(),
+          scope: this.logScope(),
           text: event.message
             ? `Parted ${eventChannel}: ${event.message as string}`
             : `Parted ${eventChannel}`,
@@ -1086,8 +1086,8 @@ export class IrcConnection {
         if (!letter) continue;
         next.add(letter);
       }
-      const before = [...ch.modes].sort().join('');
-      const after = [...next].sort().join('');
+      const before = [...ch.modes].toSorted().join('');
+      const after = [...next].toSorted().join('');
       if (before !== after) {
         ch.modes = next;
         this.publishChannelModes(ch);
@@ -1310,7 +1310,7 @@ export class IrcConnection {
   // Bail-out for transition writes: gate by tracked-peer set and self-nick.
   // Returns the eligible canonical nick (preserving the case as sent),
   // or null when the caller should no-op.
-  _eligiblePeer(nick: string | undefined | null): string | null {
+  eligiblePeer(nick: string | undefined | null): string | null {
     if (!nick) return null;
     const me = this.client.user?.nick;
     if (me && nick.toLowerCase() === me.toLowerCase()) return null;
@@ -1324,7 +1324,7 @@ export class IrcConnection {
   // updates for DMs the user dismissed (state still flows to
   // networks.states[networkId].peerPresence). The `nick` field carries the
   // routing key the client uses for its peerPresence map.
-  _publishPeerPresence(nick: string, row: PeerPresence | null): void {
+  publishPeerPresence(nick: string, row: PeerPresence | null): void {
     this.publishEphemeral({
       type: 'peer-presence',
       target: this.serverTarget(),
@@ -1350,7 +1350,7 @@ export class IrcConnection {
   // reason text. For other states it's ignored, and the DB column is
   // cleared so a stale message from a previous cycle can't bleed through.
   markPeerEvent(nick: string, state: PeerState, awayMessage: string | null = null): void {
-    const canonical = this._eligiblePeer(nick);
+    const canonical = this.eligiblePeer(nick);
     if (!canonical) {
       console.log(
         `[presence:${this.network.id}] markPeerEvent ${nick} → ${state} SKIP (not tracked)`,
@@ -1376,7 +1376,7 @@ export class IrcConnection {
     console.log(
       `[presence:${this.network.id}] markPeerEvent ${canonical} ${prevState || 'null'} → ${state}${message ? ` (${message})` : ''}`,
     );
-    this._publishPeerPresence(canonical, next);
+    this.publishPeerPresence(canonical, next);
   }
 
   // Bulk-seed the MONITOR watch list from the tracked DM peers set. Called
@@ -1387,7 +1387,7 @@ export class IrcConnection {
   // batching in ircManager.startNetwork). Any nicks beyond monitorLimit
   // are kept in the in-memory set but skipped on the wire; we surface a
   // notice so the user knows live presence is degraded for the overflow.
-  _seedMonitorWatch(): void {
+  seedMonitorWatch(): void {
     const peers = Array.from(this.trackedDmPeers);
     if (peers.length === 0) return;
     const cap = this.monitorLimit > 0 ? this.monitorLimit : peers.length;

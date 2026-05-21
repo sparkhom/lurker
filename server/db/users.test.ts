@@ -64,7 +64,7 @@ describe('listUsers', () => {
   it('orders by id ascending', () => {
     const list = users.listUsers();
     const ids = list.map((u) => u.id);
-    const sorted = [...ids].sort((a, b) => a - b);
+    const sorted = ids.toSorted((a, b) => a - b);
     expect(ids).toEqual(sorted);
   });
 });

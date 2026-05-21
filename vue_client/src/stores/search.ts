@@ -52,7 +52,7 @@ export const useSearchStore = defineStore('search', {
     },
     // Build the structured WS payload from the raw query. Returns null when
     // there's nothing to search on (no free text and no structured filter).
-    _buildPayload(before: number | null) {
+    buildPayload(before: number | null) {
       const parsed = parseSearchQuery(this.query);
       const payload: Record<string, unknown> = {
         type: 'search',
@@ -83,7 +83,7 @@ export const useSearchStore = defineStore('search', {
       this.error = '';
       this.scrollTop = 0;
       this.selectedIndex = 0;
-      const payload = this._buildPayload(null);
+      const payload = this.buildPayload(null);
       if (!payload) {
         this.loading = false;
         this.searched = false;
@@ -98,7 +98,7 @@ export const useSearchStore = defineStore('search', {
     },
     loadMore() {
       if (this.loading || !this.hasMore || this.nextBefore == null) return;
-      const payload = this._buildPayload(this.nextBefore);
+      const payload = this.buildPayload(this.nextBefore);
       if (!payload) return;
       this.loading = true;
       if (!socketSend(payload)) {

@@ -314,7 +314,9 @@ const alwaysNotifyChannelList = computed(() => {
       key: `${entry.networkId}::${entry.target}`,
       networkName: networksStore.networkById(entry.networkId)?.name || `net:${entry.networkId}`,
     }))
-    .sort((a, b) => a.networkName.localeCompare(b.networkName) || a.target.localeCompare(b.target));
+    .toSorted(
+      (a, b) => a.networkName.localeCompare(b.networkName) || a.target.localeCompare(b.target),
+    );
 });
 
 async function refreshPushState() {

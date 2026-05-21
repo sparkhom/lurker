@@ -74,7 +74,7 @@ describe('upsertAutoNickRule', () => {
         `SELECT network_id FROM highlight_rule_networks WHERE rule_id = ? ORDER BY network_id`,
       )
       .all(rule!.id) as Array<{ network_id: number }>;
-    expect(links.map((l) => l.network_id).sort()).toEqual([net1!.id, net2!.id].sort());
+    expect(links.map((l) => l.network_id).toSorted()).toEqual([net1!.id, net2!.id].toSorted());
   });
 
   it("switching a network's nick detaches the old auto rule and sweeps it when orphaned", () => {

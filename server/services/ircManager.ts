@@ -3,7 +3,7 @@
 
 import { EventEmitter } from 'events';
 import { IrcConnection } from './ircConnection.js';
-import systemLog from './systemLog.js';
+import * as systemLog from './systemLog.js';
 import {
   listNetworksForUser,
   getNetwork,
@@ -63,7 +63,7 @@ class IrcManager extends EventEmitter {
     this.byUser = new Map();
   }
 
-  _userMap(userId: number): Map<number, IrcConnection> {
+  connectionsForUser(userId: number): Map<number, IrcConnection> {
     let m = this.byUser.get(userId);
     if (!m) {
       m = new Map();
@@ -77,7 +77,7 @@ class IrcManager extends EventEmitter {
   }
 
   listConnections(userId: number): IrcConnection[] {
-    return Array.from(this._userMap(userId).values());
+    return Array.from(this.connectionsForUser(userId).values());
   }
 
   initForUser(userId: number): void {
@@ -104,7 +104,7 @@ class IrcManager extends EventEmitter {
       network,
       onEvent: (event) => this.emit('event', event),
     });
-    this._userMap(userId).set(networkId, conn);
+    this.connectionsForUser(userId).set(networkId, conn);
     systemLog.log({
       userId,
       scope: `net:${network.name}`,
@@ -160,7 +160,7 @@ class IrcManager extends EventEmitter {
       text: reason ? `Stopping: ${reason}` : 'Stopping',
     });
     conn.disconnect(reason);
-    this._userMap(userId).delete(networkId);
+    this.connectionsForUser(userId).delete(networkId);
   }
 
   disposeNetwork(userId: number, networkId: number, reason?: string): void {
@@ -172,7 +172,7 @@ class IrcManager extends EventEmitter {
       text: reason ? `Disposing: ${reason}` : 'Disposing',
     });
     conn.dispose(reason);
-    this._userMap(userId).delete(networkId);
+    this.connectionsForUser(userId).delete(networkId);
   }
 
   // Force a fresh connection: dispose the existing IrcConnection (if any) and

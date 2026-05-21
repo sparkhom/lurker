@@ -111,7 +111,7 @@ describe('MCP server', () => {
     });
     const names = (res.body.result.tools as Array<{ name: string; inputSchema: { type: string } }>)
       .map((t) => t.name)
-      .sort();
+      .toSorted();
     expect(names).toEqual([
       'get_nick_note',
       'list_buffers',

@@ -239,13 +239,13 @@ const longMessageUploading = ref(false);
 // some other target, but the wire chunks are the same. Other slash commands
 // (/raw, /join, etc.) don't pass through the splitter — return null to
 // signal "no split risk".
-function bodyForSplit(text: string): { body: string; isAction: boolean } {
-  if (!text) return { body: '', isAction: false };
+function bodyForSplit(raw: string): { body: string; isAction: boolean } {
+  if (!raw) return { body: '', isAction: false };
   // // escape: `//foo` is a literal `/foo` message, not a command, so it does
   // pass through PRIVMSG and is subject to the splitter.
-  if (text.startsWith('//')) return { body: text.slice(1), isAction: false };
-  if (text[0] !== '/') return { body: text, isAction: false };
-  const m = text.match(/^\/(\w+)\s*(.*)$/s);
+  if (raw.startsWith('//')) return { body: raw.slice(1), isAction: false };
+  if (raw[0] !== '/') return { body: raw, isAction: false };
+  const m = raw.match(/^\/(\w+)\s*(.*)$/s);
   if (!m) return { body: '', isAction: false };
   const cmd = m[1].toLowerCase();
   if (cmd === 'me') return { body: m[2], isAction: true };
@@ -258,8 +258,8 @@ function bodyForSplit(text: string): { body: string; isAction: boolean } {
   return { body: '', isAction: false };
 }
 
-function computeChunks(text: string): { chunks: number; isAction: boolean } {
-  const { body, isAction } = bodyForSplit(text);
+function computeChunks(raw: string): { chunks: number; isAction: boolean } {
+  const { body, isAction } = bodyForSplit(raw);
   const chunks = isAction ? chunkCountForAction(body) : chunkCountForSay(body);
   return { chunks, isAction };
 }
@@ -323,7 +323,7 @@ function setInputAndCaretEnd(value: string): void {
   // Hold `cycling` across the watcher microtask so `onInput` sees it set and
   // skips the history-walk reset. Clearing it synchronously loses the walk
   // state on the very next Up/Down because Vue's `watch` runs after we return.
-  Promise.resolve().then(() => {
+  queueMicrotask(() => {
     cycling = false;
     const el = inputEl.value;
     if (!el) return;
@@ -408,7 +408,7 @@ function buildChannelMatches(networkId: number, prefix: string): string[] {
     .forNetwork(networkId)
     .map((b) => b.target)
     .filter((t) => t.startsWith('#') && t.toLowerCase().startsWith(lower))
-    .sort((a, b) => a.localeCompare(b));
+    .toSorted((a, b) => a.localeCompare(b));
 }
 
 function applyCompletion() {
@@ -426,7 +426,7 @@ function applyCompletion() {
   // Move caret to just after the inserted nick + suffix.
   const caret = completion.prefix.length + pick.length + suffix.length;
   // Set on the next tick so v-model has propagated.
-  Promise.resolve().then(() => {
+  queueMicrotask(() => {
     const el = inputEl.value;
     if (!el) return;
     el.setSelectionRange(caret, caret);
@@ -478,7 +478,7 @@ function wrapOrInsertFormatting(opening: string, closing: string): void {
   // body so the user can keep applying combinations (bold + italic + colour)
   // without re-highlighting. With no selection, drop the caret just after
   // the inserted code so they can type styled text.
-  Promise.resolve().then(() => {
+  queueMicrotask(() => {
     const e2 = inputEl.value;
     if (!e2) return;
     e2.focus();
@@ -680,7 +680,7 @@ function onPickerSelect(nick: string): void {
   text.value = before + nick + ' ' + after;
   cycling = false;
   closePicker();
-  Promise.resolve().then(() => {
+  queueMicrotask(() => {
     const el = inputEl.value;
     if (!el) return;
     const caret = before.length + nick.length + 1;
@@ -706,7 +706,7 @@ function onStripSelect(nick: string): void {
   text.value = before + nick + suffix + after;
   cycling = false;
   closeStrip();
-  Promise.resolve().then(() => {
+  queueMicrotask(() => {
     const el = inputEl.value;
     if (!el) return;
     const caret = before.length + nick.length + suffix.length;
@@ -833,7 +833,7 @@ function insertUrlAtCaret(url: string): void {
   cycling = true;
   text.value = `${before}${inserted}${after}`;
   cycling = false;
-  Promise.resolve().then(() => {
+  queueMicrotask(() => {
     const e2 = inputEl.value;
     if (!e2) return;
     const caret = before.length + inserted.length;
@@ -1064,12 +1064,12 @@ function onLongMessageCancel() {
 // Drop a synthetic, non-persisted info line into the current buffer so the
 // user sees the output of client-resolved commands like /help or argument
 // validation errors. id-less so pushMessage's replay guard doesn't trip.
-function localInfo(networkId: number, target: string, text: string): void {
+function localInfo(networkId: number, target: string, lineText: string): void {
   buffers.pushMessage({
     networkId,
     target,
     type: 'motd',
-    text,
+    text: lineText,
     time: new Date().toISOString(),
   });
 }
@@ -1130,6 +1130,7 @@ function ackedSend(payload: Record<string, unknown>, body: string): boolean {
   }
   pending.then((result) => {
     if (!result.ok) toastSendFailure(result.error ?? 'unknown', body);
+    return result;
   });
   return true;
 }
@@ -1324,7 +1325,7 @@ function handleCommand(line: string, networkId: number, target: string): boolean
       return ackedSend({ type: 'send', networkId, target, text: url }, url);
     }
     case 'help':
-      for (const text of HELP_LINES) localInfo(networkId, target, text);
+      for (const helpLine of HELP_LINES) localInfo(networkId, target, helpLine);
       return true;
     default:
       return sendOrToast({ type: 'raw', networkId, line: line.slice(1) }, line);

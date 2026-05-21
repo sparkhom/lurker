@@ -17,17 +17,17 @@ let registerVerb: typeof import('./verbRegistry.js').registerVerb;
 let callVerb: typeof import('./verbRegistry.js').callVerb;
 let listVerbs: typeof import('./verbRegistry.js').listVerbs;
 let getVerb: typeof import('./verbRegistry.js').getVerb;
-let __resetForTests: typeof import('./verbRegistry.js').__resetForTests;
+let resetForTests: typeof import('./verbRegistry.js').resetForTests;
 
 beforeAll(async () => {
   ({ createUser } = await import('../db/users.js'));
   ({ createNetwork } = await import('../db/networks.js'));
-  ({ registerVerb, callVerb, listVerbs, getVerb, __resetForTests } =
+  ({ registerVerb, callVerb, listVerbs, getVerb, resetForTests } =
     await import('./verbRegistry.js'));
 });
 
 beforeEach(() => {
-  __resetForTests();
+  resetForTests();
 });
 
 afterAll(() => {
@@ -126,7 +126,7 @@ describe('verbRegistry', () => {
     const readSet = listVerbs('read').map((v) => v.name);
     const rwSet = listVerbs('read-write').map((v) => v.name);
     expect(readSet).toEqual(['r']);
-    expect(rwSet.sort()).toEqual(['r', 'w']);
+    expect(rwSet.toSorted()).toEqual(['r', 'w']);
   });
 
   it('listVerbs entries carry the inputSchema declared at registration', () => {

@@ -1038,7 +1038,7 @@ export const REGISTRY: readonly SettingOption[] = Object.freeze([
     type: 'string',
     default: '07:00',
     description:
-      'End of the quiet-hours window in HH:MM (24h), interpreted in your ' + 'system.timezone.',
+      'End of the quiet-hours window in HH:MM (24h), interpreted in your system.timezone.',
   },
 
   // ─── Input bar (system text features) ─────────────────────────────────
