@@ -8,9 +8,9 @@
 // settings, so toast/sound delivery is fully decoupled from how the signal
 // was generated. Settings are read live so quick-toggles take effect at once.
 //
-// Both toast and sound are skipped when the user is already focused on the
-// buffer the event belongs to — the message is in plain view, so an alert
-// would be redundant (see viewingEventBuffer).
+// Both toast and sound are skipped when the user is already viewing the
+// event's buffer in the foreground tab/window — the message is in plain
+// view, so an alert would be redundant (see viewingEventBuffer).
 
 import { useToastsStore, type ToastKind } from '../stores/toasts.js';
 import { useSettingsStore } from '../stores/settings.js';
@@ -74,17 +74,22 @@ function throttled(event: NotifyEvent, kind: ToastKind): boolean {
   return false;
 }
 
-// True when the user is looking right at the buffer this event belongs to:
-// the Lurker window has OS focus AND the event's buffer is the active one.
-// The message is already materializing in plain view, so a toast + sound
-// would be pure noise — Discord and Slack mute the focused channel the same
+// True when the user is already looking at the buffer this event belongs to:
+// the Lurker tab/window is in the foreground AND the event's buffer is the
+// active one. The message is materializing in plain view, so a toast + sound
+// would be redundant — Discord and Slack mute the focused channel the same
 // way. Push is unaffected: it's gated server-side and only fires when the
-// user has no visible client at all (wsHub.maybePush), a strictly stronger
-// "absent" condition than this render-time "present" one. document.hasFocus()
-// (not just `!document.hidden`) is the signal because a visible-but-unfocused
-// tab — Lurker sitting behind another window — still warrants the toast.
+// user has no visible client at all (wsHub.maybePush).
+//
+// "Foreground" is the Page Visibility API — the same signal usePresence
+// reports to the server and the push gate keys off, so toast suppression and
+// push delivery agree on what "present" means. document.hasFocus() would
+// additionally catch "Lurker visible but behind another window", but it has
+// no change event and is unreliable for installed PWAs (it can report a
+// backgrounded window as still focused), so we use the coarser but dependable
+// visibility signal instead.
 function viewingEventBuffer(event: NotifyEvent): boolean {
-  if (typeof document === 'undefined' || !document.hasFocus()) return false;
+  if (typeof document === 'undefined' || document.hidden) return false;
   const networks = useNetworksStore();
   return networks.activeKey === `${event.networkId}::${event.target}`;
 }
@@ -94,8 +99,8 @@ export function notifyForEvent(event: NotifyEvent | null | undefined): void {
   const kindKey = pickKindKey(event);
   if (!kindKey) return;
 
-  // Already watching this conversation in a focused window → no toast, no
-  // sound. The message lands in view on its own (see viewingEventBuffer).
+  // Already viewing this conversation in the foreground → no toast, no sound.
+  // The message lands in view on its own (see viewingEventBuffer).
   if (viewingEventBuffer(event)) return;
 
   // Ignored sender → no toast, no sound. Push is gated server-side in
