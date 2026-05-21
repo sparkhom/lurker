@@ -7,7 +7,11 @@
 //   HH    24-hour, padded     H   24-hour           hh  12-hour, padded
 //   h     12-hour             mm  minutes, padded   ss  seconds, padded
 //   a     am/pm               A   AM/PM
-// Anything else in the format string passes through verbatim.
+// Non-token characters (":" "-" "/" digits, spaces, brackets) pass through
+// verbatim. There is deliberately no literal-escape syntax: these formats
+// drive time/date-only fields (message timestamps, the status-bar clock), so
+// embedding prose isn't a use case — and note that a literal letter matching
+// a token IS substituted (e.g. "at h:mm" turns the leading "a" into am/pm).
 const TOKEN_RE = /YYYY|MM|DD|HH|H|hh|h|mm|ss|a|A/g;
 
 export function formatTimestamp(iso: string, fmt: string): string {

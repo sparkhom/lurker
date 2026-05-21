@@ -53,7 +53,14 @@ describe('formatTimestamp guards', () => {
     expect(formatTimestamp('2026-05-21T09:07:03', '')).toBe('');
   });
 
-  it('passes through literal characters in the format string', () => {
+  it('passes through non-token characters in the format string', () => {
     expect(formatTimestamp('2026-05-21T13:05:00', '[h:mm]')).toBe('[1:05]');
+  });
+
+  it('substitutes token letters even inside words — no literal escaping', () => {
+    // Documented limitation: these formats drive time/date-only fields, so a
+    // literal letter that collides with a token is still replaced. Pinned here
+    // so the behavior reads as intentional rather than a bug.
+    expect(formatTimestamp('2026-05-21T13:05:00', 'at h:mm')).toBe('pmt 1:05');
   });
 });
