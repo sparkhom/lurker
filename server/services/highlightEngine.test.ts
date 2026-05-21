@@ -102,6 +102,51 @@ describe('matchEvent — glob rules', () => {
   });
 });
 
+describe('matchEvent — URL exclusion', () => {
+  it('does not match a word that appears only inside a URL', () => {
+    const compiled = compileRules([rule({ pattern: 'amiantos' })]);
+    expect(matchEvent(event({ text: 'see https://amiantos.net for info' }), compiled).matched).toBe(
+      false,
+    );
+  });
+
+  it('does not match a word inside a URL path or query', () => {
+    const compiled = compileRules([rule({ pattern: 'amiantos' })]);
+    expect(
+      matchEvent(event({ text: 'https://example.com/users/amiantos' }), compiled).matched,
+    ).toBe(false);
+    expect(matchEvent(event({ text: 'https://example.com/?u=amiantos' }), compiled).matched).toBe(
+      false,
+    );
+  });
+
+  it('still matches the word when it also appears outside a URL', () => {
+    const compiled = compileRules([rule({ pattern: 'amiantos' })]);
+    expect(
+      matchEvent(event({ text: 'hey amiantos see https://amiantos.net' }), compiled).matched,
+    ).toBe(true);
+  });
+
+  it('ignores words inside www. hosts and bare emails', () => {
+    const compiled = compileRules([rule({ pattern: 'amiantos' })]);
+    expect(matchEvent(event({ text: 'visit www.amiantos.net' }), compiled).matched).toBe(false);
+    expect(matchEvent(event({ text: 'mail amiantos@example.com' }), compiled).matched).toBe(false);
+  });
+
+  it('replaces a stripped URL with whitespace so neighbours cannot fuse', () => {
+    const compiled = compileRules([rule({ pattern: 'amiantos' })]);
+    // 'ami' + URL + 'antos' must not collapse into 'amiantos' once the URL goes.
+    expect(matchEvent(event({ text: 'ami https://x.com antos' }), compiled).matched).toBe(false);
+  });
+
+  it('applies to glob and regex rules too', () => {
+    const glob = compileRules([rule({ kind: 'glob', pattern: 'ami*os' })]);
+    expect(matchEvent(event({ text: 'https://amiantos.net' }), glob).matched).toBe(false);
+    const regex = compileRules([rule({ kind: 'regex', pattern: 'amiantos' })]);
+    expect(matchEvent(event({ text: 'https://amiantos.net' }), regex).matched).toBe(false);
+  });
+});
+
 describe('matchEvent — eligibility gating', () => {
   it('does not match self-authored events', () => {
     const compiled: CompiledRule[] = compileRules([rule()]);

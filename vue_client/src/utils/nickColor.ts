@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Brad Root
 // SPDX-License-Identifier: MPL-2.0
 
+import { createUrlRegex } from '../../../shared/urlPattern.js';
+
 // Deterministic nick coloring. Mirrors weechat's gui_nick_find_color:
 // trim stop chars, lowercase, hash, modulo a palette.
 //
@@ -54,18 +56,10 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-// URL detection. Covers http(s)/ftp(s)/mailto, bare www.* hosts, and bare
-// email addresses (turned into mailto: links by urlHref).
-// The body of a scheme/www match is "everything that isn't whitespace or an
-// HTML-ish bracket"; trimUrlTail then strips trailing sentence punctuation so
+// URL detection lives in shared/urlPattern.ts so the server's highlight
+// engine can exclude links from highlight matching using the same definition.
+// trimUrlTail (below) then strips trailing sentence punctuation so
 // "see https://example.com." doesn't keep the period.
-// The email branch requires a real TLD (2+ letters) to avoid linking
-// IRC-style host masks like `nick@server`.
-const URL_RE = new RegExp(
-  '(?:(?:https?|ftps?):\\/\\/|mailto:|www\\.)[^\\s<>`]+' +
-    '|\\b[A-Za-z0-9][A-Za-z0-9._%+-]*@[A-Za-z0-9][A-Za-z0-9.-]*\\.[A-Za-z]{2,}\\b',
-  'gi',
-);
 
 // Strip trailing punctuation that's almost certainly part of the surrounding
 // sentence rather than the URL. Closing brackets are only stripped when they'd
@@ -125,7 +119,7 @@ type UrlOrTextSegment = UrlSegment | TextSegment;
 function splitTextByUrls(text: string): UrlOrTextSegment[] {
   const out: UrlOrTextSegment[] = [];
   if (!text) return out;
-  const re = new RegExp(URL_RE.source, 'gi');
+  const re = createUrlRegex();
   let lastIdx = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
