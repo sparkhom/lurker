@@ -82,6 +82,9 @@ export function matchEvent(
   event: MatchableEvent | null | undefined,
   compiled: CompiledRule[],
 ): { matched: boolean; ruleId: number | null } {
+  // Cheapest guard first: with no rules there is nothing to match, so skip
+  // the eligibility checks and URL-stripping work entirely.
+  if (compiled.length === 0) return { matched: false, ruleId: null };
   if (!event || !ELIGIBLE_TYPES.has(event.type)) return { matched: false, ruleId: null };
   if (event.self) return { matched: false, ruleId: null };
   const text = event.text || '';
