@@ -15,6 +15,7 @@ import { useToastsStore, type ToastKind } from '../stores/toasts.js';
 import { useSettingsStore } from '../stores/settings.js';
 import { useNetworksStore } from '../stores/networks.js';
 import { useIgnoresStore } from '../stores/ignores.js';
+import { viewedBuffer } from './useViewedBuffer.js';
 
 export interface NotifyEvent {
   self?: boolean;
@@ -73,28 +74,33 @@ function throttled(event: NotifyEvent, kind: ToastKind): boolean {
   return false;
 }
 
-// The in-app toast + sound only reach a user whose tab is in the foreground.
-// Two cases produce no in-app notification:
+// The in-app toast + sound only reach a user whose tab is in the foreground
+// and not already looking at the buffer the event belongs to. Three things
+// suppress them:
 //
+//   - No document: a non-browser context can't show a toast at all. Treated
+//     as not notifiable, matching usePresence.currentVisible().
 //   - Tab hidden: a hidden tab can't render a toast, and browsers throttle or
 //     defer a background tab's audio — so this path would fire unreliably (the
 //     toast/sound only "catch up" when the tab is refocused). The server-side
 //     push owns the hidden case: wsHub.maybePush fires precisely when the user
 //     has no visible client. Letting the in-app path fire here too would just
-//     double up with push, badly.
-//   - Active buffer: the message is already materializing in plain view, so an
-//     alert would be redundant (issue #50) — Discord and Slack mute the
+//     double up with push, badly. Visibility is the Page Visibility API — the
+//     same signal usePresence reports to the server — so the in-app and push
+//     paths agree on "present" and never both fire for one event.
+//   - Viewed buffer: the event's buffer is the one whose message list is on
+//     screen right now, so the message is already materializing in plain view
+//     and a toast would be redundant (issue #50) — Discord and Slack mute the
 //     focused channel the same way.
 //
-// Visibility is the Page Visibility API — the same signal usePresence reports
-// to the server — so the in-app path and the push path agree on "present" and
-// never both fire for one event. document.hasFocus() would also catch "Lurker
-// visible but behind another window", but it has no change event and is
-// unreliable for installed PWAs, so we use the dependable visibility signal.
+// "Viewed buffer" is viewedBuffer(), owned by MessageList — NOT networks
+// .activeKey. activeKey only tracks the last-opened buffer and lingers across
+// route / mobile-screen changes, so keying off it would wrongly suppress a
+// toast while the user sits on the Settings route or the mobile buffer list,
+// where no message list is mounted.
 function shouldNotifyInApp(event: NotifyEvent): boolean {
-  if (typeof document !== 'undefined' && document.hidden) return false;
-  const networks = useNetworksStore();
-  return networks.activeKey !== `${event.networkId}::${event.target}`;
+  if (typeof document === 'undefined' || document.hidden) return false;
+  return viewedBuffer() !== `${event.networkId}::${event.target}`;
 }
 
 export function notifyForEvent(event: NotifyEvent | null | undefined): void {
@@ -102,8 +108,9 @@ export function notifyForEvent(event: NotifyEvent | null | undefined): void {
   const kindKey = pickKindKey(event);
   if (!kindKey) return;
 
-  // Toast + sound only for a visible tab on a non-active buffer: a hidden tab
-  // is the push path's job, and the active buffer is already in plain view.
+  // Toast + sound only when the tab is visible and the event's buffer isn't
+  // the one on screen — a hidden tab is the push path's job, and the viewed
+  // buffer is already in plain view. See shouldNotifyInApp.
   if (!shouldNotifyInApp(event)) return;
 
   // Ignored sender → no toast, no sound. Push is gated server-side in
