@@ -1,4 +1,4 @@
-name: Build and Publish Docker Image
+name: Publish amiantos/lurker
 
 on:
   push:
