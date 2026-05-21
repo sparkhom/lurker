@@ -200,8 +200,9 @@ configure_firewall
 
 log "=== Lurker deploy finished $(date -u +%FT%TZ) ==="
 if [ -n "$LURKER_DOMAIN" ]; then
-  log "Open https://${LURKER_DOMAIN} — the first request can take ~60s while"
-  log "Caddy obtains a Let's Encrypt certificate, then create your admin account."
+  log "Lurker is running. If a DNS A record for ${LURKER_DOMAIN} isn't already"
+  log "pointing at this droplet's IP, add it now — Caddy retries Let's Encrypt"
+  log "until it resolves, then https://${LURKER_DOMAIN} serves over HTTPS."
   log "To enable passkeys / web push, see SELF_HOSTING.md (Optional features)."
 else
   PUBLIC_IP=$(curl -fsS --max-time 5 \
