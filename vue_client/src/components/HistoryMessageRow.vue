@@ -26,7 +26,7 @@
     <div class="body">
       <span class="nick" :style="nickStyle">{{ message.nick }}</span>
       <span class="sep">|</span>
-      <span class="text">{{ message.text }}</span>
+      <span class="text"><LinkedText :text="message.text ?? ''" /></span>
     </div>
     <button
       v-if="removable"
@@ -48,6 +48,7 @@ import { useNetworksStore } from '../stores/networks.js';
 import { useSettingsStore } from '../stores/settings.js';
 import { useNickColors } from '../composables/useNickColors.js';
 import { formatTimestamp, formatDate } from '../utils/timestamp.js';
+import LinkedText from './LinkedText.vue';
 
 // Shared row shape from search/highlights/bookmarks. All callers pass at
 // minimum { id, networkId, target, nick, time, text }; `self` and

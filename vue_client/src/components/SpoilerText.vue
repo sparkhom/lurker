@@ -34,7 +34,13 @@ import type { RenderSegment } from '../utils/nickColor.js';
 const props = defineProps<{ seg: RenderSegment }>();
 
 const revealed = ref(false);
-function reveal(): void {
+function reveal(e: Event): void {
+  if (revealed.value) return;
+  // While hidden, swallow the event so revealing a spoiler embedded in a
+  // clickable row (e.g. a search result that jumps to the message on click)
+  // doesn't also fire the row's handler. Once revealed it's plain text again
+  // and lets clicks through.
+  e.stopPropagation();
   revealed.value = true;
 }
 
