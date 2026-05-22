@@ -78,7 +78,7 @@ function activate(item: ContextMenuItem): void {
   }
 }
 
-function onWindowPointerDown(e: PointerEvent): void {
+function onWindowMouseDown(e: MouseEvent): void {
   if (!state.open) return;
   if (menuEl.value && menuEl.value.contains(e.target as Node)) return;
   // Re-clicking the same trigger should close (toggle behavior). Without
@@ -100,23 +100,19 @@ function onWindowResize(): void {
 }
 
 // Attaching listeners only while open avoids paying for them on every scroll
-// during typical app use. Capture-phase pointerdown so we catch the press
-// before it can mutate state that the menu was anchored to (e.g. deselecting
-// a row the menu was launched from). pointerdown — not mousedown — so the
-// synthesized mousedown iOS Safari fires after touchend on a long-press
-// (issue #8) doesn't reach this handler and close the menu we just opened:
-// the original touch's pointerdown fires before the menu opens, and no
-// pointerdown is synthesized from the touch release, so the menu stays put.
+// during typical app use. Capture-phase mousedown so we catch the click before
+// it can mutate state that the menu was anchored to (e.g. deselecting a row
+// the menu was launched from).
 watch(
   () => state.open,
   (isOpen) => {
     if (isOpen) {
-      window.addEventListener('pointerdown', onWindowPointerDown, true);
+      window.addEventListener('mousedown', onWindowMouseDown, true);
       window.addEventListener('keydown', onWindowKey);
       window.addEventListener('resize', onWindowResize);
       window.addEventListener('scroll', onWindowResize, true);
     } else {
-      window.removeEventListener('pointerdown', onWindowPointerDown, true);
+      window.removeEventListener('mousedown', onWindowMouseDown, true);
       window.removeEventListener('keydown', onWindowKey);
       window.removeEventListener('resize', onWindowResize);
       window.removeEventListener('scroll', onWindowResize, true);
@@ -125,7 +121,7 @@ watch(
 );
 
 onBeforeUnmount(() => {
-  window.removeEventListener('pointerdown', onWindowPointerDown, true);
+  window.removeEventListener('mousedown', onWindowMouseDown, true);
   window.removeEventListener('keydown', onWindowKey);
   window.removeEventListener('resize', onWindowResize);
   window.removeEventListener('scroll', onWindowResize, true);

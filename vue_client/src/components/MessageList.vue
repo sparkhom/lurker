@@ -58,10 +58,8 @@
       <div
         v-else
         class="line"
-        :class="[rowClass(row), { actionable: eligibleForActions(row.m) }]"
+        :class="rowClass(row)"
         :data-msg-id="row.m?.id ?? null"
-        @contextmenu="onLineContextMenu($event, row.m)"
-        v-bind="longPressBind(row.m)"
       >
         <template v-if="compactMode && row.m?.type === 'message'">
           <!-- Compact-mode message rows (IRCCloud-style): nick on its own
@@ -187,7 +185,6 @@ import RenderSegments from './RenderSegments.vue';
 import IgnoreModal from './IgnoreModal.vue';
 import { useMessageActions } from '../composables/useMessageActions.js';
 import type { MessageContext } from '../composables/useMessageActions.js';
-import { useLongPress } from '../composables/useLongPress.js';
 import { setViewedBuffer } from '../composables/useViewedBuffer.js';
 
 // Extended BufferMessage fields accessed in the template and script
@@ -321,7 +318,6 @@ function rowClass(row: RenderRow) {
 // the menu callback can hand off without needing to know which view it lives
 // in (mirrors MemberList's pattern).
 const messageActions = useMessageActions();
-const longPress = useLongPress();
 const ignoreTarget = ref<IgnoreTarget | null>(null);
 
 function eligibleForActions(m: ChatMessage | undefined | null): boolean {
@@ -358,17 +354,6 @@ function menuContext(m: ChatMessage): MessageContext {
   };
 }
 
-function onLineContextMenu(e: MouseEvent, m: ChatMessage | undefined) {
-  // Desktop keeps the browser's native right-click menu — message actions are
-  // reachable from the hover three-dots button. The in-app menu is a touch
-  // affordance, opened via long-press on mobile. See issue #20.
-  if (!isMobile.value) return;
-  if (!eligibleForActions(m)) return;
-  e.preventDefault();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  messageActions.openMenuFor(m as any, menuContext(m!), e.clientX, e.clientY);
-}
-
 function onActionsClick(e: MouseEvent, m: ChatMessage | undefined) {
   if (!eligibleForActions(m)) return;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -377,19 +362,6 @@ function onActionsClick(e: MouseEvent, m: ChatMessage | undefined) {
     menuContext(m!),
     (e.currentTarget as Element) || null,
   );
-}
-
-// Touch long-press → same menu. Eligibility is rechecked inside the callback
-// so the timer set on touchstart of an ineligible row (rare, the v-bind only
-// emits handlers for eligible rows) is a no-op. The bind() factory threads
-// the message through to the callback as the payload arg.
-function longPressBind(m: ChatMessage | undefined) {
-  if (!eligibleForActions(m)) return null;
-  return longPress.bind((coords, msg) => {
-    if (!msg) return;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    messageActions.openMenuFor(msg as any, menuContext(msg), coords.clientX, coords.clientY);
-  }, m as ChatMessage);
 }
 
 const smartFilterEnabled = computed(() => !!settings.effective('chat.smart_filter'));
@@ -1132,13 +1104,6 @@ watch(
   align-items: baseline;
   position: relative;
 }
-/* iOS Safari fires its native text-callout on long-press, which would race
-   our useLongPress handler. -webkit-touch-callout: none alone suppresses it
-   without touching user-select, so desktop drag-to-select (including
-   across multiple lines) still works exactly as before. */
-.line.actionable {
-  -webkit-touch-callout: none;
-}
 /* Alt-row striping is a standard-mode helper for telling adjacent same-type
    rows apart in a dense column. In compact mode, message groups already
    visually separate via the head/gap rhythm, so striping individual lines
@@ -1158,9 +1123,11 @@ watch(
   background: var(--bg-soft);
 }
 
-/* Hover-revealed three-dots button on eligible rows (desktop only). Sits in
-   the gutter on the right edge of the line. Hidden on touch viewports;
-   mobile users get the same menu via long-press. */
+/* Hover-revealed three-dots button on eligible rows. Sits in the gutter on
+   the right edge of the line. Mobile reaches the menu via the same hover
+   path: iOS Safari's sticky :hover makes the first tap on a row reveal the
+   dots, and a second tap on the dots opens the menu. Long-press is left to
+   the browser's native text-callout so users can select message text. */
 .row-actions {
   position: absolute;
   top: 50%;
@@ -1188,11 +1155,6 @@ watch(
 .row-actions:hover {
   color: var(--fg);
   background: var(--bg-soft);
-}
-@media (hover: none), (max-width: 768px) {
-  .row-actions {
-    display: none;
-  }
 }
 
 /* Matched highlight (rule fired): warm background tint. Sits above .alt so
