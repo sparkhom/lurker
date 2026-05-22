@@ -17,11 +17,14 @@
       <div
         role="button"
         class="slot"
+        tabindex="0"
         :class="{ active: slot === 'fg' }"
         :aria-pressed="slot === 'fg'"
         title="Pick the text colour"
         @mousedown.prevent
         @click="slot = 'fg'"
+        @keydown.enter.prevent="slot = 'fg'"
+        @keydown.space.prevent="slot = 'fg'"
       >
         <span class="chip" :style="chipStyle(staged.fg)"></span>
         fg
@@ -29,11 +32,14 @@
       <div
         role="button"
         class="slot"
+        tabindex="0"
         :class="{ active: slot === 'bg' }"
         :aria-pressed="slot === 'bg'"
         title="Pick the background colour"
         @mousedown.prevent
         @click="slot = 'bg'"
+        @keydown.enter.prevent="slot = 'bg'"
+        @keydown.space.prevent="slot = 'bg'"
       >
         <span class="chip" :style="chipStyle(staged.bg)"></span>
         bg
@@ -45,35 +51,54 @@
         :key="entry.code"
         role="button"
         class="swatch"
+        tabindex="0"
         :class="{ picked: staged[slot] === entry.code }"
         :style="{ backgroundColor: entry.hex }"
         :title="`mIRC ${entry.code}`"
+        :aria-label="`mIRC colour ${entry.code}`"
         @mousedown.prevent
         @click="pick(entry.code)"
+        @keydown.enter.prevent="pick(entry.code)"
+        @keydown.space.prevent="pick(entry.code)"
       ></div>
     </div>
     <div class="row">
       <div
         role="button"
         class="action apply"
+        tabindex="0"
         :class="{ disabled: !hasPick }"
         :aria-disabled="!hasPick"
         title="Insert the picked colour"
         @mousedown.prevent
         @click="apply"
+        @keydown.enter.prevent="apply"
+        @keydown.space.prevent="apply"
       >
         apply
       </div>
       <div
         role="button"
         class="action"
+        tabindex="0"
         title="Clear formatting (inserts reset)"
         @mousedown.prevent
         @click="emit('reset')"
+        @keydown.enter.prevent="emit('reset')"
+        @keydown.space.prevent="emit('reset')"
       >
         clear
       </div>
-      <div role="button" class="action" title="Close" @mousedown.prevent @click="emit('close')">
+      <div
+        role="button"
+        class="action"
+        tabindex="0"
+        title="Close"
+        @mousedown.prevent
+        @click="emit('close')"
+        @keydown.enter.prevent="emit('close')"
+        @keydown.space.prevent="emit('close')"
+      >
         close
       </div>
     </div>
@@ -192,6 +217,10 @@ function apply(): void {
 .swatch.picked {
   outline: 2px solid var(--accent);
 }
+.swatch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
 .row {
   display: flex;
   justify-content: space-between;
@@ -220,6 +249,10 @@ function apply(): void {
   color: var(--fg);
   border-color: var(--accent);
 }
+.slot:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
 .chip {
   width: 0.9em;
   height: 0.9em;
@@ -234,6 +267,10 @@ function apply(): void {
 }
 .action:hover {
   color: var(--accent);
+}
+.action:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
 }
 .action.apply {
   color: var(--accent);

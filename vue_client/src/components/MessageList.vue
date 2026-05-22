@@ -76,8 +76,9 @@
           </div>
           <span class="body" :class="bodyClass(row.m)">
             <template v-for="(seg, j) in textSegments(row.m)" :key="j">
+              <SpoilerText v-if="seg.spoiler" :seg="seg" />
               <a
-                v-if="seg.url"
+                v-else-if="seg.url"
                 class="msg-link"
                 :href="seg.url"
                 target="_blank"
