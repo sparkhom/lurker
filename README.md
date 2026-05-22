@@ -31,6 +31,7 @@ Lurker runs as an always-on server that stays connected to IRC on your behalf, k
 - `<cfuser> amiantos: holy shit, you made something better than irccloud`
 - `<amigojapan> great, now that amiantos's chat client is catching up to IRC cloud, I think I can switch to it as my daily driver`
 - `<skdoo> amiantos makes cool shit`
+- `<jadeia> lurker is really nice. this is streets ahead of irccloud in terms of design and ease of use.`
 
 # Stack
 
