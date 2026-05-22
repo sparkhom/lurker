@@ -75,7 +75,11 @@
             }}</span>
           </div>
           <span class="body" :class="bodyClass(row.m)">
-            <RenderSegments :segments="textSegments(row.m)" :self-color="selfColor" />
+            <RenderSegments
+              :segments="textSegments(row.m)"
+              :self-color="selfColor"
+              :network-id="buffer?.networkId ?? null"
+            />
           </span>
           <span class="time">{{ row.continuationTime ? '' : time(row.m?.time) }}</span>
         </template>
@@ -92,6 +96,7 @@
               v-if="hasInlineText(row.m)"
               :segments="textSegments(row.m)"
               :self-color="selfColor"
+              :network-id="buffer?.networkId ?? null"
             />
             <template v-else-if="row.m?.type === 'join'"
               ><NickRef :nick="row.m.nick ?? ''" /> joined</template

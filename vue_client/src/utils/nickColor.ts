@@ -58,14 +58,15 @@ function escapeRegex(s: string): string {
 
 // URL detection lives in shared/urlPattern.ts so the server's highlight
 // engine can exclude links from highlight matching using the same definition.
-// trimUrlTail (below) then strips trailing sentence punctuation so
+// trimTrailingPunctuation (below) then strips trailing sentence punctuation so
 // "see https://example.com." doesn't keep the period.
 
 // Strip trailing punctuation that's almost certainly part of the surrounding
-// sentence rather than the URL. Closing brackets are only stripped when they'd
-// be unbalanced inside the URL — `https://en.wikipedia.org/wiki/Foo_(bar)`
-// keeps its trailing ')', but `(see https://example.com)` doesn't.
-function trimUrlTail(s: string): string {
+// sentence rather than the token. Closing brackets are only stripped when
+// they'd be unbalanced inside the token — `https://en.wikipedia.org/wiki/Foo_(bar)`
+// keeps its trailing ')', but `(see https://example.com)` doesn't. Shared by
+// the URL and channel-name splitters.
+function trimTrailingPunctuation(s: string): string {
   const PAIRS: Record<string, string> = { ')': '(', ']': '[', '}': '{' };
   let end = s.length;
   while (end > 0) {
@@ -124,7 +125,7 @@ function splitTextByUrls(text: string): UrlOrTextSegment[] {
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     const start = m.index;
-    const matched = trimUrlTail(m[0]);
+    const matched = trimTrailingPunctuation(m[0]);
     if (!matched) {
       // The whole match was punctuation (shouldn't happen given the regex
       // requires a scheme/www prefix, but guard anyway).
@@ -134,6 +135,48 @@ function splitTextByUrls(text: string): UrlOrTextSegment[] {
     re.lastIndex = start + matched.length;
     if (start > lastIdx) out.push({ kind: 'text', text: text.slice(lastIdx, start) });
     out.push({ kind: 'url', text: matched, href: urlHref(matched) });
+    lastIdx = start + matched.length;
+  }
+  if (lastIdx < text.length) out.push({ kind: 'text', text: text.slice(lastIdx) });
+  return out;
+}
+
+interface ChannelSegment {
+  kind: 'channel';
+  text: string;
+}
+
+type ChannelOrTextSegment = ChannelSegment | TextSegment;
+
+// Split text on IRC channel names. A channel token is a `#` prefix followed
+// by a run of characters valid in an IRC channel name: per RFC 2812 that
+// rules out whitespace, commas, and colons (`:` begins the optional channel
+// mask). Trailing sentence punctuation is trimmed the same way URLs are. The
+// prefix must not sit directly after a word character, so "C#" doesn't read
+// as a channel. `##anime`-style double-hash names work because the second
+// `#` is just an ordinary body character. `&`-prefixed local channels and
+// other rare prefixes aren't supported here, matching the rest of the app
+// (BufferList sort/render, the buffer-actions menu, etc.) which all
+// hard-code `#`. Runs on text that has already had URLs split out, so a
+// `#anchor` inside a link never reaches this pass.
+function splitTextByChannels(text: string): ChannelOrTextSegment[] {
+  const out: ChannelOrTextSegment[] = [];
+  if (!text) return out;
+  const re = /(?<![A-Za-z0-9_])#[^\s,:]+/g;
+  let lastIdx = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const start = m.index;
+    const matched = trimTrailingPunctuation(m[0]);
+    // A token that trims down to the bare prefix (e.g. "#." mid-sentence) is
+    // not a channel — it needs the prefix plus at least one body character.
+    if (matched.length < 2) {
+      re.lastIndex = start + 1;
+      continue;
+    }
+    re.lastIndex = start + matched.length;
+    if (start > lastIdx) out.push({ kind: 'text', text: text.slice(lastIdx, start) });
+    out.push({ kind: 'channel', text: matched });
     lastIdx = start + matched.length;
   }
   if (lastIdx < text.length) out.push({ kind: 'text', text: text.slice(lastIdx) });
@@ -354,6 +397,10 @@ export interface RenderSegment {
   // shows as a click-to-reveal spoiler. Carries no fg/bg — SpoilerText draws
   // its own box — but keeps any bold/italic/underline/strike for the reveal.
   spoiler?: boolean;
+  // An IRC channel name (#/&-prefixed). `text` holds the same string; the
+  // renderer turns it into a clickable join/switch affordance when it has a
+  // network to act on, otherwise it renders as plain text.
+  channel?: string;
 }
 
 // Build a Vue inline-style object for a segment. Colour precedence: an
@@ -394,6 +441,29 @@ export function segmentHasStyle(seg: RenderSegment): boolean {
   );
 }
 
+// Channel detection then nick detection over a plain (URL-free) text run.
+// Channels are matched first because a channel token can't contain a nick
+// (nicks never start with #/&), so the order is unambiguous.
+function splitPlainText(
+  text: string,
+  nickSet: Set<string> | null | undefined,
+  selfLower: string | null | undefined,
+  colorFn: ((nick: string) => string | null) | null | undefined,
+): RenderSegment[] {
+  const out: RenderSegment[] = [];
+  for (const seg of splitTextByChannels(text)) {
+    if (seg.kind === 'channel') {
+      out.push({ text: seg.text, channel: seg.text });
+      continue;
+    }
+    if (!seg.text) continue;
+    for (const ns of colorNicksInText(seg.text, nickSet, selfLower, colorFn)) {
+      if (ns.text) out.push(ns);
+    }
+  }
+  return out;
+}
+
 function splitRunIntoSegments(
   text: string,
   nickSet: Set<string> | null | undefined,
@@ -401,21 +471,14 @@ function splitRunIntoSegments(
   colorFn: ((nick: string) => string | null) | null | undefined,
 ): RenderSegment[] {
   if (!text) return [];
-  const urlSegments = splitTextByUrls(text);
-  if (urlSegments.length === 0) {
-    return colorNicksInText(text, nickSet, selfLower, colorFn).filter((s) => s.text);
-  }
   const out: RenderSegment[] = [];
-  for (const seg of urlSegments) {
+  for (const seg of splitTextByUrls(text)) {
     if (seg.kind === 'url') {
       out.push({ url: seg.href, text: seg.text });
       continue;
     }
     if (!seg.text) continue;
-    const nickSegs = colorNicksInText(seg.text, nickSet, selfLower, colorFn);
-    for (const ns of nickSegs) {
-      if (ns.text) out.push(ns);
-    }
+    out.push(...splitPlainText(seg.text, nickSet, selfLower, colorFn));
   }
   return out;
 }
@@ -428,6 +491,7 @@ function splitRunIntoSegments(
 //   { text, spoiler, ...fmt }           — hidden run (fg===bg); render as a
 //                                         click-to-reveal box, never an <a>
 //   { url, text, ...fmt }               — clickable link (with formatting)
+//   { channel, text, ...fmt }           — clickable IRC channel name
 //   { text, color?, self?, ...fmt }     — nick / plain text (with formatting)
 // where fmt is { bold?, italic?, underline?, strike?, fg?, bg? }.
 export function splitTextByTokens(

@@ -69,6 +69,81 @@ describe('splitTextByTokens — spoiler detection', () => {
   });
 });
 
+describe('splitTextByTokens — channel detection', () => {
+  it('splits a #channel into its own segment carrying a channel field', () => {
+    expect(parse('join #general now')).toEqual([
+      { text: 'join ' },
+      { text: '#general', channel: '#general' },
+      { text: ' now' },
+    ]);
+  });
+
+  it('keeps the whole token for a ##-prefixed channel', () => {
+    expect(parse('##python is great')).toEqual([
+      { text: '##python', channel: '##python' },
+      { text: ' is great' },
+    ]);
+  });
+
+  it('matches a channel at the very start of the text', () => {
+    expect(parse('#foo')).toEqual([{ text: '#foo', channel: '#foo' }]);
+  });
+
+  it('keeps dashes and dots inside a channel name', () => {
+    expect(parse('try #my-cool.chan ok')).toEqual([
+      { text: 'try ' },
+      { text: '#my-cool.chan', channel: '#my-cool.chan' },
+      { text: ' ok' },
+    ]);
+  });
+
+  it('stops a channel name at a colon (RFC 2812 chanstring)', () => {
+    expect(parse('ping #ops:admins now')).toEqual([
+      { text: 'ping ' },
+      { text: '#ops', channel: '#ops' },
+      { text: ':admins now' },
+    ]);
+  });
+
+  it('ignores a token that trims down to just the bare prefix', () => {
+    // "#." matches the regex but trims to "#" — not enough to be a channel.
+    expect(parse('look at #. ok')).toEqual([{ text: 'look at #. ok' }]);
+  });
+
+  it('trims trailing sentence punctuation off a channel', () => {
+    expect(parse('see (#foo).')).toEqual([
+      { text: 'see (' },
+      { text: '#foo', channel: '#foo' },
+      { text: ').' },
+    ]);
+  });
+
+  it('does not treat "C#" as a channel — the # follows a word char', () => {
+    expect(parse('I write C# daily')).toEqual([{ text: 'I write C# daily' }]);
+  });
+
+  it('does not treat a bare "#" as a channel', () => {
+    expect(parse('a # b')).toEqual([{ text: 'a # b' }]);
+  });
+
+  it('leaves a # fragment inside a URL alone', () => {
+    expect(parse('docs https://example.com/page#install here')).toEqual([
+      { text: 'docs ' },
+      {
+        url: 'https://example.com/page#install',
+        text: 'https://example.com/page#install',
+      },
+      { text: ' here' },
+    ]);
+  });
+
+  it('carries active IRC formatting onto a channel segment', () => {
+    expect(parse(`${BOLD}#bold-chan`)).toEqual([
+      { text: '#bold-chan', channel: '#bold-chan', bold: true },
+    ]);
+  });
+});
+
 describe('segmentInlineStyle / segmentHasStyle — background colour', () => {
   it('maps a background code to a backgroundColor', () => {
     expect(segmentInlineStyle({ text: 'x', fg: 4, bg: 8 }, null)).toEqual({

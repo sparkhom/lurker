@@ -227,6 +227,63 @@ function computeUnreadFor(_userId: number, networkId: number, target: string, la
   };
 }
 
+// Builds a one-off `backlog` frame for a single buffer — used when a closed
+// buffer is reopened (the user clicked its channel name). Unlike the snapshot
+// loop this ignores the resume cursor and always ships the recent slice; the
+// client dedupes by id, so it's safe even if the buffer is already open.
+export function buildBufferBacklog(userId: number, networkId: number, target: string): WsPayload {
+  const conn = ircManager.getConnection(userId, networkId);
+  const events = listMessages(networkId, target, { limit: 200 }).map((e) =>
+    decorateMessage(userId, e),
+  );
+  const lastReadId = getReadState(userId, networkId, target);
+  const counts = computeUnreadFor(userId, networkId, target, lastReadId);
+  return {
+    kind: 'backlog',
+    networkId,
+    target,
+    events,
+    speakers: listSpeakers(networkId, target),
+    // A channel counts as joined only while a live connection is tracking it;
+    // a stopped/offline network has no connection, so treat it as parted
+    // rather than refusing to ship the history at all.
+    joined: target.startsWith('#') ? !!conn?.channels.has(target.toLowerCase()) : true,
+    lastReadId: counts.lastReadId,
+    unread: counts.unread,
+    highlights: counts.highlights,
+    highlightsCapped: counts.highlightsCapped,
+    inputHistory: listRecentInputHistory(userId, networkId, target, 200),
+  };
+}
+
+// Handles a client `open-buffer` request (a clicked channel name). Resolves
+// the requested target against buffers that already have persisted history —
+// case-insensitively, since IRC channel names are case-insensitive but
+// message rows store one canonical casing. A match (even a since-/closed
+// buffer) is reopened and re-seeded without a re-JOIN; a channel with no
+// history anywhere is one we've never visited, so it gets joined. Either way
+// the requesting socket is told the canonical target to focus, so it never
+// has to guess the casing.
+export function handleOpenBuffer(
+  ws: LurkerWebSocket,
+  userId: number,
+  networkId: number,
+  requested: string,
+): void {
+  if (!networkId || !requested || requested.startsWith(':server:')) return;
+  const canonical = listBufferTargets(networkId).find(
+    (t) => t.toLowerCase() === requested.toLowerCase(),
+  );
+  if (canonical) {
+    reopenBuffer(userId, networkId, canonical);
+    send(ws, buildBufferBacklog(userId, networkId, canonical));
+    send(ws, { kind: 'buffer-opened', networkId, target: canonical });
+  } else if (requested.startsWith('#')) {
+    ircManager.joinChannel(userId, networkId, requested);
+    send(ws, { kind: 'buffer-opened', networkId, target: requested });
+  }
+}
+
 // Per-user socket bookkeeping lives at module scope so the verb registry can
 // reach into fanOut without importing the WSS instance. The state is still
 // owned by attachWsHub at runtime (it's the only writer to socketsByUser via
@@ -780,6 +837,15 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
       }
       case 'join':
         ircManager.joinChannel(userId, msg.networkId as number, msg.channel as string);
+        break;
+      case 'open-buffer':
+        // A clicked channel name — handleOpenBuffer resolves reopen-vs-join.
+        handleOpenBuffer(
+          ws,
+          userId,
+          Number(msg.networkId),
+          typeof msg.target === 'string' ? msg.target : '',
+        );
         break;
       case 'part':
         ircManager.partChannel(
