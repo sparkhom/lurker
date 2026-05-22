@@ -720,6 +720,38 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
     ws.sinceId = maxSentId;
   }
 
+  // One-off backlog frame for a single buffer — used when a closed buffer is
+  // reopened (the user clicked its channel name). Unlike sendSnapshot this
+  // ignores the resume cursor and always ships the recent slice; the client
+  // dedupes by id, so this is safe even if the buffer is already open.
+  function sendBufferBacklog(
+    ws: LurkerWebSocket,
+    userId: number,
+    networkId: number,
+    target: string,
+  ): void {
+    const conn = ircManager.getConnection(userId, networkId);
+    if (!conn) return;
+    const events = listMessages(networkId, target, { limit: 200 }).map((e) =>
+      decorateMessage(userId, e),
+    );
+    const lastReadId = getReadState(userId, networkId, target);
+    const counts = computeUnreadFor(userId, networkId, target, lastReadId);
+    send(ws, {
+      kind: 'backlog',
+      networkId,
+      target,
+      events,
+      speakers: listSpeakers(networkId, target),
+      joined: target.startsWith('#') ? conn.channels.has(target.toLowerCase()) : true,
+      lastReadId: counts.lastReadId,
+      unread: counts.unread,
+      highlights: counts.highlights,
+      highlightsCapped: counts.highlightsCapped,
+      inputHistory: listRecentInputHistory(userId, networkId, target, 200),
+    });
+  }
+
   function handleClientMessage(ws: LurkerWebSocket, user: User, msg: WsPayload): void {
     const userId = user.id;
     // Any message that carries a networkId must reference a network the caller
@@ -781,6 +813,24 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
       case 'join':
         ircManager.joinChannel(userId, msg.networkId as number, msg.channel as string);
         break;
+      case 'open-buffer': {
+        // A clicked channel name. If the channel has persisted history — even
+        // one the user has since /closed — reopen its buffer and re-seed it
+        // without re-JOINing (mirrors IRCCloud: clicking a channel you've been
+        // in just takes you to its buffer). A channel with no history is one
+        // we've never visited, so clicking it joins.
+        const networkId = Number(msg.networkId);
+        const target = typeof msg.target === 'string' ? msg.target : '';
+        if (!networkId || !target || target.startsWith(':server:')) break;
+        const hasHistory = listMessages(networkId, target, { limit: 1 }).length > 0;
+        if (hasHistory) {
+          reopenBuffer(userId, networkId, target);
+          sendBufferBacklog(ws, userId, networkId, target);
+        } else if (target.startsWith('#') || target.startsWith('&')) {
+          ircManager.joinChannel(userId, networkId, target);
+        }
+        break;
+      }
       case 'part':
         ircManager.partChannel(
           userId,

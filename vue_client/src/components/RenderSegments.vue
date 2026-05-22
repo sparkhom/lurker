@@ -79,15 +79,22 @@ function hasStyle(seg: RenderSegment): boolean {
   return segmentHasStyle(seg);
 }
 
-// Clicking a channel name mirrors IRCCloud: if a buffer for it already exists
-// — you've been there before, even if since parted — just switch to it;
-// otherwise JOIN, which both enters the channel and opens its buffer.
+// Clicking a channel name mirrors IRCCloud. If the buffer is already open in
+// this client, just switch to it. Otherwise hand off to the server, which
+// decides (see the `open-buffer` handler): a channel with persisted history —
+// even one the user has since /closed — is reopened and re-seeded without
+// re-JOINing; a channel we've genuinely never visited gets joined. The client
+// can't make this call itself — closed buffers are filtered out of its
+// snapshot, so a since-closed channel is locally indistinguishable from a
+// brand-new one.
 function openChannel(channel: string): void {
   const nid = props.networkId;
   if (nid == null) return;
-  if (!buffers.byKey(`${nid}::${channel}`)) {
-    socketSend({ type: 'join', networkId: nid, channel });
+  if (buffers.byKey(`${nid}::${channel}`)) {
+    buffers.activate(nid, channel);
+    return;
   }
+  socketSend({ type: 'open-buffer', networkId: nid, target: channel });
   buffers.activate(nid, channel);
 }
 </script>
