@@ -88,6 +88,18 @@
       :self-nick="ownNick"
       @select="onStripSelect"
     />
+    <SuggestionStrip
+      v-show="emojiStripOpen"
+      ref="emojiStripEl"
+      :items="emojiItems"
+      :key-for="emojiKeyFor"
+      @select="onEmojiSelect"
+    >
+      <template #chip="{ item }">
+        <span class="emoji-glyph">{{ item.emoji }}</span>
+        <span class="emoji-name">:{{ item.name }}:</span>
+      </template>
+    </SuggestionStrip>
     <Teleport to="body">
       <LongMessageUploadModal
         v-if="longMessageModalOpen"
@@ -117,8 +129,15 @@ import { setComposingState } from '../composables/useComposing.js';
 import { chunkCountForSay, chunkCountForAction } from '../utils/messageSplit.js';
 import { applySpoilerMarkup } from '../utils/spoilerMarkup.js';
 import { buildNickCandidates } from '../utils/nickCompletion.js';
+import {
+  findActiveShortcode,
+  findCompletedShortcode,
+  loadEmoji,
+} from '../utils/emojiShortcodes.js';
+import type { EmojiMatch } from '../utils/emojiData.js';
 import NickPicker from './NickPicker.vue';
 import NickSuggestionStrip from './NickSuggestionStrip.vue';
+import SuggestionStrip from './SuggestionStrip.vue';
 import LongMessageUploadModal from './LongMessageUploadModal.vue';
 import MircColorPicker from './MircColorPicker.vue';
 import { useSelfLabel } from '../composables/useSelfLabel.js';
@@ -147,6 +166,24 @@ const stripQuery = ref('');
 let stripTokenStart = -1;
 let stripTokenEnd = -1;
 const colorPickerOpen = ref(false);
+
+// Slack-style `:shortcode:` emoji suggester. The strip floats over the
+// StatusBar (the same slot as the mobile nick strip) but is keyboard-navigable
+// like the desktop NickPicker. `emojiToken{Start,End}` mark the `:query` span
+// in the draft that a pick or inline auto-convert replaces. The ~1,900-entry
+// emoji table is a lazily-loaded chunk (see `loadEmoji`), so nothing here
+// pulls it into the initial bundle.
+type StripHandle = {
+  moveActive: (delta: number) => void;
+  confirmActive: () => void;
+  hasCandidates: () => boolean;
+};
+const emojiStripOpen = ref(false);
+const emojiItems = ref<EmojiMatch[]>([]);
+const emojiStripEl = ref<StripHandle | null>(null);
+let emojiTokenStart = -1;
+let emojiTokenEnd = -1;
+const emojiKeyFor = (m: EmojiMatch): string => m.name;
 
 const active = computed(() => networks.activeBuffer);
 
@@ -456,6 +493,10 @@ function resetCompletion() {
 
 function onBlur() {
   resetCompletion();
+  // Dismiss the emoji suggester on focus loss so it doesn't linger over the
+  // StatusBar — picking a chip keeps focus (mousedown.prevent) so this never
+  // races a selection.
+  closeEmojiStrip();
   // Force the active buffer's draft to the server now rather than waiting on
   // the debounce timer — covers refocus into a different tab or mobile
   // app-switch without losing the in-progress text.
@@ -586,6 +627,45 @@ function onKeydown(e: KeyboardEvent): void {
       return;
     }
   }
+  // The emoji suggester owns the navigation keys while it's open with
+  // candidates — all four arrows cycle the highlight (Down/Right step toward
+  // the next chip, Up/Left toward the previous), Tab/Enter confirm, Escape
+  // closes. Runs ahead of the history-nav and Enter-submit handlers so they
+  // don't double-fire. Hijacking Left/Right means the caret can't move inside
+  // the shortcode while the strip is up — acceptable, since the caret sits at
+  // the end of the `:query` anyway and Escape frees it. Bare arrows only:
+  // modifier+arrow still does its normal caret jump / buffer-nav. Skipped
+  // during an IME composition. The emoji strip and the nick picker are never
+  // open at once (refreshPicker closes one before opening the other), so the
+  // two blocks can't both fire.
+  if (emojiStripOpen.value && !e.isComposing && emojiStripEl.value?.hasCandidates()) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeEmojiStrip();
+      return;
+    }
+    if (
+      e.key === 'ArrowUp' ||
+      e.key === 'ArrowDown' ||
+      e.key === 'ArrowLeft' ||
+      e.key === 'ArrowRight'
+    ) {
+      if (!e.altKey && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        const forward = e.key === 'ArrowDown' || e.key === 'ArrowRight';
+        emojiStripEl.value.moveActive(forward ? 1 : -1);
+        return;
+      }
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      emojiStripEl.value.confirmActive();
+      return;
+    } else if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      emojiStripEl.value.confirmActive();
+      return;
+    }
+  }
   if (e.key === 'Enter') {
     // Textareas don't submit forms on Enter, so we trigger submission here.
     // Shift+Enter falls through to the default newline insert. e.isComposing
@@ -668,15 +748,125 @@ function closeStrip() {
   stripTokenEnd = -1;
 }
 
+function closeEmojiStrip() {
+  emojiStripOpen.value = false;
+  emojiItems.value = [];
+  emojiTokenStart = -1;
+  emojiTokenEnd = -1;
+}
+
+// Open/refresh the emoji suggester for the shortcode under the caret. Async
+// because the emoji table is a lazily-loaded chunk; the candidate set is
+// re-derived from live text once it resolves, so a fast typist (or an
+// out-of-order resolve) still ends up showing the current query's matches.
+async function showEmojiStrip() {
+  const mod = await loadEmoji().catch(() => null);
+  if (!mod) {
+    closeEmojiStrip();
+    return;
+  }
+  const el = inputEl.value;
+  if (!el) {
+    closeEmojiStrip();
+    return;
+  }
+  const value = text.value;
+  const sc = findActiveShortcode(value, el.selectionStart ?? value.length);
+  if (!sc || sc.name.length < 2) {
+    closeEmojiStrip();
+    return;
+  }
+  const matches = mod.searchEmoji(sc.name);
+  if (!matches.length) {
+    closeEmojiStrip();
+    return;
+  }
+  emojiItems.value = matches;
+  emojiTokenStart = sc.start;
+  emojiTokenEnd = sc.end;
+  emojiStripOpen.value = true;
+}
+
+// Replace the `:query` token with the picked emoji. No trailing space — emoji
+// often run together, and the typed-out auto-convert path can't add one
+// either, so the two stay consistent.
+function onEmojiSelect(item: EmojiMatch): void {
+  const value = text.value;
+  if (emojiTokenStart < 0) {
+    closeEmojiStrip();
+    return;
+  }
+  const before = value.slice(0, emojiTokenStart);
+  const after = value.slice(emojiTokenEnd);
+  cycling = true;
+  text.value = before + item.emoji + after;
+  cycling = false;
+  closeEmojiStrip();
+  queueMicrotask(() => {
+    const el = inputEl.value;
+    if (!el) return;
+    const caret = before.length + item.emoji.length;
+    el.focus();
+    el.setSelectionRange(caret, caret);
+  });
+}
+
+// Inline `:shortcode:` → emoji, fired from onInput when the user types the
+// closing `:` of a known shortcode. Async for the same lazy-chunk reason as
+// showEmojiStrip; the match is re-validated against live text before the
+// rewrite, in case the draft moved on while the chunk loaded.
+async function maybeConvertShortcode() {
+  const el = inputEl.value;
+  if (!el) return;
+  const sc = findCompletedShortcode(text.value, el.selectionStart ?? text.value.length);
+  if (!sc) return;
+  const mod = await loadEmoji().catch(() => null);
+  if (!mod) return;
+  const emoji = mod.emojiForShortcode(sc.name);
+  if (!emoji) return;
+  const el2 = inputEl.value;
+  if (!el2) return;
+  const value = text.value;
+  const fresh = findCompletedShortcode(value, el2.selectionStart ?? value.length);
+  if (!fresh || fresh.name !== sc.name) return;
+  const before = value.slice(0, fresh.start);
+  const after = value.slice(fresh.end);
+  cycling = true;
+  text.value = before + emoji + after;
+  cycling = false;
+  closeEmojiStrip();
+  queueMicrotask(() => {
+    const e2 = inputEl.value;
+    if (!e2) return;
+    const caret = before.length + emoji.length;
+    e2.focus();
+    e2.setSelectionRange(caret, caret);
+  });
+}
+
 function refreshPicker() {
   const el = inputEl.value;
   if (!el) {
     closePicker();
     closeStrip();
+    closeEmojiStrip();
     return;
   }
   const value = text.value;
   const cursor = el.selectionStart ?? value.length;
+
+  // An in-progress `:shortcode:` owns the suggester slot — it isn't a nick
+  // token, and the emoji strip and the nick picker/strip share one slot over
+  // the StatusBar. Min length 2 keeps the strip from flashing on a lone `:x`.
+  const shortcode = findActiveShortcode(value, cursor);
+  if (shortcode && shortcode.name.length >= 2) {
+    closePicker();
+    closeStrip();
+    void showEmojiStrip();
+    return;
+  }
+  closeEmojiStrip();
+
   const { token, start, end } = tokenAtCursor(value, cursor);
 
   // Slash commands never trigger nick completion in either UI.
@@ -785,6 +975,9 @@ function onInput() {
   setComposingState({ chunks, isAction });
   if (!sendable.value || !active.value) return;
   if (completion) resetCompletion();
+  // Inline-convert a just-completed `:shortcode:`, then refresh the suggester
+  // for whatever shortcode (if any) is still in progress at the caret.
+  void maybeConvertShortcode();
   refreshPicker();
   const { networkId, target } = active.value;
   const trimmed = text.value.trim();
@@ -823,6 +1016,7 @@ watch(active, (newActive, oldActive) => {
   resetCompletion();
   closePicker();
   closeStrip();
+  closeEmojiStrip();
   closeColorPicker();
   resetHistoryNav();
   // A switch between buffers swaps the draft text via the `text` computed,
@@ -1002,6 +1196,7 @@ async function submit() {
   resetCompletion();
   closePicker();
   closeStrip();
+  closeEmojiStrip();
   closeColorPicker();
   const raw = text.value;
   if (!raw.trim() || !active.value) return;
@@ -1470,6 +1665,13 @@ function handleCommand(line: string, networkId: number, target: string): boolean
 }
 .file-hidden {
   display: none;
+}
+/* Emoji suggester chip body — the glyph leads, the `:shortcode:` trails as a
+   muted label so two near-identical emoji stay distinguishable. Styled here
+   (not in SuggestionStrip) because slot content carries this component's
+   scope. */
+.emoji-name {
+  opacity: 0.6;
 }
 textarea {
   flex: 1;
