@@ -58,11 +58,13 @@
    on iOS, a focused text input means the keyboard is up and there's no home
    indicator to clear. */
 @media (display-mode: standalone) {
-  .mchat {
+  .mchat,
+  .chat {
     box-sizing: border-box;
     padding-bottom: env(safe-area-inset-bottom);
   }
-  :root:has(input:focus, textarea:focus, [contenteditable]:focus) .mchat {
+  :root:has(input:focus, textarea:focus, [contenteditable]:focus) .mchat,
+  :root:has(input:focus, textarea:focus, [contenteditable]:focus) .chat {
     padding-bottom: 0;
   }
 }

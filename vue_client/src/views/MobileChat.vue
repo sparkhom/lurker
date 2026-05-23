@@ -136,7 +136,6 @@ import type { Network } from '../stores/networks.js';
 import type { BufferLike } from '../composables/useBufferActions.js';
 import { useNetworksStore } from '../stores/networks.js';
 import { useSocket } from '../composables/useSocket.js';
-import { useVisualViewportHeight } from '../composables/useViewport.js';
 import { useChatBootstrap } from '../composables/useChatBootstrap.js';
 import { useActiveBuffer } from '../composables/useActiveBuffer.js';
 import { useBufferActions } from '../composables/useBufferActions.js';
@@ -180,10 +179,6 @@ function openSystemConsole() {
   // directly so the second tap behaves like the first.
   screen.value = 'buffer';
 }
-
-// Pin --viewport-h to the visualViewport height so the shell stays glued to
-// the visible region when the iOS soft keyboard pushes content up.
-useVisualViewportHeight();
 
 // `list` (default) → tap a buffer → `buffer` → tap members icon → `members`.
 // Back arrows walk the stack backwards. We don't sync this to the URL — the

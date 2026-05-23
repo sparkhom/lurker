@@ -99,8 +99,18 @@ onMounted(() => {
 
 <style scoped>
 .modal {
+  /* Size to the visualViewport rather than the layout viewport. On iOS
+     Safari `inset: 0` + bare `100vh` overshoots — the layout viewport
+     includes the URL-bar zone, so the modal box (and the card centered
+     inside it) extended below the visible bottom on iPad. --viewport-h /
+     --viewport-y come from useVisualViewportHeight() in App.vue; on real
+     desktops both are no-ops. See issue #11. */
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--viewport-h, 100dvh);
+  transform: translateY(var(--viewport-y, 0));
   background: var(--bg);
   display: flex;
   justify-content: center;
@@ -113,13 +123,15 @@ onMounted(() => {
 }
 .modal.align-top {
   align-items: flex-start;
-  padding-top: 2vh;
+  padding-top: 2dvh;
 }
-/* Match the 2vh top so a fully-tall card has equal breathing room
-   above and below. Default .card max-height: 85vh would otherwise
-   leave a ~13vh gap at the bottom. */
+/* Match the 2dvh top so a fully-tall card has equal breathing room
+   above and below. Default .card max-height: 85dvh would otherwise
+   leave a ~13dvh gap at the bottom. dvh (dynamic viewport height)
+   tracks the visible area as the iPad URL bar collapses; plain vh
+   would lock to the layout viewport and overflow. */
 .modal.align-top .card {
-  max-height: 96vh;
+  max-height: 96dvh;
 }
 
 /* On mobile every modal becomes a full-screen sheet — the card fills the
@@ -146,7 +158,8 @@ onMounted(() => {
 .card {
   position: relative;
   width: min(720px, 92vw);
-  max-height: 85vh;
+  /* dvh, not vh — see the note on .modal above. */
+  max-height: 85dvh;
   display: flex;
   flex-direction: column;
   background: var(--bg);

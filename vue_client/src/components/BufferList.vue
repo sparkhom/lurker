@@ -575,8 +575,14 @@ onBeforeUnmount(() => {
   cursor: pointer;
   border-left: 2px solid transparent;
 }
-.net-head:hover {
-  background: var(--bg-soft);
+/* Gate :hover behind (hover: hover) so iPad-in-desktop-layout (width > 768px,
+   touch-only) doesn't get the iOS sticky-hover two-tap: with bare :hover the
+   first tap is consumed as a hover preview, only the second activates. See
+   issue #11. */
+@media (hover: hover) {
+  .net-head:hover {
+    background: var(--bg-soft);
+  }
 }
 .net-head.active {
   background: var(--bg-soft);
@@ -656,8 +662,10 @@ onBeforeUnmount(() => {
   border-left: 1px solid var(--border);
   pointer-events: none;
 }
-.channels li:hover {
-  background: var(--bg-soft);
+@media (hover: hover) {
+  .channels li:hover {
+    background: var(--bg-soft);
+  }
 }
 .channels li.active {
   background: var(--bg-soft);
@@ -736,12 +744,20 @@ onBeforeUnmount(() => {
   opacity: 0;
   transition: opacity 80ms linear;
 }
-.channels li:hover .row-actions,
+/* Reveal the row-actions button on hover (desktop) or keyboard focus (a11y).
+   No touch path here on purpose — long-press fires `contextmenu` on the row,
+   which already opens the same buffer-actions menu, so iPad users reach
+   identical functionality without paying the sticky-hover two-tap tax. */
+@media (hover: hover) {
+  .channels li:hover .row-actions {
+    opacity: 1;
+  }
+  .channels .row-actions:hover {
+    color: var(--fg);
+  }
+}
 .channels .row-actions:focus-visible {
   opacity: 1;
-}
-.channels .row-actions:hover {
-  color: var(--fg);
 }
 @media (max-width: 768px) {
   .channels .row-actions {
