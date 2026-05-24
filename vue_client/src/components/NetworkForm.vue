@@ -4,9 +4,13 @@
 -->
 
 <template>
-  <div class="modal" @click.self="$emit('close')">
-    <form class="card" @submit.prevent="submit">
-      <h2>{{ isEdit ? 'Edit network' : 'Add network' }}</h2>
+  <AppModal
+    :word="isEdit ? 'edit' : 'network'"
+    :title="isEdit ? 'edit network' : 'add network'"
+    size="sm"
+    @close="$emit('close')"
+  >
+    <form class="net-form" @submit.prevent="submit">
       <label>
         <span>Name</span>
         <input v-model="form.name" placeholder="Libera" required />
@@ -105,11 +109,12 @@
         </button>
       </div>
     </form>
-  </div>
+  </AppModal>
 </template>
 
 <script setup lang="ts">
 import { reactive, ref, computed } from 'vue';
+import AppModal from './AppModal.vue';
 import { useNetworksStore, type Network } from '../stores/networks.js';
 
 const props = withDefaults(
@@ -223,29 +228,19 @@ async function remove(): Promise<void> {
 </script>
 
 <style scoped>
-.modal {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-}
-.card {
-  background: var(--bg);
-  border: 1px solid var(--accent);
-  padding: 16px 20px;
-  width: 400px;
+/* Scroll within the card when advanced options stretch the form past the
+   modal's max-height; the AppModal shell already clips and centers. */
+.net-form {
   display: flex;
   flex-direction: column;
   gap: 10px;
-}
-h2 {
-  margin: 0 0 4px;
-  color: var(--accent);
-  text-transform: lowercase;
-  font-weight: 600;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* Match the breakout pattern from SearchModal/RecentUploadsModal so the
+     scrollbar sits against the card border instead of inside the padding. */
+  margin: 0 calc(-1 * var(--card-pad-x));
+  padding: 0 var(--card-pad-x);
 }
 label {
   display: flex;
