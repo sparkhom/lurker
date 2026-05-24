@@ -49,30 +49,32 @@
           :class="{ active: cat.id === activeCategoryId }"
           >{{ cat.label }}</RouterLink
         >
-        <div
-          v-if="
-            cat.id === 'appearance' &&
-            activeCategoryId === 'appearance' &&
-            appearanceSubsections.length > 1
-          "
-          class="sidebar-subnav"
-          aria-label="appearance subsections"
-        >
-          <RouterLink
-            v-for="subsection in appearanceSubsections"
-            :key="subsection.id"
-            class="sidebar-sublink"
-            :class="{ active: subsection.id === activeAppearanceSubsectionId }"
-            :to="{
-              name: 'settings',
-              params: { category: 'appearance' },
-              hash: `#${subsection.id}`,
-            }"
-            @click="$emit('selectAppearanceSubsection', subsection.id)"
+        <Transition name="sidebar-subnav">
+          <div
+            v-if="
+              cat.id === 'appearance' &&
+              activeCategoryId === 'appearance' &&
+              appearanceSubsections.length > 1
+            "
+            class="sidebar-subnav"
+            aria-label="appearance subsections"
           >
-            {{ subsection.label }}
-          </RouterLink>
-        </div>
+            <RouterLink
+              v-for="subsection in appearanceSubsections"
+              :key="subsection.id"
+              class="sidebar-sublink"
+              :class="{ active: subsection.id === activeAppearanceSubsectionId }"
+              :to="{
+                name: 'settings',
+                params: { category: 'appearance' },
+                hash: `#${subsection.id}`,
+              }"
+              @click="$emit('selectAppearanceSubsection', subsection.id)"
+            >
+              {{ subsection.label }}
+            </RouterLink>
+          </div>
+        </Transition>
       </template>
     </template>
 
@@ -243,9 +245,23 @@ watch(searchEl, (el) => {
 
 .sidebar-subnav {
   display: flex;
+  flex: 0 0 auto;
   flex-direction: column;
   gap: 1px;
   margin: 1px 0 4px;
+  max-height: 240px;
+  overflow: hidden;
+}
+.sidebar-subnav-enter-active,
+.sidebar-subnav-leave-active {
+  transition:
+    max-height 160ms ease,
+    opacity 120ms ease;
+}
+.sidebar-subnav-enter-from,
+.sidebar-subnav-leave-to {
+  max-height: 0;
+  opacity: 0;
 }
 .sidebar-sublink {
   color: var(--fg-muted);
