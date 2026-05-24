@@ -632,6 +632,19 @@ export const useBuffersStore = defineStore('buffers', {
       if (buf.pendingRefetch) {
         buf.pendingRefetch = false;
         this.reattachToLive(networkId, target);
+      } else if (buf.messages.length === 0 && !buf.detached && !buf.loadingHistory) {
+        // First-load fetch. The buffer shell exists but has no messages —
+        // either it's brand new (profile-modal "Send DM" to a nick we've
+        // never DM'd before) or it was pre-created by a side channel
+        // (presence/typing/MONITOR events touch ensureBuffer without
+        // seeding history) and the initial backlog snapshot only covers
+        // buffers that were already open at socket-connect. Push-notification
+        // deep-links land here too, since isOpen() is satisfied by any shell
+        // in the store regardless of message contents. Kick a latest fetch
+        // here so every entry path is uniformly seeded — the MessageList
+        // lifecycle's ensureViewportFilled() goes back to being a safety
+        // net rather than the load-bearing initial-fetch trigger.
+        this.reattachToLive(networkId, target);
       }
       // For DMs, ask the server to WHOIS-probe the peer so the banner/sidebar
       // dim reflect current state rather than a possibly-stale cached value.
