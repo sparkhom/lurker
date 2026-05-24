@@ -140,20 +140,23 @@ onBeforeUnmount(() => {
   background: var(--bg);
   border: 1px solid var(--border);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
-  padding: 4px 0;
+  /* No outer padding — first/last items go edge-to-edge so the hover wash
+     fills the corners of the popup instead of leaving dead strips. */
+  padding: 0;
   color: var(--fg);
   user-select: none;
 }
 .item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
-  padding: 7px 12px;
+  padding: 8px 12px;
   background: none;
   border: none;
   color: inherit;
   font: inherit;
+  line-height: 1.4;
   text-align: left;
   cursor: pointer;
 }
@@ -169,10 +172,16 @@ onBeforeUnmount(() => {
   color: var(--fg-muted);
   cursor: default;
 }
+/* Fixed-height box with line-height:1 ensures FA glyph metrics center on the
+   label's text baseline instead of riding a few pixels high. */
 .icon {
   display: inline-flex;
-  width: 14px;
+  align-items: center;
   justify-content: center;
+  width: 16px;
+  height: 1em;
+  flex-shrink: 0;
+  line-height: 1;
   color: var(--fg-muted);
 }
 .divider {
