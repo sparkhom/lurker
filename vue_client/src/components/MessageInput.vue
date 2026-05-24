@@ -123,6 +123,7 @@ import { useSettingsStore } from '../stores/settings.js';
 import { useUploadsStore, onInsertUrl } from '../stores/uploads.js';
 import { useToastsStore } from '../stores/toasts.js';
 import { useIgnoresStore } from '../stores/ignores.js';
+import { useWhoisStore } from '../stores/whois.js';
 import { socketSend, socketSendWithAck } from '../composables/useSocket.js';
 import { requestScrollToBottom } from '../composables/useScrollState.js';
 import { setComposingState } from '../composables/useComposing.js';
@@ -1462,7 +1463,11 @@ function handleCommand(line: string, networkId: number, target: string): boolean
         localInfo(networkId, target, 'usage: /whois <nick>');
         return true;
       }
-      return sendOrToast({ type: 'raw', networkId, line: `WHOIS ${who}` }, line);
+      // openViewer kicks the WHOIS itself (issue #92) so we don't double-fire.
+      // The modal renders whatever's cached immediately and replaces it when
+      // the new whois_result lands.
+      useWhoisStore().openViewer(networkId, who);
+      return true;
     }
     case 'kick': {
       // /kick <nick> [reason]            (in a channel buffer)

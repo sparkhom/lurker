@@ -17,6 +17,7 @@ import { useNicklistCollapseStore } from '../stores/nicklistCollapse.js';
 import { useChannelNotifyStore } from '../stores/channelNotify.js';
 import { useIgnoresStore } from '../stores/ignores.js';
 import { useNickNotesStore } from '../stores/nickNotes.js';
+import { useWhoisStore } from '../stores/whois.js';
 import { useBookmarksStore } from '../stores/bookmarks.js';
 import { useSystemLogStore } from '../stores/systemLog.js';
 import { notifyForEvent } from './useHighlightNotifier.js';
@@ -184,6 +185,11 @@ function applyEvent(event: any): void {
     case 'error':
       buffers.pushMessage({ ...event, target: event.target || `:server:${event.networkId}` });
       break;
+    case 'whois_result': {
+      const whois = useWhoisStore();
+      whois.applyResult(event.networkId, event.whois || {});
+      break;
+    }
     case 'chanlist-start': {
       const chanlist = useChanlistStore();
       chanlist.applyStart(event.networkId);

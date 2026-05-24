@@ -5,6 +5,7 @@ import type { ContextMenuItem } from './useContextMenu.js';
 import { usePinsStore } from '../stores/pins.js';
 import { useChannelNotifyStore } from '../stores/channelNotify.js';
 import { useNickNotesStore } from '../stores/nickNotes.js';
+import { useWhoisStore } from '../stores/whois.js';
 import { useContextMenu } from './useContextMenu.js';
 import { socketSend } from './useSocket.js';
 
@@ -27,6 +28,7 @@ export function useBufferActions(): BufferActionsAPI {
   const pins = usePinsStore();
   const channelNotify = useChannelNotifyStore();
   const nickNotes = useNickNotesStore();
+  const whois = useWhoisStore();
   const menu = useContextMenu();
 
   function buildItems(buf: BufferLike | null | undefined): ContextMenuItem[] {
@@ -63,10 +65,16 @@ export function useBufferActions(): BufferActionsAPI {
             },
       );
     } else {
-      // DM target is the peer's nick — open the note editor directly. Channels
-      // can't carry a per-nick note from this menu (which nick?), so the entry
-      // is DM-only; in-channel nick notes flow through the member list menu.
+      // DM target is the peer's nick — open the profile/note actions directly.
+      // Channels can't carry a per-nick action from this menu (which nick?),
+      // so these are DM-only; in-channel equivalents flow through the member
+      // list menu.
       const hasNote = nickNotes.hasNote(buf.networkId, buf.target);
+      items.push({
+        label: 'View profile…',
+        icon: 'fa-solid fa-id-card',
+        onClick: () => whois.openViewer(buf.networkId, buf.target),
+      });
       items.push({
         label: hasNote ? 'Edit note…' : 'Add note…',
         icon: 'fa-solid fa-note-sticky',

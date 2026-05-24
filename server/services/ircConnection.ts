@@ -1179,20 +1179,15 @@ export class IrcConnection {
     });
 
     // irc-framework aggregates RPL_WHOIS* (311/312/317/319/330/...) into a
-    // single 'whois' event when RPL_ENDOFWHOIS arrives. We fan it out as
-    // motd-style lines on the server buffer so the user actually sees the
-    // result of /whois (raw fall-through alone hides everything because the
-    // numerics are consumed by irc-framework instead of becoming messages).
-    // irc-framework aggregates RPL_WHOIS* (311/312/317/319/330/...) into a
-    // single 'whois' event when RPL_ENDOFWHOIS arrives. WHOIS is now purely
-    // user-driven output — presence comes from MONITOR + away-notify, not
-    // whois — so this handler just formats the reply into motd lines.
+    // single 'whois' event when RPL_ENDOFWHOIS arrives. We fan it out as a
+    // structured `whois_result` event so the client can render it in the
+    // user-profile modal (issue #92). It's ephemeral — the modal pulls it
+    // from a per-nick cache, no scrollback noise. `error: 'not_found'`
+    // surfaces here too (irc-framework synthesizes a whois event with that
+    // shape on ERR_NOSUCHNICK) so the modal can flip to its empty state.
     c.on('whois', (event: Record<string, unknown>) => {
       if (!event || !event.nick) return;
-      const lines = formatWhoisLines(event);
-      for (const text of lines) {
-        this.publish({ type: 'motd', target: this.serverTarget(), text });
-      }
+      this.publishEphemeral({ type: 'whois_result', whois: event });
     });
 
     // Channel list (`/LIST`). irc-framework batches RPL_LIST every 50 rows and
@@ -1782,45 +1777,6 @@ export function computeFallbackNick(
   if (!base) return null;
   if (attemptIndex < 0 || attemptIndex >= NICK_FALLBACK_MAX) return null;
   return `${base}${attemptIndex + 1}`;
-}
-
-// Render irc-framework's aggregated `whois` event into a small block of
-// human-readable lines. Order roughly mirrors what other IRC clients show:
-// identity → realname → host/ip → connection security → server → channels →
-// modes → idle/signon → registered/account/oper/bot → secure/certfp.
-function formatWhoisLines(w: Record<string, unknown>): string[] {
-  const lines: string[] = [];
-  if (w.error === 'not_found') {
-    lines.push(`whois: no such nick ${w.nick}`);
-    return lines;
-  }
-  const userhost = [w.ident, w.hostname].filter(Boolean).join('@');
-  lines.push(`whois ${w.nick}${userhost ? ` (${userhost})` : ''}`);
-  if (w.real_name) lines.push(`  realname: ${w.real_name}`);
-  if (w.actual_hostname || w.actual_ip) {
-    const parts = [w.actual_hostname, w.actual_ip].filter(Boolean).join(' ');
-    lines.push(`  host: ${parts}`);
-  }
-  if (w.server) {
-    const info = w.server_info ? ` (${w.server_info})` : '';
-    lines.push(`  server: ${w.server}${info}`);
-  }
-  if (w.channels) lines.push(`  channels: ${w.channels}`);
-  if (w.modes) lines.push(`  modes: ${w.modes}`);
-  if (w.account) lines.push(`  account: ${w.account}`);
-  if (w.registered_nick) lines.push(`  registered: ${w.registered_nick}`);
-  if (w.operator) lines.push(`  oper: ${w.operator}`);
-  if (w.helpop) lines.push(`  helpop: ${w.helpop}`);
-  if (w.bot) lines.push(`  bot: ${w.bot}`);
-  if (w.secure) lines.push('  secure: yes');
-  if (w.certfp) lines.push(`  certfp: ${w.certfp}`);
-  if (w.away) lines.push(`  away: ${w.away}`);
-  if (w.idle != null) {
-    const idleSec = Number(w.idle);
-    const signonStr = w.logon ? ` (signon ${new Date(Number(w.logon) * 1000).toISOString()})` : '';
-    lines.push(`  idle: ${Number.isFinite(idleSec) ? `${idleSec}s` : w.idle}${signonStr}`);
-  }
-  return lines;
 }
 
 // Convert a server-sourced numeric reply (parsed IrcMessage) into a single

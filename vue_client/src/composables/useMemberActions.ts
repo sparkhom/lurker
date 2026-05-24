@@ -4,6 +4,7 @@
 import type { ContextMenuItem } from './useContextMenu.js';
 import { useBuffersStore } from '../stores/buffers.js';
 import { useNickNotesStore } from '../stores/nickNotes.js';
+import { useWhoisStore } from '../stores/whois.js';
 import { useContextMenu } from './useContextMenu.js';
 
 export interface MemberLike {
@@ -51,6 +52,7 @@ function nickOf(m: MemberLike | string): string {
 export function useMemberActions(): MemberActionsAPI {
   const buffers = useBuffersStore();
   const nickNotes = useNickNotesStore();
+  const whois = useWhoisStore();
   const menu = useContextMenu();
 
   function buildItems(
@@ -61,6 +63,11 @@ export function useMemberActions(): MemberActionsAPI {
     const nick = nickOf(member);
     const hasNote = nickNotes.hasNote(ctx.networkId, nick);
     const items: ContextMenuItem[] = [
+      {
+        label: 'View profile…',
+        icon: 'fa-solid fa-id-card',
+        onClick: () => whois.openViewer(ctx.networkId, nick),
+      },
       {
         label: 'Send DM',
         icon: 'fa-solid fa-envelope',

@@ -63,7 +63,16 @@
       <span class="buffer">System console</span>
     </header>
     <header v-else-if="active" class="topic">
-      <span class="buffer">{{ bufferLabel }}</span>
+      <button
+        v-if="isDmHeader"
+        type="button"
+        class="buffer link"
+        title="View profile"
+        @click="openDmProfile"
+      >
+        {{ bufferLabel }}
+      </button>
+      <span v-else class="buffer">{{ bufferLabel }}</span>
       <template v-if="topic">
         <span class="sep">│</span>
         <button type="button" class="topic-text" title="View full topic" @click="showTopic = true">
@@ -147,6 +156,14 @@
     <QuickSwitcher v-if="showSwitcher" @close="showSwitcher = false" />
     <SearchModal v-if="showSearch" @close="showSearch = false" @jump="onJumpToMessage" />
     <KeyboardHelpModal v-if="showKbdHelp" @close="showKbdHelp = false" />
+    <UserProfileModal
+      v-if="whois.viewer.open && whois.viewer.networkId != null"
+      :nick="whois.viewer.nick"
+      :network-id="whois.viewer.networkId"
+    />
+    <!-- NickNoteModal comes last so when both are open (edit-note-from-profile)
+         it lands on top — AppModal uses a fixed z-index, so DOM order is the
+         tiebreaker. -->
     <NickNoteModal
       v-if="nickNotes.editor.open && nickNotes.editor.networkId != null"
       :nick="nickNotes.editor.nick"
@@ -182,9 +199,11 @@ import QuickSwitcher from '../components/QuickSwitcher.vue';
 import SearchModal from '../components/SearchModal.vue';
 import KeyboardHelpModal from '../components/KeyboardHelpModal.vue';
 import NickNoteModal from '../components/NickNoteModal.vue';
+import UserProfileModal from '../components/UserProfileModal.vue';
 import { useKeyboardShortcuts } from '../composables/useKeyboardShortcuts.js';
 import { useNicklistCollapseStore } from '../stores/nicklistCollapse.js';
 import { useNickNotesStore } from '../stores/nickNotes.js';
+import { useWhoisStore } from '../stores/whois.js';
 import { useBufferActions } from '../composables/useBufferActions.js';
 import { useJumpToMessage } from '../composables/useJumpToMessage.js';
 
@@ -199,6 +218,7 @@ function openSystemConsole() {
 const settings = useSettingsStore();
 const nicklistCollapse = useNicklistCollapseStore();
 const nickNotes = useNickNotesStore();
+const whois = useWhoisStore();
 const bufferActions = useBufferActions();
 
 const showNetworkForm = ref(false);
@@ -307,6 +327,19 @@ watch(showChannels, async (open) => {
   void measureFootWrap();
 });
 onMounted(measureFootWrap);
+
+// True when the active buffer is a DM (not a channel, not the network's
+// server buffer). Drives the clickable DM header that opens the user
+// profile modal — channel headers stay non-interactive.
+const isDmHeader = computed(() => {
+  if (!active.value) return false;
+  if (isChannel.value || isServerBuffer.value) return false;
+  return true;
+});
+function openDmProfile() {
+  if (!active.value) return;
+  whois.openViewer(active.value.networkId, active.value.target);
+}
 
 // User count for the active channel buffer. Sits in the topic bar (next to
 // the members-toggle button) rather than the status bar — the count is a
@@ -577,6 +610,16 @@ useChatBootstrap({ onJump: onJumpToMessage });
   height: 1px;
 }
 .topic .buffer {
+  color: var(--accent);
+}
+/* DM headers double as a "view profile" trigger. Strip the .link padding so
+   the button-rendered label sits exactly where the span used to, and only
+   underline on hover so it doesn't read as a link in steady state. */
+button.buffer.link {
+  padding: 0;
+}
+button.buffer.link:hover {
+  text-decoration: underline;
   color: var(--accent);
 }
 .topic .sep {
