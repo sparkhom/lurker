@@ -233,6 +233,24 @@ describe('search_messages', () => {
     expect(result.messages).toEqual([]);
   });
 
+  // Regression for #91: the inline `from:nick` / `in:#chan` / `on:network`
+  // syntax sends a filter-only payload (no `query`). The schema used to mark
+  // `query` required, which rejected these as invalid_input and silently hung
+  // the modal — the handler and DB layer have always tolerated a missing query
+  // as long as at least one structured filter is present.
+  it('accepts filter-only searches with no free-text query', () => {
+    const result = callVerb('search_messages', rCtx(owner.id), { nick: 'alice' }) as {
+      messages: Array<{ text: string }>;
+    };
+    // Pin to message text, not nick — `m.nick = ? COLLATE NOCASE` would still
+    // match if the seed casing ever changed, but a nick-equality assertion
+    // wouldn't.
+    expect(result.messages.map((m) => m.text).toSorted()).toEqual([
+      'deployment ready',
+      'hello world',
+    ]);
+  });
+
   it('reports hasMore=false when total matches equal the requested limit exactly', () => {
     // Seed a fresh user + network so the message count is deterministic.
     const u = createUser('search-limit-edge');
