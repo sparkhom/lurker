@@ -240,10 +240,15 @@ describe('search_messages', () => {
   // as long as at least one structured filter is present.
   it('accepts filter-only searches with no free-text query', () => {
     const result = callVerb('search_messages', rCtx(owner.id), { nick: 'alice' }) as {
-      messages: Array<{ nick: string }>;
+      messages: Array<{ text: string }>;
     };
-    expect(result.messages.length).toBeGreaterThan(0);
-    expect(result.messages.every((m) => m.nick === 'alice')).toBe(true);
+    // Pin to message text, not nick — `m.nick = ? COLLATE NOCASE` would still
+    // match if the seed casing ever changed, but a nick-equality assertion
+    // wouldn't.
+    expect(result.messages.map((m) => m.text).toSorted()).toEqual([
+      'deployment ready',
+      'hello world',
+    ]);
   });
 
   it('reports hasMore=false when total matches equal the requested limit exactly', () => {
