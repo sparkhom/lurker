@@ -272,6 +272,28 @@ watch(searchEl, (el) => {
   line-height: 1.35;
   text-transform: lowercase;
   letter-spacing: 0.03em;
+  position: relative;
+}
+.sidebar-sublink::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 0;
+  height: 50%;
+  width: 8px;
+  border-left: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  pointer-events: none;
+}
+.sidebar-sublink:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  bottom: 0;
+  width: 0;
+  border-left: 1px solid var(--border);
+  pointer-events: none;
 }
 .sidebar-sublink:hover,
 .sidebar-sublink.active {
