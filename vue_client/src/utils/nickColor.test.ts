@@ -41,26 +41,26 @@ describe('splitTextByTokens — background colour', () => {
 });
 
 describe('splitTextByTokens — spoiler detection', () => {
-  it('emits a single spoiler segment when fg equals bg', () => {
+  it('emits a single spoiler segment when fg equals bg, preserving the chosen colour', () => {
     const segs = parse(`${C}01,01secret${C}`);
-    expect(segs).toEqual([{ text: 'secret', spoiler: true }]);
+    expect(segs).toEqual([{ text: 'secret', spoiler: true, fg: 1 }]);
   });
 
   it('treats any matching fg/bg pair as a spoiler, not just 01,01', () => {
     const segs = parse(`${C}04,04hidden${C}`);
-    expect(segs).toEqual([{ text: 'hidden', spoiler: true }]);
+    expect(segs).toEqual([{ text: 'hidden', spoiler: true, fg: 4 }]);
   });
 
   it('does not split a URL out of a spoiler run (no leak)', () => {
     const segs = parse(`${C}01,01see https://example.com${C}`);
     expect(segs).toHaveLength(1);
-    expect(segs[0]).toEqual({ text: 'see https://example.com', spoiler: true });
+    expect(segs[0]).toEqual({ text: 'see https://example.com', spoiler: true, fg: 1 });
     expect(segs[0].url).toBeUndefined();
   });
 
   it('keeps active bold/italic toggles on the spoiler segment', () => {
     const segs = parse(`${BOLD}${C}01,01x${C}`);
-    expect(segs).toEqual([{ text: 'x', spoiler: true, bold: true }]);
+    expect(segs).toEqual([{ text: 'x', spoiler: true, fg: 1, bold: true }]);
   });
 
   it('does not treat differing fg/bg as a spoiler', () => {
@@ -145,18 +145,28 @@ describe('splitTextByTokens — channel detection', () => {
 });
 
 describe('segmentInlineStyle / segmentHasStyle — background colour', () => {
-  it('maps a background code to a backgroundColor', () => {
+  it('maps fg and bg codes to CSS colours via the fallback palette', () => {
+    // No palette argument → fall back to MIRC_PALETTE_FALLBACK. Slot 4 is
+    // red, slot 8 is yellow.
     expect(segmentInlineStyle({ text: 'x', fg: 4, bg: 8 }, null)).toEqual({
-      color: '#ff0000',
-      backgroundColor: '#ffff00',
+      color: '#ff6188',
+      backgroundColor: '#ffd866',
     });
   });
 
   it('renders a background even when the foreground is the default (99)', () => {
-    // \x0399,01 — default text on a black background.
+    // \x0399,01 — default text on the "black" slot. The fallback "black" is
+    // var(--bg) so the box adapts to whatever theme is active.
     const style = segmentInlineStyle({ text: 'x', fg: 99, bg: 1 }, null);
     expect(style.color).toBeUndefined();
-    expect(style.backgroundColor).toBe('#000000');
+    expect(style.backgroundColor).toBe('var(--bg)');
+  });
+
+  it('honours a caller-supplied palette over the fallback', () => {
+    const palette = Array(16).fill('#abcdef');
+    palette[4] = '#deadbe';
+    const style = segmentInlineStyle({ text: 'x', fg: 4 }, null, palette);
+    expect(style.color).toBe('#deadbe');
   });
 
   it('reports a background-only segment as styled', () => {

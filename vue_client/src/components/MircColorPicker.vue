@@ -107,31 +107,22 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, watch } from 'vue';
+import { mircColor } from '../utils/nickColor.js';
+import { useMircPalette } from '../composables/useNickColors.js';
 
 // 'fg' is the text colour slot, 'bg' the background colour slot.
 type ColorTarget = 'fg' | 'bg';
 
-// The 16-color palette here mirrors MIRC_PALETTE in utils/nickColor.js — those
-// are the only codes our renderer styles, so anything outside 0-15 wouldn't
-// round-trip visibly anyway.
-const PALETTE = [
-  { code: '00', hex: '#ffffff' },
-  { code: '01', hex: '#000000' },
-  { code: '02', hex: '#00007f' },
-  { code: '03', hex: '#009300' },
-  { code: '04', hex: '#ff0000' },
-  { code: '05', hex: '#7f0000' },
-  { code: '06', hex: '#9c009c' },
-  { code: '07', hex: '#fc7f00' },
-  { code: '08', hex: '#ffff00' },
-  { code: '09', hex: '#00fc00' },
-  { code: '10', hex: '#009393' },
-  { code: '11', hex: '#00ffff' },
-  { code: '12', hex: '#0000fc' },
-  { code: '13', hex: '#ff00ff' },
-  { code: '14', hex: '#7f7f7f' },
-  { code: '15', hex: '#d2d2d2' },
-];
+// Swatches reflect the user-overridable mIRC palette so what they pick here
+// matches what the renderer will draw. The wire format is still the standard
+// mIRC code ("00".."15") — only the local preview colour changes.
+const mircPalette = useMircPalette();
+const swatches = computed(() =>
+  Array.from({ length: 16 }, (_, i) => ({
+    code: i.toString().padStart(2, '0'),
+    hex: mircColor(i, mircPalette.value) ?? '#ffffff',
+  })),
+);
 
 const props = withDefaults(
   defineProps<{
@@ -148,7 +139,6 @@ const emit = defineEmits<{
   close: [];
 }>();
 
-const swatches = PALETTE;
 const slot = ref<ColorTarget>('fg');
 const staged = reactive<{ fg: string | null; bg: string | null }>({ fg: null, bg: null });
 const hasPick = computed(() => !!staged.fg || !!staged.bg);
@@ -168,7 +158,8 @@ watch(
 // A filled chip when the slot holds a colour, a hollow one (border only) when
 // it doesn't — so the slot buttons double as a preview of the staged colour.
 function chipStyle(code: string | null): Record<string, string> {
-  const hex = code ? PALETTE.find((p) => p.code === code)?.hex : undefined;
+  if (!code) return {};
+  const hex = swatches.value.find((p) => p.code === code)?.hex;
   return hex ? { backgroundColor: hex } : {};
 }
 
