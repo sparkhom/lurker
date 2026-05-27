@@ -231,28 +231,45 @@ function colorNicksInText(
   return out;
 }
 
-// mIRC's classic 16-colour foreground palette. Indices 16-98 (extended) and
-// the \x04 hex variant aren't widely used and clash badly with custom themes,
-// so we don't render those — we just consume the escape so the digits don't
-// leak into the output.
-const MIRC_PALETTE: Record<number, string> = {
-  0: '#ffffff',
-  1: '#000000',
-  2: '#00007f',
-  3: '#009300',
-  4: '#ff0000',
-  5: '#7f0000',
-  6: '#9c009c',
-  7: '#fc7f00',
-  8: '#ffff00',
-  9: '#00fc00',
-  10: '#009393',
-  11: '#00ffff',
-  12: '#0000fc',
-  13: '#ff00ff',
-  14: '#7f7f7f',
-  15: '#d2d2d2',
-};
+// Fallback for the 16 mIRC colour slots, used when no caller-supplied palette
+// covers a given index. The chromatic slots match nick.colors defaults so a
+// renderer without a settings store (tests, MOTD pre-paint) still produces
+// theme-friendly colours; the four mono-ish slots fall back to theme vars.
+// Indices 16-98 (extended) and the \x04 hex variant aren't widely used and
+// clash badly with custom themes, so we don't render those — we just consume
+// the escape so the digits don't leak into the output.
+export const MIRC_PALETTE_FALLBACK: readonly string[] = [
+  'var(--fg)', //                                       0  white
+  'var(--bg)', //                                       1  black
+  '#6799f3', //                                         2  navy
+  '#a9dc76', //                                         3  green
+  '#ff6188', //                                         4  red
+  '#ed6c89', //                                         5  maroon
+  '#ab9df2', //                                         6  purple
+  '#fc9867', //                                         7  orange
+  '#ffd866', //                                         8  yellow
+  '#b3db82', //                                         9  lime
+  '#78dce8', //                                         10 teal
+  '#a0f1ff', //                                         11 cyan
+  '#7ba4ff', //                                         12 blue
+  '#ff7494', //                                         13 magenta
+  'var(--fg-muted)', //                                 14 gray
+  'color-mix(in srgb, var(--fg) 70%, transparent)', //  15 light gray
+];
+
+// Look up a mIRC colour slot in a caller-supplied palette, falling back to
+// MIRC_PALETTE_FALLBACK when the palette is missing the entry or empty. Out-
+// of-range indices (16-98, plus the hex \x04 variant) return null so the
+// renderer can drop them without leaking digits into the output.
+export function mircColor(
+  index: number,
+  palette: readonly string[] | null | undefined,
+): string | null {
+  if (index < 0 || index > 15) return null;
+  const supplied = palette?.[index];
+  if (supplied) return supplied;
+  return MIRC_PALETTE_FALLBACK[index] ?? null;
+}
 
 interface IrcRun {
   text: string;
@@ -407,17 +424,26 @@ export interface RenderSegment {
 // explicit IRC fg wins over nick coloring, which wins over the self-color.
 // Pass selfColor=null when rendering outside the message context (topic bar,
 // motd, etc.) — those callers never produce nick / self segments anyway.
-export function segmentInlineStyle(seg: RenderSegment, selfColor: string | null): TextSegmentStyle {
+// `mircPalette` is the user-overridable 16-colour mIRC palette from settings;
+// pass null to fall back to MIRC_PALETTE_FALLBACK (handy in tests and pre-
+// store render paths).
+export function segmentInlineStyle(
+  seg: RenderSegment,
+  selfColor: string | null,
+  mircPalette: readonly string[] | null = null,
+): TextSegmentStyle {
   const style: TextSegmentStyle = {};
-  if (seg.fg != null && MIRC_PALETTE[seg.fg]) {
-    style.color = MIRC_PALETTE[seg.fg];
+  const fg = seg.fg != null ? mircColor(seg.fg, mircPalette) : null;
+  if (fg) {
+    style.color = fg;
   } else if (seg.color) {
     style.color = seg.color;
   } else if (seg.self && selfColor) {
     style.color = selfColor;
   }
-  if (seg.bg != null && MIRC_PALETTE[seg.bg]) {
-    style.backgroundColor = MIRC_PALETTE[seg.bg];
+  if (seg.bg != null) {
+    const bg = mircColor(seg.bg, mircPalette);
+    if (bg) style.backgroundColor = bg;
   }
   if (seg.bold) style.fontWeight = 'bold';
   if (seg.italic) style.fontStyle = 'italic';
@@ -513,9 +539,11 @@ export function splitTextByTokens(
     // A run whose foreground and background are the same colour is invisible
     // text — the IRC spoiler convention. Emit it as one opaque segment and
     // skip URL / nick splitting: a linked URL or a coloured nick rendered
-    // inside the run would stay visible and leak the hidden content.
+    // inside the run would stay visible and leak the hidden content. Keep the
+    // chosen colour on the segment so SpoilerText can paint the box in the
+    // sender's colour rather than a generic gray.
     if (run.fg != null && run.bg != null && run.fg === run.bg) {
-      out.push({ text: run.text, spoiler: true, ...fmt });
+      out.push({ text: run.text, spoiler: true, fg: run.fg, ...fmt });
       continue;
     }
     if (run.fg != null) fmt.fg = run.fg;

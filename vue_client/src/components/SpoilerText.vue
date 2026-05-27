@@ -7,6 +7,7 @@
   <span
     class="spoiler"
     :class="{ revealed }"
+    :style="wrapperStyle"
     :role="revealed ? undefined : 'button'"
     :tabindex="revealed ? undefined : 0"
     :aria-expanded="revealed ? undefined : 'false'"
@@ -25,13 +26,20 @@
 import { ref, computed } from 'vue';
 import type { CSSProperties } from 'vue';
 import type { RenderSegment } from '../utils/nickColor.js';
+import { mircColor } from '../utils/nickColor.js';
+import { useMircPalette } from '../composables/useNickColors.js';
 
 // Renders an IRC spoiler run (fg===bg, i.e. text deliberately coloured to be
 // invisible) as a Discord-style blacked-out box. The content is kept out of
 // the accessible name (aria-hidden) until revealed so a screen reader doesn't
 // read the secret aloud. Reveal is one-way: once a user deliberately opens a
-// spoiler, re-hiding it isn't a behaviour anyone expects.
+// spoiler, re-hiding it isn't a behaviour anyone expects. The colour the
+// sender picked rides through on seg.fg (== seg.bg by construction) — we use
+// it to paint the unrevealed box and the revealed text/tint so the chatter's
+// colour intent is preserved instead of being flattened to gray.
 const props = defineProps<{ seg: RenderSegment }>();
+
+const mircPalette = useMircPalette();
 
 const revealed = ref(false);
 function reveal(e: Event): void {
@@ -44,10 +52,38 @@ function reveal(e: Event): void {
   revealed.value = true;
 }
 
+// Resolve the sender's chosen mIRC colour to a CSS value. Null when fg is
+// absent (older snapshots without the field) — we then fall back to the old
+// neutral gray.
+const color = computed(() => {
+  const fg = props.seg.fg;
+  if (fg == null) return null;
+  return mircColor(fg, mircPalette.value);
+});
+
+const wrapperStyle = computed<CSSProperties>(() => {
+  const c = color.value;
+  if (!c) {
+    // No chosen colour to honour (out-of-range mIRC index, or a RenderSegment
+    // hand-built without fg). Keep the wrapper inheriting the .spoiler base
+    // background (var(--fg-muted)) unrevealed, then fade to the neutral tint
+    // on reveal — same behaviour as before customisation.
+    return revealed.value
+      ? { background: 'color-mix(in srgb, var(--fg-muted) 22%, transparent)' }
+      : {};
+  }
+  return revealed.value
+    ? // Faint tint of the chosen colour so the affordance survives the reveal.
+      { background: `color-mix(in srgb, ${c} 22%, transparent)` }
+    : { background: c };
+});
+
 // The spoiler run still carries any bold/italic/underline/strike toggles that
-// were active — apply them so the revealed text matches how it was sent.
+// were active — apply them so the revealed text matches how it was sent. Once
+// revealed, the text takes the chosen colour against the faded backdrop.
 const bodyStyle = computed<CSSProperties>(() => {
   const s: CSSProperties = {};
+  if (revealed.value && color.value) s.color = color.value;
   if (props.seg.bold) s.fontWeight = 'bold';
   if (props.seg.italic) s.fontStyle = 'italic';
   const decos: string[] = [];
@@ -62,6 +98,8 @@ const bodyStyle = computed<CSSProperties>(() => {
 .spoiler {
   border-radius: 3px;
   padding: 0 3px;
+  /* Wrapper-style overrides this for coloured spoilers; the var(--fg-muted)
+     fallback covers older snapshots whose segments lack fg. */
   background: var(--fg-muted);
   transition: background-color 0.1s ease;
 }
@@ -73,12 +111,15 @@ const bodyStyle = computed<CSSProperties>(() => {
   /* Stop a drag-select from revealing the text — click is the only reveal. */
   user-select: none;
 }
-.spoiler:not(.revealed):hover {
-  background: var(--fg);
-}
-.spoiler.revealed {
-  /* A faint tint so it still reads as "this was a spoiler" once opened. */
-  background: color-mix(in srgb, var(--fg-muted) 22%, transparent);
+/* Hover affordance is desktop-only: on touch devices, sticky-:hover would
+   make the first tap apply the hover state instead of revealing, so we skip
+   the hover rule entirely and let the single tap reveal. We brighten via
+   `filter` rather than overriding `background` because the wrapper's inline
+   style (chosen mIRC colour) would otherwise win the cascade. */
+@media (hover: hover) and (pointer: fine) {
+  .spoiler:not(.revealed):hover {
+    filter: brightness(1.2);
+  }
 }
 .spoiler:focus-visible {
   outline: 1px solid var(--accent);

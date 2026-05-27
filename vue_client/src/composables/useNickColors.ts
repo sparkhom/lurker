@@ -34,3 +34,12 @@ export function useNickColors(): NickColorsAPI {
 
   return { color, splitText, selfColor };
 }
+
+// Reactive accessor for the user-overridable mIRC palette (look.color.mirc_colors).
+// Returned as a ComputedRef<string[]> — 16 entries, one per mIRC colour code 0..15.
+// Callers hand this to segmentInlineStyle() / mircColor() so rendered colours
+// update live when the user edits the palette in Settings.
+export function useMircPalette(): ComputedRef<string[]> {
+  const settings = useSettingsStore();
+  return computed(() => settings.effective('look.color.mirc_colors') as string[]);
+}

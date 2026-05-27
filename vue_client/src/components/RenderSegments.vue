@@ -45,6 +45,7 @@ import type { CSSProperties } from 'vue';
 import type { RenderSegment } from '../utils/nickColor.js';
 import { segmentInlineStyle, segmentHasStyle } from '../utils/nickColor.js';
 import { useBuffersStore } from '../stores/buffers.js';
+import { useMircPalette } from '../composables/useNickColors.js';
 import { socketSend } from '../composables/useSocket.js';
 import SpoilerText from './SpoilerText.vue';
 
@@ -71,9 +72,10 @@ const props = withDefaults(
 );
 
 const buffers = useBuffersStore();
+const mircPalette = useMircPalette();
 
 function styleFor(seg: RenderSegment): CSSProperties {
-  return segmentInlineStyle(seg, props.selfColor ?? null) as CSSProperties;
+  return segmentInlineStyle(seg, props.selfColor ?? null, mircPalette.value) as CSSProperties;
 }
 function hasStyle(seg: RenderSegment): boolean {
   return segmentHasStyle(seg);

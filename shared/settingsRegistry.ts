@@ -237,6 +237,41 @@ export const REGISTRY: readonly SettingOption[] = Object.freeze([
     default: '#38353b',
     description: 'Subtle horizontal/vertical separators between regions.',
   },
+  {
+    key: 'look.color.mirc_colors',
+    label: 'mIRC color palette',
+    category: 'appearance',
+    group: 'palette',
+    type: 'string-list',
+    // 16 entries, one per mIRC color code 0..15. The chromatic slots default
+    // to the closest hue from look.nick.colors so coloured chat text harmonises
+    // with the rest of the theme; the four mono-ish slots (white, black, gray,
+    // light gray) use theme variables so they stay legible on any background.
+    default: [
+      'var(--fg)', //                                       0  white
+      'var(--bg)', //                                       1  black
+      '#6799f3', //                                         2  navy
+      '#a9dc76', //                                         3  green
+      '#ff6188', //                                         4  red
+      '#ed6c89', //                                         5  maroon
+      '#ab9df2', //                                         6  purple
+      '#fc9867', //                                         7  orange
+      '#ffd866', //                                         8  yellow
+      '#b3db82', //                                         9  lime
+      '#78dce8', //                                         10 teal
+      '#a0f1ff', //                                         11 cyan
+      '#7ba4ff', //                                         12 blue
+      '#ff7494', //                                         13 magenta
+      'var(--fg-muted)', //                                 14 gray
+      'color-mix(in srgb, var(--fg) 70%, transparent)', //  15 light gray
+    ],
+    description:
+      'How the 16 mIRC color codes (0-15) render in chat. One CSS color per line, ' +
+      'in order: white, black, navy, green, red, maroon, purple, orange, yellow, ' +
+      'lime, teal, cyan, blue, magenta, gray, light gray. Defaults pick the ' +
+      'closest hue from your nick palette so coloured text matches the rest of ' +
+      'the theme. Any CSS color value works (hex, rgb(), var(--name), color-mix()).',
+  },
 
   // ─── Alternating message rows ─────────────────────────────────────────
   {
