@@ -861,6 +861,14 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
         // Server pseudo-buffer can't be closed (it's the per-network log).
         if (!networkId || !target || target.startsWith(':server:')) break;
         closeBuffer(userId, networkId, target);
+        // The client renders the pinned section by intersecting pins with open
+        // buffers, so a pin on a now-closed buffer is invisible — and leaving
+        // the row would diverge the client's pin set from ours, snapping the
+        // next reorder back as a mismatch (issue #112). Close implies unpin.
+        if (listPinnedForUserNetwork(userId, networkId).includes(target)) {
+          const pinned = unpinBuffer(userId, networkId, target);
+          fanOut(userId, { kind: 'pins-changed', networkId, pinned });
+        }
         if (target.startsWith('#')) {
           // Send PART if connected; partChannel also flips channels.joined=0.
           // If disconnected, partChannel is a no-op, so explicitly mark the

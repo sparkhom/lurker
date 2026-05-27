@@ -273,8 +273,11 @@ function migrate() {
     -- Per-(user, network) pinned buffer list. Pinned channels/DMs float to the
     -- top of the sidebar in user-controlled order; position is a dense integer
     -- scoped per (user_id, network_id), rewritten in full on each reorder so we
-    -- don't have to chase sparse gaps. Pin survives part/close — the row is
-    -- only removed by an explicit unpin (or user/network deletion via cascade).
+    -- don't have to chase sparse gaps. Pin survives part (the channel stays in
+    -- the sidebar) but not close — the client filters the pinned section by
+    -- open buffers, so a row without an open buffer is invisible and would
+    -- desync the client's pin set from ours. Close-buffer therefore implies
+    -- unpin (see wsHub close-buffer handler).
     CREATE TABLE IF NOT EXISTS pinned_buffers (
       user_id INTEGER NOT NULL,
       network_id INTEGER NOT NULL,
@@ -504,7 +507,7 @@ ensureColumn('messages', 'alt', 'INTEGER NOT NULL DEFAULT 0');
 // Schema versioning lets us retire one-shot recovery blocks once every
 // production DB has run through them. Bump SCHEMA_VERSION when adding a new
 // recovery block, and delete blocks for versions far enough in the past.
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 const schemaVersionRow = db
   .prepare(`SELECT value FROM app_meta WHERE key = 'schema_version'`)
   .get() as { value: string } | undefined;
@@ -755,6 +758,42 @@ if (schemaVersion < 6) {
     }
   });
   seed();
+}
+
+if (schemaVersion < 7) {
+  // Issue #112 backfill: before this version, close-buffer left the
+  // pinned_buffers row intact. The client filters the pinned section by open
+  // buffers, so the orphan was invisible — but it made the client's pin set
+  // smaller than the server's, and the next reorder failed the set-match
+  // check in reorderPins and snapped back. Drop the orphans (target also in
+  // closed_buffers), then renumber positions per (user, network) so they
+  // stay dense (0..n-1) as the rest of the code assumes.
+  db.exec(`
+    DELETE FROM pinned_buffers
+    WHERE EXISTS (
+      SELECT 1 FROM closed_buffers c
+      WHERE c.user_id = pinned_buffers.user_id
+        AND c.network_id = pinned_buffers.network_id
+        AND c.target = pinned_buffers.target
+    )
+  `);
+  db.exec(`
+    WITH renum AS (
+      SELECT user_id, network_id, target,
+             ROW_NUMBER() OVER (
+               PARTITION BY user_id, network_id
+               ORDER BY position ASC, target ASC
+             ) - 1 AS new_pos
+      FROM pinned_buffers
+    )
+    UPDATE pinned_buffers
+    SET position = (
+      SELECT new_pos FROM renum
+      WHERE renum.user_id = pinned_buffers.user_id
+        AND renum.network_id = pinned_buffers.network_id
+        AND renum.target = pinned_buffers.target
+    )
+  `);
 }
 
 if (schemaVersion < SCHEMA_VERSION) {
