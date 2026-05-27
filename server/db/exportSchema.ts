@@ -121,6 +121,7 @@ export const EXPORT_TABLES = Object.freeze({
       'userhost',
       'matched_rule_id',
       'alt',
+      'from_ignored',
     ],
   },
 

@@ -15,12 +15,22 @@ let insertMessage: typeof import('./messages.js').insertMessage;
 let listMessages: typeof import('./messages.js').listMessages;
 let listMessagesAround: typeof import('./messages.js').listMessagesAround;
 let searchMessages: typeof import('./messages.js').searchMessages;
+let countNewer: typeof import('./messages.js').countNewer;
+let countHighlightsNewer: typeof import('./messages.js').countHighlightsNewer;
+let listUserHighlights: typeof import('./messages.js').listUserHighlights;
 
 beforeAll(async () => {
   ({ createUser } = await import('./users.js'));
   ({ createNetwork } = await import('./networks.js'));
-  ({ insertMessage, listMessages, listMessagesAround, searchMessages } =
-    await import('./messages.js'));
+  ({
+    insertMessage,
+    listMessages,
+    listMessagesAround,
+    searchMessages,
+    countNewer,
+    countHighlightsNewer,
+    listUserHighlights,
+  } = await import('./messages.js'));
 });
 
 afterAll(() => {
@@ -481,5 +491,87 @@ describe('messages.alt parity (insert result)', () => {
     expect(first.alt).toBe(false);
     expect(second.alt).toBe(true);
     expect(sysEvt.alt).toBe(false);
+  });
+});
+
+describe('from_ignored excludes ignored senders from unread/highlight counts', () => {
+  function chatWith(
+    networkId: number,
+    opts: { nick: string; matched?: number; ignored?: boolean },
+  ) {
+    return insertMessage({
+      networkId,
+      target: '#ig',
+      time: new Date().toISOString(),
+      type: 'message',
+      nick: opts.nick,
+      text: 'hello',
+      self: false,
+      matchedRuleId: opts.matched ?? null,
+      fromIgnored: opts.ignored === true,
+    });
+  }
+
+  it('countNewer excludes from_ignored rows', () => {
+    const user = createUser('ig-count');
+    const net = createNetwork(user.id, {
+      name: 'n',
+      host: 'h',
+      port: 6697,
+      tls: true,
+      nick: 'me',
+    })!;
+    chatWith(net.id, { nick: 'alice' });
+    chatWith(net.id, { nick: 'spammer', ignored: true });
+    chatWith(net.id, { nick: 'bob' });
+    expect(countNewer(net.id, '#ig', 0)).toBe(2);
+  });
+
+  it('countHighlightsNewer excludes from_ignored rows even when they matched a rule', () => {
+    const user = createUser('ig-hl-count');
+    const net = createNetwork(user.id, {
+      name: 'n',
+      host: 'h',
+      port: 6697,
+      tls: true,
+      nick: 'me',
+    })!;
+    chatWith(net.id, { nick: 'alice', matched: 7 });
+    chatWith(net.id, { nick: 'spammer', matched: 7, ignored: true });
+    chatWith(net.id, { nick: 'bob', matched: 7 });
+    expect(countHighlightsNewer(net.id, '#ig', 0)).toBe(2);
+  });
+
+  it('listUserHighlights hides from_ignored rows', () => {
+    const user = createUser('ig-hl-list');
+    const net = createNetwork(user.id, {
+      name: 'n',
+      host: 'h',
+      port: 6697,
+      tls: true,
+      nick: 'me',
+    })!;
+    chatWith(net.id, { nick: 'alice', matched: 7 });
+    chatWith(net.id, { nick: 'spammer', matched: 7, ignored: true });
+    const items = listUserHighlights(user.id);
+    expect(items.map((r) => r.nick)).toEqual(['alice']);
+  });
+
+  it('fromIgnored round-trips through rowToEvent', () => {
+    const user = createUser('ig-roundtrip');
+    const net = createNetwork(user.id, {
+      name: 'n',
+      host: 'h',
+      port: 6697,
+      tls: true,
+      nick: 'me',
+    })!;
+    chatWith(net.id, { nick: 'alice' });
+    chatWith(net.id, { nick: 'spammer', ignored: true });
+    const rows = listMessages(net.id, '#ig', { limit: 50 });
+    expect(rows.map((r) => ({ nick: r.nick, fromIgnored: r.fromIgnored }))).toEqual([
+      { nick: 'alice', fromIgnored: false },
+      { nick: 'spammer', fromIgnored: true },
+    ]);
   });
 });

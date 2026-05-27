@@ -55,6 +55,20 @@ function chat(target: string, nick: string, text: string, matchedRuleId: number 
   });
 }
 
+function chatIgnored(target: string, nick: string, text: string, matchedRuleId: number | null) {
+  return insertMessage({
+    networkId: net.id,
+    target,
+    time: new Date().toISOString(),
+    type: 'message',
+    nick,
+    text,
+    self: false,
+    matchedRuleId,
+    fromIgnored: true,
+  });
+}
+
 describe('GET /api/highlights', () => {
   it('requires authentication', async () => {
     const res = await createAnonAgent(app).get('/api/highlights');
@@ -93,5 +107,15 @@ describe('GET /api/highlights', () => {
     const res = await agent.get('/api/highlights?limit=99999');
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.items)).toBe(true);
+  });
+
+  it('omits matched rows whose sender was ignored at insert time', async () => {
+    const visible = chat('#ig', 'eve', 'alice ping', 99).id;
+    const hidden = chatIgnored('#ig', 'spammer', 'alice ping', 99).id;
+    const res = await agent.get('/api/highlights?limit=50');
+    expect(res.status).toBe(200);
+    const ids = res.body.items.map((r: { id: number }) => r.id);
+    expect(ids).toContain(visible);
+    expect(ids).not.toContain(hidden);
   });
 });

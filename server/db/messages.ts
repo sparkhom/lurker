@@ -18,6 +18,7 @@ interface MessageRow {
   userhost: string | null;
   alt: number;
   matched_rule_id: number | null;
+  from_ignored: number;
 }
 
 /** A raw message row joined with network_name. */
@@ -40,6 +41,7 @@ export interface MessageEvent {
   alt: boolean;
   matched: boolean;
   matchedRuleId: number | null;
+  fromIgnored: boolean;
   [key: string]: unknown;
 }
 
@@ -62,6 +64,7 @@ export interface MessageInput {
   extra?: Record<string, any> | null; // untyped IRC extra fields
   matchedRuleId?: number | null;
   userhost?: string | null;
+  fromIgnored?: boolean;
 }
 
 /** Buffer summary row for MCP list_buffers. */
@@ -82,9 +85,9 @@ export interface MaxIdByBufferRow {
 // Non-striped types pass through with alt=0; the value is meaningless for them
 // and the client never reads it.
 const insertStmt = db.prepare(`
-  INSERT INTO messages (network_id, target, time, type, nick, text, kind, self, extra, matched_rule_id, userhost, alt)
+  INSERT INTO messages (network_id, target, time, type, nick, text, kind, self, extra, matched_rule_id, userhost, from_ignored, alt)
   VALUES (
-    @networkId, @target, @time, @type, @nick, @text, @kind, @self, @extra, @matchedRuleId, @userhost,
+    @networkId, @target, @time, @type, @nick, @text, @kind, @self, @extra, @matchedRuleId, @userhost, @fromIgnored,
     CASE WHEN @type IN ('message', 'action', 'notice')
          THEN 1 - COALESCE(
            (SELECT alt FROM messages
@@ -112,6 +115,7 @@ export function insertMessage(row: MessageInput): { id: number | bigint; alt: bo
     extra: row.extra ? JSON.stringify(row.extra) : null,
     matchedRuleId: row.matchedRuleId ?? null,
     userhost: row.userhost ?? null,
+    fromIgnored: row.fromIgnored ? 1 : 0,
   });
   const id = result.lastInsertRowid;
   const altRow = altByIdStmt.get(id) as { alt: number } | undefined;
@@ -133,6 +137,7 @@ function rowToEvent(row: MessageRow): MessageEvent {
     alt: row.alt === 1,
     matched: row.matched_rule_id != null,
     matchedRuleId: row.matched_rule_id,
+    fromIgnored: row.from_ignored === 1,
   };
   if (row.extra) {
     try {
@@ -306,7 +311,8 @@ export function countNewer(networkId: number, target: string, afterId: number): 
       .prepare(
         `SELECT COUNT(*) AS n FROM messages
      WHERE network_id = ? AND target = ? AND id > ?
-       AND type IN ${COUNTABLE_TYPES_SQL}`,
+       AND type IN ${COUNTABLE_TYPES_SQL}
+       AND from_ignored = 0`,
       )
       .get(networkId, target, afterId || 0) as { n: number }
   ).n;
@@ -314,14 +320,16 @@ export function countNewer(networkId: number, target: string, afterId: number): 
 
 // Cheap indexed count of unread highlights since `afterId`. Uses the partial
 // idx_messages_matched index — the old scan+decorate approach was replaced
-// once match state moved to insert time.
+// once match state moved to insert time. Ignored senders are excluded so the
+// red highlight pip doesn't fire for someone the user can't see.
 export function countHighlightsNewer(networkId: number, target: string, afterId: number): number {
   return (
     db
       .prepare(
         `SELECT COUNT(*) AS n FROM messages
      WHERE network_id = ? AND target = ? AND id > ?
-       AND matched_rule_id IS NOT NULL`,
+       AND matched_rule_id IS NOT NULL
+       AND from_ignored = 0`,
       )
       .get(networkId, target, afterId || 0) as { n: number }
   ).n;
@@ -340,6 +348,7 @@ export function listUserHighlights(
        JOIN networks n ON n.id = m.network_id
        WHERE n.user_id = ?
          AND m.matched_rule_id IS NOT NULL
+         AND m.from_ignored = 0
          AND m.id < ?
        ORDER BY m.id DESC
        LIMIT ?`
@@ -348,6 +357,7 @@ export function listUserHighlights(
        JOIN networks n ON n.id = m.network_id
        WHERE n.user_id = ?
          AND m.matched_rule_id IS NOT NULL
+         AND m.from_ignored = 0
        ORDER BY m.id DESC
        LIMIT ?`;
   const params = before ? [userId, before, limit] : [userId, limit];

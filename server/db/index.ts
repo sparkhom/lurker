@@ -504,6 +504,15 @@ db.exec(`CREATE INDEX IF NOT EXISTS idx_messages_matched
 // styled with .line.alt. See schemaVersion < 2 backfill below.
 ensureColumn('messages', 'alt', 'INTEGER NOT NULL DEFAULT 0');
 
+// Sender matched the network owner's ignore list at insert time. Stamped on
+// the row so countNewer/countHighlightsNewer can exclude ignored senders
+// without doing a JS-side mask scan over every unread row — the client's
+// render-time ignore filter only covers what's already on screen, so badge
+// counts (and the highlights modal) needed their own path. Set once at
+// insert; never recomputed. Old rows default to 0, which is conservative —
+// they remain visible/countable, matching pre-fix behavior.
+ensureColumn('messages', 'from_ignored', 'INTEGER NOT NULL DEFAULT 0');
+
 // Schema versioning lets us retire one-shot recovery blocks once every
 // production DB has run through them. Bump SCHEMA_VERSION when adding a new
 // recovery block, and delete blocks for versions far enough in the past.

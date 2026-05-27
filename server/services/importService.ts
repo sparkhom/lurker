@@ -263,6 +263,9 @@ export async function importFromZipBuffer(
         // matched_rule_id is nullable; if its target rule wasn't in the
         // export, fall back to null.
         if (row.matched_rule_id === undefined) row.matched_rule_id = null;
+        // from_ignored was added later; older archives don't carry it, and
+        // the column is NOT NULL so a missing key would fail the insert.
+        if (row.from_ignored === undefined) row.from_ignored = 0;
         const result = insertOne(stmt, cols, row);
         idMaps.messages.set(original.id, result.lastInsertRowid);
         inserted += 1;
