@@ -101,7 +101,9 @@
       <SystemConsole v-if="isSystemConsole" />
       <MessageList v-else :pending-scroll-id="pendingScrollId" />
       <StatusBar compact />
-      <MessageInput v-if="!isSystemConsole" ref="messageInputRef" />
+      <div v-if="!isSystemConsole" class="composer-host" :class="{ 'keyboard-open': keyboardOpen }">
+        <MessageInput ref="messageInputRef" />
+      </div>
     </section>
 
     <!-- Screen: members -->
@@ -182,9 +184,11 @@ import UserProfileModal from '../components/UserProfileModal.vue';
 import { useNickNotesStore } from '../stores/nickNotes.js';
 import { useWhoisStore } from '../stores/whois.js';
 import { useJumpToMessage } from '../composables/useJumpToMessage.js';
+import { useVisualViewport } from '../composables/useVisualViewport.js';
 
 const networks = useNetworksStore();
 const { connected } = useSocket();
+const { keyboardOpen } = useVisualViewport();
 const {
   active,
   activeKey,
@@ -330,13 +334,17 @@ useChatBootstrap({ onJump: onJumpToMessage });
 </script>
 
 <style scoped>
-/* Single-column flex stack sized to the dynamic viewport. iOS scrolls
-   the page naturally when the keyboard opens; the textarea at the
-   bottom of the shell stays visible just above the keyboard, and the
-   upper content (sidebar / topic / older messages) scrolls off the
-   top of the visible area until the user dismisses the keyboard. See
-   issue #85 for the full investigation — multiple workarounds were
-   tried and each made things worse on at least one device. */
+/* Single-column flex stack sized to 100dvh. On current iOS Safari the
+   dynamic-viewport unit shrinks with the soft keyboard, so the shell
+   contracts and the input bar (last flex child) rides up flush against
+   the keyboard with no extra plumbing. We deliberately do NOT use
+   position: fixed or a JS-tracked --kb-bottom here — those approaches
+   fight iOS auto-scroll, env() shifts, and a known iOS 26 visualViewport
+   regression (returns phantom positive values after keyboard dismiss).
+   The body-level `touch-action: none` (see main.css) is what stops iOS
+   from drag-scrolling the document despite overflow:hidden. Safe-area
+   home-indicator clearance lives on .composer-host (below) — wrapping
+   MessageInput so it can't compete with the shell's geometry. */
 .mchat {
   height: 100dvh;
   display: flex;
@@ -446,7 +454,47 @@ useChatBootstrap({ onJump: onJumpToMessage });
 .buffer :deep(.status-bar) {
   flex: 0 0 auto;
 }
-.buffer :deep(.input) {
+
+/* iOS Safari scroll-target trick. When an input is focused, iOS scrolls
+   the input's nearest scrollable ancestor to bring it into view, leaving
+   a comfort margin between the input and the keyboard top. If no
+   scrollable ancestor exists, iOS falls back to scrolling the
+   *visualViewport* itself — that's where the previous gap came from.
+   `overflow-y: scroll` here gives iOS a scrollable target. There's
+   nothing actually to scroll (the inner input fits exactly), so the
+   scroll is a no-op — but iOS targets this element instead of the
+   viewport, so no gap appears.
+
+   padding-bottom carries the home-indicator safe-area inset (only
+   non-zero in PWA standalone) and collapses to 0 when the keyboard is
+   up via the .keyboard-open class — the keyboard already covers the
+   home-indicator zone. .keyboard-open is bound from the keyboardOpen
+   ref in script setup, which combines three signals (visualViewport
+   height delta, visualViewport offsetTop, and focused-input fallback)
+   so iOS PWA — where visualViewport.resize doesn't fire reliably — is
+   still caught. */
+.composer-host {
+  flex: 0 0 auto;
+  overflow-y: scroll;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  scrollbar-width: none;
+}
+.composer-host::-webkit-scrollbar {
+  display: none;
+}
+/* env(safe-area-inset-bottom) only applies in PWA standalone. Mobile
+   Safari's own bottom chrome already keeps content above the home
+   indicator, so applying the inset there leaves a redundant gap. */
+@media (display-mode: standalone) {
+  .composer-host {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
+.composer-host.keyboard-open {
+  padding-bottom: 0;
+}
+.composer-host :deep(.input) {
   flex: 0 0 auto;
 }
 

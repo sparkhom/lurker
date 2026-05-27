@@ -48,25 +48,25 @@
   }
 }
 
-/* Home-indicator clearance: needed only in PWA standalone mode (no browser
-   chrome below the content, so without this the input bar would sit on top
-   of the iOS gesture zone at the bottom of the screen). Safari proper has
-   its own bottom chrome that already keeps content above the home indicator,
-   so applying env(safe-area-inset-bottom) there just leaves a redundant gap
-   below the input and can let Safari's bottom chrome clip the input when
-   the keyboard is up. Inside this @media, focus state zeroes the padding —
-   on iOS, a focused text input means the keyboard is up and there's no home
-   indicator to clear. */
+/* Home-indicator clearance for desktop-layout shells (DesktopChat on iPad
+   PWA landscape, Settings, modals). Mobile chat's .mchat handles its own
+   inset via .composer-host so it's deliberately not listed here. Only
+   applies in PWA standalone — Mobile Safari's bottom chrome already
+   covers the home indicator. The :root[data-keyboard-open] override
+   collapses the inset when the soft keyboard is up (keyboard covers the
+   home-indicator zone). */
 @media (display-mode: standalone) {
-  .mchat,
-  .chat {
+  .chat,
+  .settings-page,
+  .modal {
     box-sizing: border-box;
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
-  :root:has(input:focus, textarea:focus, [contenteditable]:focus) .mchat,
-  :root:has(input:focus, textarea:focus, [contenteditable]:focus) .chat {
-    padding-bottom: 0;
-  }
+}
+:root[data-keyboard-open='true'] .chat,
+:root[data-keyboard-open='true'] .settings-page,
+:root[data-keyboard-open='true'] .modal {
+  padding-bottom: 0;
 }
 
 * {
@@ -76,11 +76,11 @@
 html,
 body,
 #app {
-  /* `100dvh` tracks the dynamic viewport on iOS — shrinks when the soft
-     keyboard opens. Without this, body/html stay at full layout-viewport
-     height while the shell (also `100dvh`) shrinks, leaving body area
-     below the shell that iOS's auto-scroll exposes. See issue #85. */
-  height: 100dvh;
+  /* 100% (not 100dvh) here — html/body fill the layout viewport and stay
+     locked. The shell (.mchat / .chat / .settings-page) uses 100dvh so
+     it shrinks with the iOS soft keyboard while the document underneath
+     stays put. */
+  height: 100%;
   margin: 0;
   background: var(--bg);
   color: var(--fg);
@@ -94,14 +94,31 @@ body,
 }
 
 /* Whole app behaves like a CLI window — no document-level scroll.
-   `overscroll-behavior: none` kills the rubber-band bounce at the
-   edges. (Earlier attempts to use `position: fixed` on body to fully
-   lock iOS drag-scroll didn't help — iOS overrides it for keyboard
-   accommodation. See issue #85.) */
+   overflow:hidden + overscroll-behavior:none gets us most of the way,
+   but iOS Safari will still let the user drag-scroll the document
+   despite both of those (a documented iOS quirk). `touch-action: none`
+   on body is the load-bearing line that blocks that — children with
+   their own scroll behaviors (MessageList, modal scroll areas) re-enable
+   via `touch-action: pan-y`. Without this, focusing the input on iOS
+   Safari and dragging up would scroll the document and leave a
+   persistent gap below the shell (issue #114). */
 html,
 body {
   overflow: hidden;
   overscroll-behavior: none;
+}
+body {
+  touch-action: none;
+}
+
+/* Scrollable regions explicitly re-enable vertical pan — body's
+   touch-action:none disables it for descendants by default. Add to this
+   list when introducing a new scroll container. overscroll-behavior:
+   contain stops scroll chaining from these regions back to the document. */
+.message-list,
+.scroll-region {
+  overscroll-behavior: contain;
+  touch-action: pan-y;
 }
 
 a {
