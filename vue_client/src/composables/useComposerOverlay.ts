@@ -1,0 +1,123 @@
+// Copyright (c) 2026 Brad Root
+// SPDX-License-Identifier: MPL-2.0
+
+// Cross-component state for the composer's overlay popovers — the nick and
+// emoji suggestion strips and the mIRC colour picker. They live in
+// StatusBar's DOM (visually they overlay the bar) but their state and the
+// "what to do when the user picks" logic belong with MessageInput (which
+// owns the textarea content). Same module-level singleton shape as
+// useComposing — there is only ever one composer on screen at a time.
+
+import { reactive, readonly, type DeepReadonly } from 'vue';
+import type { EmojiMatch } from '../utils/emojiData.js';
+
+export interface ComposerOverlayState {
+  // Nick suggestion strip — mobile by default, opt-in on desktop. The buffer
+  // and self-nick the strip needs are derived by the renderer from the
+  // active-buffer stores; they're always the active buffer's, so there's no
+  // need to pipe them through this state.
+  nickOpen: boolean;
+  nickQuery: string;
+  // Emoji `:shortcode:` strip.
+  emojiOpen: boolean;
+  emojiItems: EmojiMatch[];
+  emojiActiveIndex: number;
+  // mIRC colour picker.
+  colorPickerOpen: boolean;
+}
+
+const state = reactive<ComposerOverlayState>({
+  nickOpen: false,
+  nickQuery: '',
+  emojiOpen: false,
+  emojiItems: [],
+  emojiActiveIndex: 0,
+  colorPickerOpen: false,
+});
+
+type NickSelectHandler = (nick: string) => void;
+type EmojiSelectHandler = (item: EmojiMatch) => void;
+type ColorApplyHandler = (fg: string | null, bg: string | null) => void;
+type VoidHandler = () => void;
+
+// Handlers MessageInput registers on mount. Defaults are no-ops so a pick
+// before registration is dropped silently rather than crashing.
+let onNickSelect: NickSelectHandler = () => {};
+let onEmojiSelect: EmojiSelectHandler = () => {};
+let onColorApply: ColorApplyHandler = () => {};
+let onColorReset: VoidHandler = () => {};
+let onColorClose: VoidHandler = () => {};
+
+export interface ComposerOverlayHandlers {
+  onNickSelect?: NickSelectHandler;
+  onEmojiSelect?: EmojiSelectHandler;
+  onColorApply?: ColorApplyHandler;
+  onColorReset?: VoidHandler;
+  onColorClose?: VoidHandler;
+}
+
+export function setComposerOverlayHandlers(h: ComposerOverlayHandlers): void {
+  if (h.onNickSelect) onNickSelect = h.onNickSelect;
+  if (h.onEmojiSelect) onEmojiSelect = h.onEmojiSelect;
+  if (h.onColorApply) onColorApply = h.onColorApply;
+  if (h.onColorReset) onColorReset = h.onColorReset;
+  if (h.onColorClose) onColorClose = h.onColorClose;
+}
+
+export function setNickStrip(open: boolean, query = ''): void {
+  state.nickOpen = open;
+  state.nickQuery = query;
+}
+
+export function setEmojiStrip(open: boolean, items: EmojiMatch[] = []): void {
+  state.emojiOpen = open;
+  state.emojiItems = items;
+  state.emojiActiveIndex = 0;
+}
+
+export function setColorPickerOpen(open: boolean): void {
+  state.colorPickerOpen = open;
+}
+
+// Emoji-strip keyboard navigation, driven from MessageInput's keydown.
+// Wraps at both ends so a held arrow cycles the whole row.
+export function moveEmojiActive(delta: number): void {
+  const n = state.emojiItems.length;
+  if (n === 0) return;
+  state.emojiActiveIndex = (state.emojiActiveIndex + delta + n) % n;
+}
+
+export function setEmojiActive(index: number): void {
+  if (index >= 0 && index < state.emojiItems.length) state.emojiActiveIndex = index;
+}
+
+export function confirmEmojiActive(): void {
+  const item = state.emojiItems[state.emojiActiveIndex];
+  if (item !== undefined) onEmojiSelect(item);
+}
+
+export function hasEmojiCandidates(): boolean {
+  return state.emojiItems.length > 0;
+}
+
+// Renderer-side dispatchers — bound by StatusBar's popover event handlers,
+// route back through the registered MessageInput callbacks.
+export function selectNick(nick: string): void {
+  onNickSelect(nick);
+}
+export function selectEmoji(item: EmojiMatch): void {
+  onEmojiSelect(item);
+}
+export function applyColor(fg: string | null, bg: string | null): void {
+  onColorApply(fg, bg);
+}
+export function resetColor(): void {
+  onColorReset();
+}
+export function closeColorPicker(): void {
+  onColorClose();
+}
+
+export function useComposerOverlay(): DeepReadonly<ComposerOverlayState> {
+  return readonly(state);
+}

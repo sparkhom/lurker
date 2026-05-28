@@ -1153,8 +1153,7 @@ export const REGISTRY: readonly SettingOption[] = Object.freeze([
       'Use the mobile-style horizontal suggestion strip on desktop instead of ' +
       'the @-triggered popup menu. The strip surfaces matching nicks above the ' +
       "input as you type any 2+ character prefix (no '@' required), tap or " +
-      'click a nick to insert it. Mobile uses the strip unconditionally; this ' +
-      'setting lets desktop users opt into the same behavior.',
+      'click a nick to insert it.',
   },
 
   // ─── Input bar (formatting) ──────────────────────────────────────────

@@ -4,16 +4,16 @@
 -->
 
 <!--
-  Generic horizontal suggestion strip that floats over the StatusBar — the
+  Generic horizontal suggestion strip rendered as a StatusBar overlay — the
   IRCCloud-style autocomplete bar. Visually it mirrors NickSuggestionStrip
-  (same chrome as the bar it covers); behaviourally it adds keyboard
-  navigation, exposing the same `moveActive` / `confirmActive` /
-  `hasCandidates` interface as the desktop NickPicker so a host's textarea
-  keydown handler can drive it.
+  (same chrome as the bar it covers); behaviourally it's keyboard-navigable
+  via an externally-owned activeIndex so the host's keydown handler can
+  drive it without an imperative ref.
 
-  The strip is content-agnostic: callers pass an `items` array and a `keyFor`
-  function, and render each chip's body through the `chip` slot. The emoji
-  suggester is the first consumer; NickSuggestionStrip could later adopt it.
+  The strip is content-agnostic: callers pass an `items` array, a `keyFor`
+  function, and the current `activeIndex`, and render each chip's body
+  through the `chip` slot. The emoji suggester is the first consumer;
+  NickSuggestionStrip could later adopt it.
 -->
 
 <template>
@@ -36,7 +36,7 @@
       :class="{ active: i === activeIndex }"
       @mousedown.prevent
       @click="emit('select', item)"
-      @mouseenter="activeIndex = i"
+      @mouseenter="emit('hover', i)"
     >
       <slot name="chip" :item="item" />
     </div>
@@ -47,66 +47,48 @@
 import { ref, watch, nextTick } from 'vue';
 
 const props = defineProps<{
-  items: T[];
+  /** Readonly so a reactive readonly source (e.g. useComposerOverlay) can
+      be passed through without a cast — the strip never mutates it. */
+  items: readonly T[];
   /** Stable :key for each item — the strip is content-agnostic. */
   keyFor: (item: T) => string;
+  /** Highlighted chip; the host owns the index so keyboard nav lives
+      outside this component. */
+  activeIndex: number;
 }>();
 
 const emit = defineEmits<{
   select: [item: T];
+  /** Mouse hover claimed a chip — host updates activeIndex so mouse and
+      keyboard share the same highlight. */
+  hover: [index: number];
 }>();
 
-// The highlighted chip. Keyboard nav (driven by the host's keydown handler)
-// walks this; hovering a chip with the mouse adopts it too, so the two input
-// modes share one highlight and can't disagree.
-const activeIndex = ref(0);
 const rootEl = ref<HTMLElement | null>(null);
 
-// A changed candidate set restarts the highlight at the first chip: a fresh
-// query shouldn't inherit a stale position, and a shrunk list shouldn't
-// strand the index past the end.
+// When the host shifts activeIndex via keyboard nav, pull the chip into
+// view if the row has overflowed horizontally. Watching the prop keeps the
+// strip declarative — no imperative ref method needed.
 watch(
-  () => props.items,
+  () => props.activeIndex,
   () => {
-    activeIndex.value = 0;
+    nextTick(() => {
+      rootEl.value
+        ?.querySelector('.chip.active')
+        ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    });
   },
 );
-
-// `delta` is in chip-index space — +1 steps to the next chip, -1 to the
-// previous — and wraps at both ends so a held arrow cycles the whole row.
-function moveActive(delta: number): void {
-  const n = props.items.length;
-  if (n === 0) return;
-  activeIndex.value = (activeIndex.value + delta + n) % n;
-  // The strip scrolls horizontally once the candidates overflow; pull a
-  // keyboard-selected chip back into view.
-  nextTick(() => {
-    rootEl.value
-      ?.querySelector('.chip.active')
-      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  });
-}
-
-function confirmActive(): void {
-  const item = props.items[activeIndex.value];
-  if (item !== undefined) emit('select', item);
-}
-
-function hasCandidates(): boolean {
-  return props.items.length > 0;
-}
-
-defineExpose({ moveActive, confirmActive, hasCandidates });
 </script>
 
 <style scoped>
-/* Mirrors NickSuggestionStrip / StatusBar — same padding, border-top and
-   background as the shell, so it cleanly covers the bar underneath. */
+/* Overlays StatusBar's row with the same chrome — same padding, same
+   border-top, same background — so the bar visually disappears under the
+   strip while it's active. Positioned absolute to fill the parent
+   .status-wrap (StatusBar's positioning container). */
 .suggestion-strip {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 100%;
+  inset: 0;
   display: flex;
   align-items: center;
   gap: 1ch;
@@ -148,9 +130,9 @@ defineExpose({ moveActive, confirmActive, hasCandidates });
 /* Highlight matches a selected buffer row in the buffer list — a flat
    --bg-soft fill with square edges — so the suggester reads as the same kind
    of selection affordance used elsewhere. Single rule shared by mouse and
-   keyboard: hovering sets activeIndex (see @mouseenter), so `.active` alone
-   covers both with no separate :hover rule that could double-highlight during
-   keyboard nav. */
+   keyboard: hovering emits `hover` (see @mouseenter) which the host maps to
+   activeIndex, so `.active` alone covers both with no separate :hover rule
+   that could double-highlight during keyboard nav. */
 .chip.active {
   background: var(--bg-soft);
 }

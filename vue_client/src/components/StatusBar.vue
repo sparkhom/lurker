@@ -4,48 +4,88 @@
 -->
 
 <template>
-  <div v-if="active" class="status-bar" :class="{ compact }">
-    <span v-if="!compact" class="seg clock">{{ clock }}</span>
-    <span v-if="!compact" class="seg buffer"
-      ><template v-if="targetLabel"
-        ><span v-if="networkLabel" class="net">{{ networkLabel }}/</span
-        ><span class="name">{{ targetLabel }}</span></template
-      ><span v-else class="name">{{ networkLabel }}</span
-      ><span v-if="modeSuffix" class="modes">{{ modeSuffix }}</span></span
-    >
-    <span v-if="compact" class="seg self"
-      ><span class="name">{{ promptLabel }}</span
-      ><span v-if="awayLabel" class="away">&nbsp;{{ awayLabel }}</span></span
-    >
-    <!-- Detached-jump indicator. Sits adjacent to the self/nick segment on
+  <div v-if="active" class="status-wrap">
+    <div class="status-bar" :class="{ compact }">
+      <span v-if="!compact" class="seg clock">{{ clock }}</span>
+      <span v-if="!compact" class="seg buffer"
+        ><template v-if="targetLabel"
+          ><span v-if="networkLabel" class="net">{{ networkLabel }}/</span
+          ><span class="name">{{ targetLabel }}</span></template
+        ><span v-else class="name">{{ networkLabel }}</span
+        ><span v-if="modeSuffix" class="modes">{{ modeSuffix }}</span></span
+      >
+      <span v-if="compact" class="seg self"
+        ><span class="name">{{ promptLabel }}</span
+        ><span v-if="awayLabel" class="away">&nbsp;{{ awayLabel }}</span></span
+      >
+      <!-- Detached-jump indicator. Sits adjacent to the self/nick segment on
          compact (mobile) per agreed placement, where it's the only exit
          from a detached buffer back to live. On desktop seg.self is hidden,
          so this lands right after the buffer name — also a natural spot.
          Unlike [N new ↓] (which is hidden on compact), this button renders
          in both modes. -->
-    <button v-if="detached" class="seg return-present" type="button" @click="onReturnToPresent">
-      Return to present<template v-if="liveDuringDetach > 0">
-        ({{ liveDuringDetach }} new)</template
+      <button v-if="detached" class="seg return-present" type="button" @click="onReturnToPresent">
+        Return to present<template v-if="liveDuringDetach > 0">
+          ({{ liveDuringDetach }} new)</template
+        >
+        ↓
+      </button>
+      <span v-if="peerStatusLabel" class="seg peer-status" :class="peerStatusClass">{{
+        peerStatusLabel
+      }}</span>
+      <span v-if="lagLabel && !compact" class="seg lag" :class="lagClass">{{ lagLabel }}</span>
+      <span v-if="uploadLabel" class="seg upload" :class="{ failed: uploads.failedAt }">{{
+        uploadLabel
+      }}</span>
+      <button
+        v-if="newBelow > 0 && !compact"
+        class="seg jump"
+        type="button"
+        @click="onJumpToBottom"
       >
-      ↓
-    </button>
-    <span v-if="peerStatusLabel" class="seg peer-status" :class="peerStatusClass">{{
-      peerStatusLabel
-    }}</span>
-    <span v-if="lagLabel && !compact" class="seg lag" :class="lagClass">{{ lagLabel }}</span>
-    <span v-if="uploadLabel" class="seg upload" :class="{ failed: uploads.failedAt }">{{
-      uploadLabel
-    }}</span>
-    <button v-if="newBelow > 0 && !compact" class="seg jump" type="button" @click="onJumpToBottom">
-      {{ newBelow }} new ↓
-    </button>
-    <span v-if="splitLabel" class="seg split" :class="splitClass">{{ splitLabel }}</span>
-    <span v-if="typingSegments.length" class="seg typing"
-      >Typing:
-      <template v-for="(seg, i) in typingSegments" :key="i"
-        ><span :style="seg.color ? { color: seg.color } : null">{{ seg.text }}</span></template
-      ></span
+        {{ newBelow }} new ↓
+      </button>
+      <span v-if="splitLabel" class="seg split" :class="splitClass">{{ splitLabel }}</span>
+      <span v-if="typingSegments.length" class="seg typing"
+        >Typing:
+        <template v-for="(seg, i) in typingSegments" :key="i"
+          ><span :style="seg.color ? { color: seg.color } : null">{{ seg.text }}</span></template
+        ></span
+      >
+    </div>
+    <!-- Composer overlays — the nick/emoji suggestion strips replace the bar's
+         content while active (same chrome, swapped contents); the mIRC colour
+         picker pops up from the bar's bottom edge. State and the "where the
+         pick gets applied" logic live in useComposerOverlay so MessageInput
+         (which owns the textarea) and StatusBar (which renders the popover)
+         stay decoupled. -->
+    <NickSuggestionStrip
+      v-show="overlay.nickOpen"
+      :query="overlay.nickQuery"
+      :buffer="buffer"
+      :self-nick="ownNick"
+      @select="selectNick"
+    />
+    <SuggestionStrip
+      v-show="overlay.emojiOpen"
+      :items="overlay.emojiItems"
+      :key-for="emojiKeyFor"
+      :active-index="overlay.emojiActiveIndex"
+      @select="selectEmoji"
+      @hover="setEmojiActive"
     >
+      <template #chip="{ item }">
+        <span class="emoji-glyph">{{ item.emoji }}</span>
+        <span class="emoji-name">:{{ item.name }}:</span>
+      </template>
+    </SuggestionStrip>
+    <MircColorPicker
+      v-if="overlay.colorPickerOpen"
+      :open="overlay.colorPickerOpen"
+      @apply="applyColor"
+      @reset="resetColor"
+      @close="closeColorPicker"
+    />
   </div>
 </template>
 
@@ -62,6 +102,19 @@ import { useComposing } from '../composables/useComposing.js';
 import { useSelfLabel } from '../composables/useSelfLabel.js';
 import { formatTimestamp } from '../utils/timestamp.js';
 import { isPeerOffline, isPeerAway } from '../utils/peerPresence.js';
+import NickSuggestionStrip from './NickSuggestionStrip.vue';
+import SuggestionStrip from './SuggestionStrip.vue';
+import MircColorPicker from './MircColorPicker.vue';
+import {
+  useComposerOverlay,
+  selectNick,
+  selectEmoji,
+  setEmojiActive,
+  applyColor,
+  resetColor,
+  closeColorPicker,
+} from '../composables/useComposerOverlay.js';
+import type { EmojiMatch } from '../utils/emojiData.js';
 
 withDefaults(
   defineProps<{
@@ -110,6 +163,18 @@ const { newBelow } = useScrollState();
 
 const active = computed(() => networks.activeBuffer);
 const buffer = computed(() => (networks.activeKey ? buffers.byKey(networks.activeKey) : null));
+
+// Composer-overlay state and the props the popovers need. ownNick and
+// `buffer` aren't routed through the composable because they're always the
+// active buffer / network's — derive them here from the same stores
+// MessageInput reads.
+const overlay = useComposerOverlay();
+const ownNick = computed(() => {
+  const a = active.value;
+  if (!a) return '';
+  return networks.states[a.networkId]?.nick || '';
+});
+const emojiKeyFor = (m: EmojiMatch): string => m.name;
 
 const isServerBuffer = computed(() => !!active.value?.target?.startsWith(':server:'));
 const isChannel = computed(() => !!active.value?.target?.startsWith('#'));
@@ -271,6 +336,14 @@ function onReturnToPresent() {
 </script>
 
 <style scoped>
+/* Positioning context for the composer overlays. The wrap has no chrome of
+   its own — it's just there so the strips can pin to .status-bar's bounds
+   via `position: absolute; inset: 0;` and the colour picker can anchor to
+   the wrap's bottom-right with overflow no longer in the way. */
+.status-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
 .status-bar {
   display: flex;
   align-items: center;
@@ -364,5 +437,11 @@ function onReturnToPresent() {
 .seg.jump:hover,
 .seg.return-present:hover {
   color: var(--fg);
+}
+/* Emoji suggester chip body — the glyph leads, the `:shortcode:` trails
+   muted so two near-identical emoji stay distinguishable. Styled here (not
+   in SuggestionStrip) because slot content carries this component's scope. */
+.emoji-name {
+  opacity: 0.6;
 }
 </style>

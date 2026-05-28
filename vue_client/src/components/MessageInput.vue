@@ -64,13 +64,11 @@
     >
       <i class="fa-solid fa-palette"></i>
     </div>
-    <MircColorPicker
-      v-if="showFormatButton"
-      :open="colorPickerOpen"
-      @apply="onApplyColor"
-      @reset="onPickReset"
-      @close="closeColorPicker"
-    />
+    <!-- The nick / emoji suggestion strips and the mIRC colour picker render
+         inside StatusBar (they overlay it visually) — see useComposerOverlay
+         for the cross-component state contract. Only the desktop @-popup
+         lives in the form, because it's a position:fixed popover anchored
+         to the form rather than to StatusBar. -->
     <NickPicker
       ref="nickPickerEl"
       :open="pickerOpen"
@@ -81,25 +79,6 @@
       @select="onPickerSelect"
       @close="closePicker"
     />
-    <NickSuggestionStrip
-      v-show="stripOpen"
-      :query="stripQuery"
-      :buffer="buffer"
-      :self-nick="ownNick"
-      @select="onStripSelect"
-    />
-    <SuggestionStrip
-      v-show="emojiStripOpen"
-      ref="emojiStripEl"
-      :items="emojiItems"
-      :key-for="emojiKeyFor"
-      @select="onEmojiSelect"
-    >
-      <template #chip="{ item }">
-        <span class="emoji-glyph">{{ item.emoji }}</span>
-        <span class="emoji-name">:{{ item.name }}:</span>
-      </template>
-    </SuggestionStrip>
     <Teleport to="body">
       <LongMessageUploadModal
         v-if="longMessageModalOpen"
@@ -137,12 +116,19 @@ import {
 } from '../utils/emojiShortcodes.js';
 import type { EmojiMatch } from '../utils/emojiData.js';
 import NickPicker from './NickPicker.vue';
-import NickSuggestionStrip from './NickSuggestionStrip.vue';
-import SuggestionStrip from './SuggestionStrip.vue';
 import LongMessageUploadModal from './LongMessageUploadModal.vue';
-import MircColorPicker from './MircColorPicker.vue';
 import { useSelfLabel } from '../composables/useSelfLabel.js';
 import { useViewport } from '../composables/useViewport.js';
+import {
+  useComposerOverlay,
+  setComposerOverlayHandlers,
+  setNickStrip,
+  setEmojiStrip,
+  setColorPickerOpen,
+  moveEmojiActive,
+  confirmEmojiActive,
+  hasEmojiCandidates,
+} from '../composables/useComposerOverlay.js';
 import type { Buffer } from '../stores/buffers.js';
 
 const networks = useNetworksStore();
@@ -162,29 +148,19 @@ const pickerQuery = ref('');
 const nickPickerEl = ref<InstanceType<typeof NickPicker> | null>(null);
 let pickerTokenStart = -1;
 let pickerTokenEnd = -1;
-const stripOpen = ref(false);
-const stripQuery = ref('');
+// Suggestion-strip and colour-picker visibility / contents live in
+// useComposerOverlay so StatusBar can render them as overlays without prop
+// drilling. Token-span book-keeping (which slice of the draft a pick
+// replaces) stays here — it's pure MessageInput state.
+const overlay = useComposerOverlay();
 let stripTokenStart = -1;
 let stripTokenEnd = -1;
-const colorPickerOpen = ref(false);
-
-// Slack-style `:shortcode:` emoji suggester. The strip floats over the
-// StatusBar (the same slot as the mobile nick strip) but is keyboard-navigable
-// like the desktop NickPicker. `emojiToken{Start,End}` mark the `:query` span
-// in the draft that a pick or inline auto-convert replaces. The ~1,900-entry
-// emoji table is a lazily-loaded chunk (see `loadEmoji`), so nothing here
-// pulls it into the initial bundle.
-type StripHandle = {
-  moveActive: (delta: number) => void;
-  confirmActive: () => void;
-  hasCandidates: () => boolean;
-};
-const emojiStripOpen = ref(false);
-const emojiItems = ref<EmojiMatch[]>([]);
-const emojiStripEl = ref<StripHandle | null>(null);
+// Slack-style `:shortcode:` emoji suggester. `emojiToken{Start,End}` mark
+// the `:query` span in the draft that a pick or inline auto-convert
+// replaces. The ~1,900-entry emoji table is a lazily-loaded chunk (see
+// `loadEmoji`), so nothing here pulls it into the initial bundle.
 let emojiTokenStart = -1;
 let emojiTokenEnd = -1;
-const emojiKeyFor = (m: EmojiMatch): string => m.name;
 
 const active = computed(() => networks.activeBuffer);
 
@@ -552,11 +528,11 @@ function wrapOrInsertFormatting(opening: string, closing: string): void {
 
 function onToggleColorPicker() {
   if (!sendable.value) return;
-  colorPickerOpen.value = !colorPickerOpen.value;
+  setColorPickerOpen(!overlay.colorPickerOpen);
 }
 
 function closeColorPicker() {
-  colorPickerOpen.value = false;
+  setColorPickerOpen(false);
 }
 
 function onApplyColor(fg: string | null, bg: string | null): void {
@@ -597,7 +573,7 @@ function onKeydown(e: KeyboardEvent): void {
       return;
     }
   }
-  if (e.key === 'Escape' && colorPickerOpen.value) {
+  if (e.key === 'Escape' && overlay.colorPickerOpen) {
     e.preventDefault();
     closeColorPicker();
     return;
@@ -639,7 +615,7 @@ function onKeydown(e: KeyboardEvent): void {
   // during an IME composition. The emoji strip and the nick picker are never
   // open at once (refreshPicker closes one before opening the other), so the
   // two blocks can't both fire.
-  if (emojiStripOpen.value && !e.isComposing && emojiStripEl.value?.hasCandidates()) {
+  if (overlay.emojiOpen && !e.isComposing && hasEmojiCandidates()) {
     if (e.key === 'Escape') {
       e.preventDefault();
       closeEmojiStrip();
@@ -654,16 +630,16 @@ function onKeydown(e: KeyboardEvent): void {
       if (!e.altKey && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
         const forward = e.key === 'ArrowDown' || e.key === 'ArrowRight';
-        emojiStripEl.value.moveActive(forward ? 1 : -1);
+        moveEmojiActive(forward ? 1 : -1);
         return;
       }
     } else if (e.key === 'Tab') {
       e.preventDefault();
-      emojiStripEl.value.confirmActive();
+      confirmEmojiActive();
       return;
     } else if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      emojiStripEl.value.confirmActive();
+      confirmEmojiActive();
       return;
     }
   }
@@ -743,15 +719,13 @@ function closePicker() {
 }
 
 function closeStrip() {
-  stripOpen.value = false;
-  stripQuery.value = '';
+  setNickStrip(false);
   stripTokenStart = -1;
   stripTokenEnd = -1;
 }
 
 function closeEmojiStrip() {
-  emojiStripOpen.value = false;
-  emojiItems.value = [];
+  setEmojiStrip(false);
   emojiTokenStart = -1;
   emojiTokenEnd = -1;
 }
@@ -782,10 +756,9 @@ async function showEmojiStrip() {
     closeEmojiStrip();
     return;
   }
-  emojiItems.value = matches;
+  setEmojiStrip(true, matches);
   emojiTokenStart = sc.start;
   emojiTokenEnd = sc.end;
-  emojiStripOpen.value = true;
 }
 
 // Replace the `:query` token with the picked emoji. No trailing space — emoji
@@ -883,19 +856,25 @@ function refreshPicker() {
     return;
   }
 
-  // Desktop users can opt into the mobile-style strip via this setting;
-  // mobile always uses the strip regardless.
-  const useStrip = isMobile.value || !!settings.effective('input.suggestion_strip_on_desktop');
+  // Mobile runs both UIs concurrently — an `@`-prefixed token routes to the
+  // vertical picker, anything else routes to the horizontal strip. Desktop
+  // is picker-only by default; the setting opts into the strip globally.
+  const useStrip = isMobile.value
+    ? !token.startsWith('@')
+    : !!settings.effective('input.suggestion_strip_on_desktop');
 
   if (useStrip) {
+    // On mobile both UIs are live, so dropping the `@` (which switched us
+    // from the picker branch to here) needs to actively close the picker
+    // — the picker branch below never runs to do it for us.
+    if (pickerOpen.value) closePicker();
     // Strip replaces the @-popup with an always-on suggestion row.
     // Leading '@' is tolerated as muscle-memory but stripped from the query
     // so the prefix matches plain typing. Min length 2 keeps the strip from
     // flashing on every single-letter word.
     const prefix = token.startsWith('@') ? token.slice(1) : token;
     if (prefix.length >= 2) {
-      stripOpen.value = true;
-      stripQuery.value = prefix;
+      setNickStrip(true, prefix);
       stripTokenStart = start;
       stripTokenEnd = end;
     } else {
@@ -908,6 +887,9 @@ function refreshPicker() {
     if (pickerOpen.value) closePicker();
     return;
   }
+  // Symmetric mobile case — typing `@` after a bare prefix should close the
+  // strip the previous keystroke opened.
+  if (overlay.nickOpen) closeStrip();
   pickerOpen.value = true;
   pickerQuery.value = token.slice(1);
   pickerTokenStart = start;
@@ -1068,6 +1050,12 @@ onBeforeUnmount(() => {
     unsubInsert = null;
   }
   if (typeof window !== 'undefined') window.removeEventListener('pagehide', onPagehide);
+  // Overlay state lives in a module-level singleton, so an unmounted
+  // MessageInput would otherwise leak its last open strip/picker into the
+  // next instance (e.g. switching to system console and back).
+  closeStrip();
+  closeEmojiStrip();
+  closeColorPicker();
 });
 
 function insertUrlAtCaret(url: string): void {
@@ -1100,6 +1088,16 @@ let unsubInsert: (() => boolean) | null = null;
 onMounted(() => {
   unsubInsert = onInsertUrl(insertUrlAtCaret);
   if (typeof window !== 'undefined') window.addEventListener('pagehide', onPagehide);
+  // Route picks from StatusBar's overlay-rendered popovers back to the
+  // textarea-mutation logic that owns the draft. Re-registered on every
+  // mount so closures bind to the live `text`/`inputEl`.
+  setComposerOverlayHandlers({
+    onNickSelect: onStripSelect,
+    onEmojiSelect,
+    onColorApply: onApplyColor,
+    onColorReset: onPickReset,
+    onColorClose: closeColorPicker,
+  });
 });
 
 function blobFromClipboardItem(item: DataTransferItem): File | null {
@@ -1638,8 +1636,8 @@ function handleCommand(line: string, networkId: number, target: string): boolean
   align-items: flex-start;
   gap: 1ch;
   padding: 8px 12px;
-  /* Anchors the NickSuggestionStrip's `position: absolute; bottom: 100%`
-     so it floats just above this form, over the StatusBar. */
+  /* Containing block for the desktop NickPicker's anchor logic — the
+     position:fixed picker still reads coordinates off the form. */
   position: relative;
 }
 .input.drag-over {
@@ -1691,13 +1689,6 @@ function handleCommand(line: string, networkId: number, target: string): boolean
 }
 .file-hidden {
   display: none;
-}
-/* Emoji suggester chip body — the glyph leads, the `:shortcode:` trails as a
-   muted label so two near-identical emoji stay distinguishable. Styled here
-   (not in SuggestionStrip) because slot content carries this component's
-   scope. */
-.emoji-name {
-  opacity: 0.6;
 }
 textarea {
   flex: 1;

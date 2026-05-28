@@ -10,13 +10,23 @@
     class="nick-picker"
     :style="panelStyle"
     @pointerdown.stop
+    @mousedown.prevent.stop
   >
+    <!-- iOS keyboard preservation, same rationale as NickSuggestionStrip:
+         fire on `click` (end of touch), keep `@mousedown.prevent` on the row
+         so focus never leaves the textarea, and use a plain <div role=button>
+         rather than a focusable <button>. Emitting on pointerdown would close
+         the picker (v-if) mid-touch, sending the synthesized mousedown to
+         whatever lands underneath and defeating @mousedown.prevent — that's
+         what was stealing iOS focus before. -->
     <div
       v-for="row in renderedRows"
       :key="row.lc + ':' + row.index"
+      role="button"
       class="row"
       :class="{ active: row.index === activeIndex }"
-      @pointerdown.prevent="pick(row.nick)"
+      @mousedown.prevent
+      @click="pick(row.nick)"
       @mouseenter="activeIndex = row.index"
     >
       <span class="nick" :style="row.color ? { color: row.color } : null">{{ row.nick }}</span>

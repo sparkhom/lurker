@@ -79,14 +79,13 @@ const rows = computed(() => {
 </script>
 
 <style scoped>
-/* Mirrors StatusBar's row so this strip reads as the same chrome with its
-   contents swapped — same padding, same border-top, same background as the
-   shell so it cleanly covers the bar underneath. */
+/* Overlays StatusBar's row with the same chrome — same padding, same
+   border-top, same background as the shell — so the bar visually disappears
+   under the strip while it's active. Positioned absolute to fill the
+   parent .status-wrap (StatusBar's positioning container). */
 .nick-suggestion-strip {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 100%;
+  inset: 0;
   display: flex;
   align-items: center;
   gap: 1ch;
