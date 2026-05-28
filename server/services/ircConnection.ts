@@ -1323,6 +1323,7 @@ export class IrcConnection {
         target,
         nick: eventNick,
         state: typing,
+        userhost: buildUserhost(event),
       });
     });
   }

@@ -51,6 +51,7 @@ export interface BufferMember {
 export interface TypingEntry {
   state: string;
   expiresAt: number;
+  userhost: string | null;
 }
 
 export interface SpeakerEntry {
@@ -740,7 +741,13 @@ export const useBuffersStore = defineStore('buffers', {
         socketSend({ type: 'probe-presence', networkId, nick: target });
       }
     },
-    setTyping(networkId: number | string, target: string, nick: string, state: string) {
+    setTyping(
+      networkId: number | string,
+      target: string,
+      nick: string,
+      state: string,
+      userhost: string | null = null,
+    ) {
       if (!nick) return;
       const buf = ensureBuffer(this, networkId, target);
       clearTypingTimer(networkId, target, nick);
@@ -752,7 +759,7 @@ export const useBuffersStore = defineStore('buffers', {
 
       const duration = TYPING_DURATIONS[state];
       if (!duration) return;
-      buf.typing[nick] = { state, expiresAt: Date.now() + duration };
+      buf.typing[nick] = { state, expiresAt: Date.now() + duration, userhost };
 
       const timer = setTimeout(() => {
         const b = this.buffers[key(networkId, target)];

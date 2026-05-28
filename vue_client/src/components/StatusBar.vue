@@ -55,6 +55,7 @@ import { useNetworksStore } from '../stores/networks.js';
 import { useBuffersStore } from '../stores/buffers.js';
 import { useSettingsStore } from '../stores/settings.js';
 import { useUploadsStore } from '../stores/uploads.js';
+import { useIgnoresStore } from '../stores/ignores.js';
 import { useNickColors } from '../composables/useNickColors.js';
 import { useScrollState, requestScrollToBottom } from '../composables/useScrollState.js';
 import { useComposing } from '../composables/useComposing.js';
@@ -79,6 +80,7 @@ const networks = useNetworksStore();
 const buffers = useBuffersStore();
 const settings = useSettingsStore();
 const uploads = useUploadsStore();
+const ignores = useIgnoresStore();
 const nickColors = useNickColors();
 const composing = useComposing();
 const { promptLabel, awayLabel } = useSelfLabel();
@@ -168,7 +170,11 @@ const peerStatusClass = computed(() => {
 const typingNicks = computed(() => {
   const t = buffer.value?.typing;
   if (!t) return [];
-  return Object.keys(t);
+  const networkId = active.value?.networkId;
+  if (!networkId) return Object.keys(t);
+  return Object.entries(t)
+    .filter(([nick, entry]) => !ignores.isIgnored(networkId, nick, entry.userhost ?? ''))
+    .map(([nick]) => nick);
 });
 
 function nickSeg(nick: string): { text: string; color: string | null } {

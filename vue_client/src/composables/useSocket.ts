@@ -172,7 +172,13 @@ function applyEvent(event: any): void {
       buffers.setMembers(event.networkId, event.target, []);
       break;
     case 'typing':
-      buffers.setTyping(event.networkId, event.target, event.nick, event.state);
+      buffers.setTyping(
+        event.networkId,
+        event.target,
+        event.nick,
+        event.state,
+        event.userhost ?? null,
+      );
       break;
     case 'peer-presence':
       networks.applyPeerPresence(event.networkId, event.nick, {
