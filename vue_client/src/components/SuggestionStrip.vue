@@ -74,13 +74,29 @@ const rootEl = ref<HTMLElement | null>(null);
 // When the host shifts activeIndex via keyboard nav, pull the chip into
 // view if the row has overflowed horizontally. Watching the prop keeps the
 // strip declarative — no imperative ref method needed.
+//
+// We compute the horizontal shift ourselves rather than calling
+// scrollIntoView({ block: 'nearest', inline: 'nearest' }). scrollIntoView
+// walks up the ancestor chain trying to satisfy both axes; even though the
+// strip is `overflow-y: hidden`, the vertical axis still resolves against
+// the next scrollable ancestor (the message area / document), which yanks
+// the page up by ~1px when the chip's box doesn't line up perfectly with
+// the viewport. Restricting the operation to the strip's own scrollLeft
+// keeps the motion purely horizontal.
 watch(
   () => props.activeIndex,
   () => {
     nextTick(() => {
-      rootEl.value
-        ?.querySelector('.chip.active')
-        ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      const strip = rootEl.value;
+      const active = strip?.querySelector<HTMLElement>('.chip.active');
+      if (!strip || !active) return;
+      const stripRect = strip.getBoundingClientRect();
+      const chipRect = active.getBoundingClientRect();
+      if (chipRect.left < stripRect.left) {
+        strip.scrollLeft -= stripRect.left - chipRect.left;
+      } else if (chipRect.right > stripRect.right) {
+        strip.scrollLeft += chipRect.right - stripRect.right;
+      }
     });
   },
 );
