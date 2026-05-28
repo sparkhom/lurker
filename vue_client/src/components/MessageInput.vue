@@ -909,12 +909,13 @@ function refreshPicker() {
     return;
   }
 
-  // Mobile runs both UIs concurrently — an `@`-prefixed token routes to the
-  // vertical picker, anything else routes to the horizontal strip. Desktop
-  // is picker-only by default; the setting opts into the strip globally.
-  const useStrip = isMobile.value
-    ? !token.startsWith('@')
-    : !!settings.effective('input.suggestion_strip_on_desktop');
+  // Both UIs are concurrent wherever the strip is enabled — `@`-prefix is the
+  // explicit opt-in to the vertical picker, anything else routes to the
+  // horizontal strip. Mobile always has the strip; desktop opts in via the
+  // setting. With the setting off on desktop there is no strip, so non-`@`
+  // tokens get no completion UI and `@`-tokens still drive the picker.
+  const stripEnabled = isMobile.value || !!settings.effective('input.suggestion_strip_on_desktop');
+  const useStrip = stripEnabled && !token.startsWith('@');
 
   if (useStrip) {
     // On mobile both UIs are live, so dropping the `@` (which switched us
