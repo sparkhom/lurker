@@ -732,6 +732,22 @@ export class IrcConnection {
     });
 
     c.on('message', (event: Record<string, unknown>) => {
+      // Drop server-pushed history replays. Some networks (e.g. Ergo with
+      // `relaymsg`/replay enabled, mansionNET) blindly resend recent messages
+      // inside a CHATHISTORY (or ZNC playback) BATCH on every reconnect.
+      // We don't request the CHATHISTORY cap or command anywhere, so anything
+      // arriving in one of these batches is unsolicited replay — and without
+      // a dedupe path it inserts duplicates carrying the original (past)
+      // server-time. Ignoring the whole batch is the right call.
+      const batch = event.batch as { type?: string } | undefined;
+      const batchType = batch?.type;
+      if (
+        batchType === 'chathistory' ||
+        batchType === 'draft/chathistory' ||
+        batchType === 'znc.in/playback'
+      ) {
+        return;
+      }
       const me = c.user?.nick;
       const eventNick = event.nick as string | undefined;
       const eventTarget = event.target as string | undefined;
