@@ -123,6 +123,10 @@ watch(
      than the nick strip's chips, and `align-items: center` on the strip
      would then push the emoji glyph above the StatusBar's text baseline. */
   padding: 0 6px;
+  /* Emoji glyphs sit higher in their line box than letter forms — even
+     with the chip's box centered, the glyph reads ~2px above the bar's
+     text baseline. Nudge the whole chip down to compensate. */
+  transform: translateY(2px);
   font: inherit;
   color: var(--fg);
   cursor: pointer;
