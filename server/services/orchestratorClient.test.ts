@@ -78,7 +78,8 @@ describe('reportToOrchestrator', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, opts] = fetchMock.mock.calls[0] as [string, { headers: Record<string, string> }];
     expect(url).toBe('http://orchestrator:8020/api/cells/register');
-    expect(opts.headers.authorization).toBe('Bearer fleet-secret');
+    expect(opts.headers.Authorization).toBe('Bearer fleet-secret');
+    expect(opts.headers['User-Agent']).toMatch(/^Lurker\//);
   });
 
   it('returns false (never throws) when the orchestrator is unreachable', async () => {

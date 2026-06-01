@@ -13,7 +13,7 @@
 // orchestrator never takes the cell down with it.
 
 import { isNodeMode } from '../utils/edition.js';
-import { APP_VERSION } from '../utils/userAgent.js';
+import { APP_VERSION, USER_AGENT } from '../utils/userAgent.js';
 import { countUsers } from '../db/users.js';
 import * as systemLog from './systemLog.js';
 
@@ -72,8 +72,11 @@ export async function reportToOrchestrator(cfg: OrchestratorConfig): Promise<boo
     const res = await fetch(`${cfg.url.replace(/\/+$/, '')}/api/cells/register`, {
       method: 'POST',
       headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${cfg.secret}`,
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${cfg.secret}`,
+        // Identify these calls in control-plane logs, same as our other
+        // outbound HTTP (upload providers).
+        'User-Agent': USER_AGENT,
       },
       body: JSON.stringify(buildRegistration(cfg)),
     });
@@ -88,6 +91,9 @@ let timer: ReturnType<typeof setInterval> | null = null;
 // Register on boot, then re-register on an interval. No-op when not a configured
 // node, so it's safe to call unconditionally at startup.
 export function startOrchestratorClient(intervalMs = DEFAULT_INTERVAL_MS): void {
+  // Idempotent: clear any prior interval first so a double-start (re-init path,
+  // tests, future refactors) can't leak timers or run concurrent heartbeats.
+  stopOrchestratorClient();
   const cfg = readOrchestratorConfig();
   if (!cfg) return;
   const tick = async (): Promise<void> => {
@@ -96,7 +102,7 @@ export function startOrchestratorClient(intervalMs = DEFAULT_INTERVAL_MS): void 
       systemLog.log({
         scope: 'node',
         level: 'warn',
-        text: `orchestrator unreachable at ${cfg.url} — will retry`,
+        text: `failed to report to orchestrator at ${cfg.url} (unreachable or non-2xx) — will retry`,
       });
     }
   };
