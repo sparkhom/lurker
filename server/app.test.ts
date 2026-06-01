@@ -42,6 +42,14 @@ describe('buildApp route gating by edition', () => {
       expect(res.status).toBe(404);
     });
 
+    it('404s GET /mcp too (not swallowed by the SPA fallback)', async () => {
+      const app = await buildFor('node');
+      // `mcp` is excluded from the SPA catch-all, so a disabled /mcp is
+      // consistently absent rather than served index.html.
+      const res = await request(app).get('/mcp');
+      expect(res.status).toBe(404);
+    });
+
     it('mounts the orchestrator control surface /api/node', async () => {
       const app = await buildFor('node');
       // requireNodeAuth rejects (503 with no secret configured), but the router

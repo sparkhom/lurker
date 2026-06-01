@@ -127,6 +127,24 @@ describe('POST /api/uploads (node edition)', () => {
     });
   });
 
+  it('503s with a clear message (no per-user key names) when the operator env is unset', async () => {
+    const savedUrl = process.env.LURKER_NODE_UPLOAD_URL;
+    const savedKey = process.env.LURKER_NODE_UPLOAD_API_KEY;
+    delete process.env.LURKER_NODE_UPLOAD_URL;
+    delete process.env.LURKER_NODE_UPLOAD_API_KEY;
+    try {
+      const res = await agent
+        .post('/api/uploads')
+        .attach('image', smallPng, { filename: 'noconfig.png', contentType: 'image/png' });
+      expect(res.status).toBe(503);
+      // Must not leak the per-user hoarder settings a tenant can't configure.
+      expect(res.body.error).not.toMatch(/uploads\.hoarder/);
+    } finally {
+      process.env.LURKER_NODE_UPLOAD_URL = savedUrl;
+      process.env.LURKER_NODE_UPLOAD_API_KEY = savedKey;
+    }
+  });
+
   it('caps upload size by the operator env, ignoring the higher tenant setting', async () => {
     // Tenant set 200 MB; operator env caps at 1 MB, so a ~2 MB upload must 413.
     const big = Buffer.alloc(2 * 1024 * 1024, 1);

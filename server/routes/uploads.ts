@@ -13,6 +13,7 @@ import {
   NODE_UPLOAD_PROVIDER_ID,
   nodeUploadSecrets,
   nodeUploadLimits,
+  nodeUploadConfigured,
 } from '../services/uploadProviders/nodeUpload.js';
 import type { UploadListRow } from '../db/uploadHistory.js';
 import { insertUpload, listUploads, getThumbnail, deleteUpload } from '../db/uploadHistory.js';
@@ -46,6 +47,15 @@ router.post(
     try {
       if (!req.file) {
         res.status(400).json({ error: 'no file uploaded' });
+        return;
+      }
+
+      // In node edition the operator must have configured the in-house uploader.
+      // Without it the forced provider would throw an error naming per-user
+      // settings a tenant can't see — fail fast with a clear, server-side signal
+      // instead. The boot warning already tells the operator what to set.
+      if (isNodeMode() && !nodeUploadConfigured()) {
+        res.status(503).json({ error: 'uploads are not configured on this server' });
         return;
       }
 

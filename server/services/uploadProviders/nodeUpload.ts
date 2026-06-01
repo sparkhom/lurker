@@ -54,8 +54,9 @@ function intOverride(envName: string, settingKey: string): number {
  * service these are NOT tenant settings — a tenant could otherwise inflate
  * storage/bandwidth or lift their own size cap with a direct settings write —
  * so the cell sources them from the environment, clamped to each setting's
- * registry bounds, with the registry defaults as the floor. A3 hides the
- * matching tenant UI; this is the enforcement behind it.
+ * registry [min,max] bounds and falling back to the registry default when an
+ * env var is unset or malformed. A3 hides the matching tenant UI; this is the
+ * enforcement behind it.
  */
 export function nodeUploadLimits(): { maxMb: number; maxDim: number; quality: number } {
   return {

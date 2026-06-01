@@ -65,11 +65,13 @@ export function buildApp(sessionSecret: string): Express {
   app.use('/api/imports', importRouter);
   app.use('/api/config', configRouter);
 
-  // API tokens + the MCP server are bearer-authenticated surfaces. The hosted
-  // service routes a customer to their cell by the cp_session cookie, but a
-  // bearer client carries no such cookie, so neither endpoint can be addressed
-  // through the per-cell proxy (A7). Disable them entirely in node edition —
-  // A3 hides the matching UI. Standalone keeps both fully featured.
+  // The HTTP API-token feature and the MCP server are the two ends of the same
+  // bearer-token model: /api/api-tokens (session-cookie auth) mints the tokens,
+  // and /mcp (bearer auth) consumes them. The hosted service routes a customer
+  // to their cell by the cp_session cookie, but a bearer client carries no such
+  // cookie — so /mcp can't be addressed through the per-cell proxy, which makes
+  // the tokens unusable there. Disable both in node edition (A7); A3 hides the
+  // matching UI. Standalone keeps them fully featured.
   if (!isNodeMode()) {
     app.use('/api/api-tokens', apiTokensRouter);
     app.use('/mcp', requireApiAuth, mcpRouter);
@@ -85,9 +87,13 @@ export function buildApp(sessionSecret: string): Express {
     res.json({ status: 'ok', time: new Date().toISOString() });
   });
 
+  // SPA fallback for client-side routes. `mcp` joins `api`/`ws` in the exclusion
+  // so that in node edition — where /mcp isn't mounted — a stray GET /mcp 404s
+  // instead of being served index.html; it's a disabled endpoint, not a page.
+  // (In standalone the mounted /mcp middleware handles it before this anyway.)
   const clientDist = path.join(import.meta.dirname, '../vue_client/dist');
   app.use(express.static(clientDist));
-  app.get(/^\/(?!api|ws).*/, (_req, res, next) => {
+  app.get(/^\/(?!api|ws|mcp).*/, (_req, res, next) => {
     res.sendFile(path.join(clientDist, 'index.html'), (err) => {
       if (err) next();
     });
