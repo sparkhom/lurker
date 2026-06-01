@@ -91,6 +91,14 @@ describe('node control API — provision', () => {
     expect(res.status).toBe(400);
   });
 
+  it('rejects a username with disallowed characters (400)', async () => {
+    const res = await createAnonAgent(app)
+      .post('/api/node/users')
+      .set('Authorization', AUTH)
+      .send({ username: 'no/slashes' });
+    expect(res.status).toBe(400);
+  });
+
   it('409s on a duplicate username and surfaces the existing id', async () => {
     const first = await createAnonAgent(app)
       .post('/api/node/users')

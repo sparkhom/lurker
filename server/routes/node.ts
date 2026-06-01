@@ -1,11 +1,12 @@
 // Copyright (c) 2026 Brad Root
 // SPDX-License-Identifier: MPL-2.0
 
-import fs from 'fs';
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { requireNodeAuth } from '../middleware/nodeAuth.js';
 import { getEdition } from '../utils/edition.js';
+import { APP_VERSION } from '../utils/userAgent.js';
+import { isValidUsername } from '../utils/username.js';
 import {
   countUsers,
   createUser,
@@ -22,21 +23,10 @@ import ircManager from '../services/ircManager.js';
 const router = Router();
 router.use(requireNodeAuth);
 
-const APP_VERSION: string = (() => {
-  try {
-    const pkg = JSON.parse(
-      fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
-    ) as { version?: string };
-    return typeof pkg.version === 'string' ? pkg.version : 'unknown';
-  } catch {
-    return 'unknown';
-  }
-})();
-
-const MAX_USERNAME_LEN = 64;
-
-// Health + capacity. The control plane polls this to drive fill-then-pin
-// placement (A4 will push the same shape on a heartbeat).
+// Health + capacity. `users.count` is the TOTAL provisioned accounts on this
+// cell (not currently-online users) — that's the figure fill-then-pin placement
+// keys on, since a cell's load is the tenants assigned to it. A4 will push the
+// same shape on a heartbeat.
 router.get('/status', (_req: Request, res: Response) => {
   res.json({
     edition: getEdition(),
@@ -52,12 +42,10 @@ router.get('/status', (_req: Request, res: Response) => {
 // any role in the body is deliberately ignored.
 router.post('/users', (req: Request, res: Response) => {
   const username = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
-  if (!username) {
-    res.status(400).json({ error: 'username required' });
-    return;
-  }
-  if (username.length > MAX_USERNAME_LEN) {
-    res.status(400).json({ error: `username too long (max ${MAX_USERNAME_LEN})` });
+  // Same rule as the human signup/auth flows so a node-provisioned account is
+  // valid everywhere (length bounds + charset, no control characters).
+  if (!isValidUsername(username)) {
+    res.status(400).json({ error: 'invalid username' });
     return;
   }
   const existing = findUserByUsername(username);

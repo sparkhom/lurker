@@ -25,6 +25,7 @@ import {
   setPasswordHash,
 } from '../db/users.js';
 import { inviteStatus, consumeInvite } from '../db/invites.js';
+import { isValidUsername } from '../utils/username.js';
 import {
   listForUser as listCredentialsForUser,
   findByCredentialId,
@@ -61,13 +62,6 @@ function setChallengeCookie(res: Response, token: string): void {
 
 function clearChallengeCookie(res: Response): void {
   res.clearCookie(CHALLENGE_COOKIE, { ...challengeCookieOptions(), maxAge: undefined });
-}
-
-function isValidUsername(name: unknown): boolean {
-  if (typeof name !== 'string') return false;
-  const trimmed = name.trim();
-  if (trimmed.length < 1 || trimmed.length > 64) return false;
-  return /^[A-Za-z0-9_.\- ]+$/.test(trimmed);
 }
 
 // webauthnCredentials.ts is still untyped — credential shape inferred as any
