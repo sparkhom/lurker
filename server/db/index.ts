@@ -4,6 +4,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
+import { isNodeMode } from '../utils/edition.js';
 
 const dbPath = process.env.DATABASE_PATH || path.join(import.meta.dirname, '../../data/lurker.db');
 const dbDir = path.dirname(dbPath);
@@ -434,6 +435,23 @@ function columnExists(table: string, column: string): boolean {
   return !!cols.find((c) => c.name === column);
 }
 
+// Recovery for pre-role SELF-HOSTED installs: if no admin exists, promote the
+// earliest user so a single-user install that pre-dates the role column keeps
+// control. Deliberately SKIPPED in node edition — a cell is managed by the
+// orchestrator and has no operator-admin, so auto-promoting a tenant would
+// breach the hosted tenant/admin boundary (a tenant must never become admin).
+export function backfillFirstAdmin(): void {
+  if (isNodeMode()) return;
+  const adminCount = (
+    db.prepare(`SELECT COUNT(*) AS n FROM users WHERE role = 'admin'`).get() as { n: number }
+  ).n;
+  if (adminCount === 0) {
+    // Promote the earliest-created user (id ASC) if any exist.
+    db.exec(`UPDATE users SET role = 'admin'
+             WHERE id = (SELECT id FROM users ORDER BY id LIMIT 1)`);
+  }
+}
+
 migrate();
 
 // One-shot rebuild for peer_presence_state schema change. Old layout had
@@ -481,14 +499,7 @@ ensureColumn('users', 'last_seen_at', 'TEXT');
 // to admin by routes/auth.js. On an existing single-user install pre-dating
 // this column, backfill that lone user to admin so they retain control.
 ensureColumn('users', 'role', `TEXT NOT NULL DEFAULT 'user'`);
-const adminCount = (
-  db.prepare(`SELECT COUNT(*) AS n FROM users WHERE role = 'admin'`).get() as { n: number }
-).n;
-if (adminCount === 0) {
-  // Promote the earliest-created user (id ASC) if any exist.
-  db.exec(`UPDATE users SET role = 'admin'
-           WHERE id = (SELECT id FROM users ORDER BY id LIMIT 1)`);
-}
+backfillFirstAdmin();
 
 // Persist which rule matched each message so the highlights modal can read
 // from disk instead of scanning whatever happens to be loaded in client memory.
