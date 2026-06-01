@@ -9,7 +9,13 @@ process.env.LURKER_EDITION = 'node';
 process.env.LURKER_NODE_SECRET = 'test-node-secret';
 
 import type { Express } from 'express';
-import { setupTestDb, createTestApp, createAnonAgent } from '../test-utils/testApp.js';
+import { unsign } from 'cookie-signature';
+import {
+  setupTestDb,
+  createTestApp,
+  createAnonAgent,
+  TEST_SESSION_SECRET,
+} from '../test-utils/testApp.js';
 
 const ctx = setupTestDb('routes-node');
 const AUTH = 'Bearer test-node-secret';
@@ -142,5 +148,54 @@ describe('node control API — deprovision', () => {
       .set('Authorization', AUTH);
     expect(res.status).toBe(409);
     expect(findUserById(admin.id)).toBeDefined();
+  });
+});
+
+describe('node control API — mint session', () => {
+  it('mints a signed lurker_session cookie that maps to a real session for the user', async () => {
+    const created = await createAnonAgent(app)
+      .post('/api/node/users')
+      .set('Authorization', AUTH)
+      .send({ username: 'mint-me' });
+    const id = created.body.id;
+
+    const res = await createAnonAgent(app)
+      .post(`/api/node/users/${id}/session`)
+      .set('Authorization', AUTH);
+    expect(res.status).toBe(200);
+    expect(res.body.cookieName).toBe('lurker_session');
+    expect(typeof res.body.value).toBe('string');
+    expect(res.body.value.startsWith('s:')).toBe(true);
+
+    // The signed value must unsign with the cell's secret and resolve to a real
+    // session row owned by this user — i.e. the cell's own auth will accept it.
+    const token = unsign(res.body.value.slice(2), TEST_SESSION_SECRET);
+    expect(token).not.toBe(false);
+    const { findSession } = await import('../db/sessions.js');
+    expect(findSession(token as string)?.user_id).toBe(id);
+  });
+
+  it('404s minting for an unknown user', async () => {
+    const res = await createAnonAgent(app)
+      .post('/api/node/users/999999/session')
+      .set('Authorization', AUTH);
+    expect(res.status).toBe(404);
+  });
+
+  it('refuses to mint a session for an admin', async () => {
+    const admin = createUser('mint-admin', { role: 'admin' });
+    const res = await createAnonAgent(app)
+      .post(`/api/node/users/${admin.id}/session`)
+      .set('Authorization', AUTH);
+    expect(res.status).toBe(409);
+  });
+
+  it('requires the node secret', async () => {
+    const created = await createAnonAgent(app)
+      .post('/api/node/users')
+      .set('Authorization', AUTH)
+      .send({ username: 'mint-noauth' });
+    const res = await createAnonAgent(app).post(`/api/node/users/${created.body.id}/session`);
+    expect(res.status).toBe(401);
   });
 });
