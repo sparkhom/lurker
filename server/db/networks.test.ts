@@ -12,15 +12,18 @@ import path from 'path';
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lurker-test-'));
 process.env.DATABASE_PATH = path.join(tmpDir, 'test.db');
 
+let db: typeof import('./index.js').default;
 let createUser: typeof import('./users.js').createUser;
 let createNetwork: typeof import('./networks.js').createNetwork;
+let getNetwork: typeof import('./networks.js').getNetwork;
 let ownsNetwork: typeof import('./networks.js').ownsNetwork;
 let listNetworksForUser: typeof import('./networks.js').listNetworksForUser;
 let reorderNetworks: typeof import('./networks.js').reorderNetworks;
 
 beforeAll(async () => {
+  db = (await import('./index.js')).default;
   ({ createUser } = await import('./users.js'));
-  ({ createNetwork, ownsNetwork, listNetworksForUser, reorderNetworks } =
+  ({ createNetwork, getNetwork, ownsNetwork, listNetworksForUser, reorderNetworks } =
     await import('./networks.js'));
 });
 
@@ -147,5 +150,30 @@ describe('reorderNetworks', () => {
     expect(reorderNetworks(henri.id, [gNet!.id, hNet!.id])).toBeNull();
     expect(listNetworksForUser(gina.id).map((n) => n.id)).toEqual([gNet!.id]);
     expect(listNetworksForUser(henri.id).map((n) => n.id)).toEqual([hNet!.id]);
+  });
+});
+
+describe('network secrets without an encryption key (self-host)', () => {
+  it('stores and returns secrets as plaintext (no envelope)', () => {
+    // This suite sets no LURKER_SECRET_KEY, so encryption is a no-op.
+    const iris = createUser('iris');
+    const net = createNetwork(iris.id, {
+      name: 'libera',
+      host: 'irc.libera.chat',
+      port: 6697,
+      tls: true,
+      nick: 'iris',
+      server_password: 'plain-srv',
+      sasl_password: 'plain-sasl',
+      connect_commands: 'PRIVMSG NickServ :identify plain',
+    })!;
+    const raw = db.prepare('SELECT * FROM networks WHERE id = ?').get(net.id) as Record<
+      string,
+      string | null
+    >;
+    expect(raw.server_password).toBe('plain-srv');
+    expect(raw.sasl_password).toBe('plain-sasl');
+    expect(raw.connect_commands).toBe('PRIVMSG NickServ :identify plain');
+    expect(getNetwork(net.id, iris.id)!.server_password).toBe('plain-srv');
   });
 });

@@ -12,6 +12,7 @@ import { getNodeSecret } from './middleware/nodeAuth.js';
 import { nodeUploadConfigured } from './services/uploadProviders/nodeUpload.js';
 import * as systemLog from './services/systemLog.js';
 import { purgeExpiredSessions } from './db/sessions.js';
+import { backfillEncryptNetworkSecrets } from './db/networks.js';
 import { resolveSessionSecret } from './utils/sessionSecret.js';
 import { getEdition, isNodeMode } from './utils/edition.js';
 import { startOrchestratorClient, stopOrchestratorClient } from './services/orchestratorClient.js';
@@ -54,6 +55,15 @@ systemLog.log({ scope: 'server', text: `Lurker server starting up (edition: ${ED
 // it before connections register their idents.
 if (isIdentdEnabled()) {
   startIdentd(identdPort());
+}
+
+// Wrap any plaintext network secrets at rest now that the DB schema is ready
+// and before IRC connects. No-op unless LURKER_SECRET_KEY is configured (hosted
+// cells); self-host instances keep secrets in plaintext.
+const wrapped = backfillEncryptNetworkSecrets();
+if (wrapped.encrypted > 0) {
+  console.log(`[lurker] encrypted ${wrapped.encrypted} network-secret row(s) at rest`);
+  systemLog.log({ scope: 'server', text: `Encrypted ${wrapped.encrypted} network-secret row(s)` });
 }
 
 ircManager.initAll();

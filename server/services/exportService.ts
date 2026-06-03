@@ -12,6 +12,8 @@ import { Readable } from 'stream';
 import { ZipArchive } from 'archiver';
 import db from '../db/index.js';
 import { EXPORT_TABLES, EXPORT_FORMAT_VERSION } from '../db/exportSchema.js';
+import { ENCRYPTED_NETWORK_COLUMNS } from '../db/networks.js';
+import { decryptSecret } from '../utils/secretCrypto.js';
 
 interface ExportTableDefWithScope {
   scope: string;
@@ -166,6 +168,17 @@ export async function buildExportZip(
     if (d.mode !== 'export' && d.mode !== 'partial') continue;
     if (d.section && d.section !== 'data') continue;
     const rows = selectAll(table, d, userId);
+    // Network secrets live encrypted at rest on hosted cells; decrypt them so
+    // the export is portable plaintext (restorable on a self-host without the
+    // key) — same content the user sees in the app. No-op on a self-host
+    // (values are already plaintext).
+    if (table === 'networks') {
+      for (const row of rows) {
+        for (const col of ENCRYPTED_NETWORK_COLUMNS) {
+          row[col] = decryptSecret(row[col] as string | null);
+        }
+      }
+    }
     data[table] = rows.map((row) => projectRow(row, d));
     counts[table] = rows.length;
 
