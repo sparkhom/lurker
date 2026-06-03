@@ -45,7 +45,11 @@ export function extensionFor(mime: string, fallback = 'bin'): string {
 // WebP / APNG don't lose animation on the way through Lurker.
 export async function optimize(
   buffer: Buffer,
-  { maxDim, quality, rasterOnly = false }: { maxDim: number; quality: number; rasterOnly?: boolean },
+  {
+    maxDim,
+    quality,
+    rasterOnly = false,
+  }: { maxDim: number; quality: number; rasterOnly?: boolean },
 ): Promise<OptimizeResult> {
   let meta: sharp.Metadata;
   try {

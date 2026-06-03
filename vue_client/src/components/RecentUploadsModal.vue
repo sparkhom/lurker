@@ -48,7 +48,9 @@
           <div class="row-actions">
             <!-- A removed upload's URL is dead — only allow clearing it from history. -->
             <template v-if="!u.removed">
-              <button class="link" @click="onInsert(u)" title="insert URL into input">insert</button>
+              <button class="link" @click="onInsert(u)" title="insert URL into input">
+                insert
+              </button>
               <button
                 class="link"
                 @click="onCopy(u)"

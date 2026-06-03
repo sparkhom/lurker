@@ -62,7 +62,10 @@ describe('reportUpload', () => {
       height: 600,
     });
     expect(ok).toBe(true);
-    const [url, opts] = fetchMock.mock.calls[0] as [string, { headers: Record<string, string>; body: string }];
+    const [url, opts] = fetchMock.mock.calls[0] as [
+      string,
+      { headers: Record<string, string>; body: string },
+    ];
     expect(url).toBe('http://orchestrator:8020/_cp/moderation/uploads');
     expect(opts.headers.Authorization).toBe('Bearer fleet-secret');
     const body = JSON.parse(opts.body);
@@ -105,5 +108,25 @@ describe('flushUnsyncedUploads', () => {
     vi.stubGlobal('fetch', vi.fn<FetchMock>().mockResolvedValue({ ok: false }));
     await mod.flushUnsyncedUploads();
     expect(listUnsyncedUploads(500).some((r) => r.id === id)).toBe(true);
+  });
+});
+
+describe('reportUploadSoon', () => {
+  it('reports inline (fire-and-forget) and marks the row synced on success', async () => {
+    const id = seedUpload('soon');
+    vi.stubGlobal('fetch', vi.fn<FetchMock>().mockResolvedValue({ ok: true }));
+    mod.reportUploadSoon({
+      cell_upload_id: id,
+      cell_user_id: userId,
+      url: 'https://cdn.test/soon.jpg',
+      thumb_url: null,
+      mime: 'image/jpeg',
+      byte_size: 1,
+      width: null,
+      height: null,
+    });
+    // Fire-and-forget — let the resolved-promise microtask settle.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(listUnsyncedUploads(500).some((r) => r.id === id)).toBe(false);
   });
 });

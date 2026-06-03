@@ -67,7 +67,10 @@ const pipelineCapture = {
   opts: null as { maxDim: number; quality: number; rasterOnly?: boolean } | null,
 };
 vi.mock('../services/imagePipeline.js', () => ({
-  optimize: async (_buf: Buffer, opts: { maxDim: number; quality: number; rasterOnly?: boolean }) => {
+  optimize: async (
+    _buf: Buffer,
+    opts: { maxDim: number; quality: number; rasterOnly?: boolean },
+  ) => {
     pipelineCapture.opts = opts;
     return {
       buffer: Buffer.from('x'),

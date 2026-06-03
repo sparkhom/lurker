@@ -16,10 +16,7 @@ import { backfillEncryptNetworkSecrets } from './db/networks.js';
 import { resolveSessionSecret } from './utils/sessionSecret.js';
 import { getEdition, isNodeMode } from './utils/edition.js';
 import { startOrchestratorClient, stopOrchestratorClient } from './services/orchestratorClient.js';
-import {
-  startModerationReporter,
-  stopModerationReporter,
-} from './services/moderationReport.js';
+import { startModerationReporter, stopModerationReporter } from './services/moderationReport.js';
 import { startIdentd, stopIdentd, isIdentdEnabled, identdPort } from './services/identd.js';
 
 const PORT = Number(process.env.PORT || 8010);

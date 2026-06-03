@@ -198,13 +198,23 @@ describe('importFromZipBuffer — roundtrip', () => {
 
     const bobUploads = db
       .prepare('SELECT * FROM upload_history WHERE user_id = ?')
-      .all(bob.id) as Array<{ url: string; thumbnail: Buffer | null }>;
+      .all(bob.id) as Array<{
+      url: string;
+      thumbnail: Buffer | null;
+      synced_to_cp: number;
+      removed: number;
+    }>;
     expect(bobUploads.length).toBe(1);
     expect(bobUploads[0].url).toBe('https://example.com/foo.jpg');
     // Thumbnail blob was re-attached from the zip entry.
     expect(bobUploads[0].thumbnail).not.toBeNull();
     expect(Buffer.from(bobUploads[0].thumbnail!).length).toBeGreaterThan(0);
     expect(result.thumbnailsAttached).toBe(1);
+    // synced_to_cp and removed are operational state left out of the portable
+    // contract, so the imported row gets the schema defaults (0) — not a NULL
+    // that would fail the NOT NULL constraint (the old-archive import hazard).
+    expect(bobUploads[0].synced_to_cp).toBe(0);
+    expect(bobUploads[0].removed).toBe(0);
   });
 
   it('refuses to import into a non-empty account', async () => {
