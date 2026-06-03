@@ -124,24 +124,18 @@ onMounted(() => {
   gap: var(--space-4);
 }
 .control {
-  width: 40px;
-  height: 40px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   background: none;
   border: none;
-  border-radius: var(--radius-sm);
-  color: var(--accent);
+  color: var(--fg-muted);
   cursor: pointer;
   font: inherit;
+  /* Icon-only button — size the glyph, not text weight (fa-solid is already
+     weight 900). */
   font-size: var(--icon-lg);
-  padding: 0;
+  padding: var(--space-2) var(--space-4);
 }
-.control:hover,
-.control:focus-visible {
-  color: var(--fg);
-  background: var(--bg-soft);
+.control:hover {
+  color: var(--accent);
 }
 
 .stage {
