@@ -889,6 +889,19 @@ export const REGISTRY: readonly SettingOption[] = Object.freeze([
       'inserts the resulting URL. Disable to fall back to plain text paste.',
   },
   {
+    key: 'uploads.image_modal.enabled',
+    label: 'Image viewer',
+    category: 'uploads',
+    group: 'viewing',
+    type: 'bool',
+    default: false,
+    description:
+      'When enabled, clicking a URL to an image hosted by your upload providers ' +
+      '(x0.at, files.catbox.moe, and your configured Hoarder host) opens the image ' +
+      'in an in-app viewer instead of a new browser tab. Cmd/Ctrl-click always opens ' +
+      'in a new tab.',
+  },
+  {
     key: 'uploads.catbox.userhash',
     label: 'Catbox userhash',
     category: 'uploads',
@@ -1282,6 +1295,7 @@ export const GROUPS: Readonly<Record<string, string>> = Object.freeze({
   'auto-away': 'Auto-away',
   provider: 'Provider',
   pipeline: 'Image pipeline',
+  viewing: 'Viewing',
   catbox: 'catbox.moe',
   hoarder: 'Hoarder',
   alerts: 'Alerts',
