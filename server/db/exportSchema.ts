@@ -226,6 +226,7 @@ export const EXPORT_TABLES = Object.freeze({
     fkRekey: { user_id: 'users' },
     // thumbnail BLOB is written to thumbnails/<id>.jpg in the zip rather than
     // base64-inlined; the row carries a hasThumbnail boolean in data.json.
+    // thumbnail_url (node edition) is a plain string column carried as-is.
     blobColumns: ['thumbnail'],
     columns: [
       'id',
@@ -238,6 +239,7 @@ export const EXPORT_TABLES = Object.freeze({
       'width',
       'height',
       'thumbnail',
+      'thumbnail_url',
       'created_at',
     ],
   },

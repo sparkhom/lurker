@@ -540,6 +540,13 @@ ensureColumn('messages', 'from_ignored', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('buffer_reads', 'cleared_before_message_id', 'INTEGER');
 ensureColumn('buffer_reads', 'cleared_at', 'TEXT');
 
+// Node-edition uploads store the thumbnail as a remote CDN object under a
+// `thumbs/` prefix instead of an inline BLOB, so it doesn't bloat the cell DB
+// (and every D3 R2 backup snapshot). Standalone leaves this NULL and keeps the
+// BLOB. When set, it's the public thumbnail URL; when NULL, the API falls back
+// to serving the BLOB via /api/uploads/:id/thumb.
+ensureColumn('upload_history', 'thumbnail_url', 'TEXT');
+
 // Schema versioning lets us retire one-shot recovery blocks once every
 // production DB has run through them. Bump SCHEMA_VERSION when adding a new
 // recovery block, and delete blocks for versions far enough in the past.

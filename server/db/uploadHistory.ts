@@ -15,10 +15,15 @@ export interface UploadHistoryRow {
   width: number | null;
   height: number | null;
   thumbnail: Buffer | null;
+  thumbnail_url: string | null;
   created_at: string;
 }
 
-/** List row shape — omits the thumbnail blob, adds has_thumbnail flag. */
+/**
+ * List row shape — omits the thumbnail blob, adds has_thumbnail flag. Carries
+ * thumbnail_url so the API can prefer a remote CDN thumbnail (node edition) over
+ * the local BLOB-serving route.
+ */
 export interface UploadListRow {
   id: number;
   provider: string;
@@ -30,6 +35,7 @@ export interface UploadListRow {
   height: number | null;
   created_at: string;
   has_thumbnail: number;
+  thumbnail_url: string | null;
 }
 
 /** Fields passed to insertUpload. */
@@ -41,13 +47,16 @@ export interface InsertUploadFields {
   byte_size: number;
   width?: number | null;
   height?: number | null;
+  // Exactly one of thumbnail (inline BLOB, standalone) or thumbnail_url (remote
+  // CDN object, node edition) is set; both null for thumbnail-less uploads (txt).
   thumbnail: Buffer | null;
+  thumbnail_url?: string | null;
 }
 
 const insertStmt = db.prepare(`
   INSERT INTO upload_history
-    (user_id, provider, url, filename, mime, byte_size, width, height, thumbnail)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (user_id, provider, url, filename, mime, byte_size, width, height, thumbnail, thumbnail_url)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 export function insertUpload(userId: number, row: InsertUploadFields): number {
@@ -61,6 +70,7 @@ export function insertUpload(userId: number, row: InsertUploadFields): number {
     row.width ?? null,
     row.height ?? null,
     row.thumbnail,
+    row.thumbnail_url ?? null,
   );
   return Number(info.lastInsertRowid);
 }
@@ -77,7 +87,7 @@ export function listUploads(
       .prepare(
         `
       SELECT id, provider, url, filename, mime, byte_size, width, height, created_at,
-             (thumbnail IS NOT NULL) AS has_thumbnail
+             thumbnail_url, (thumbnail IS NOT NULL) AS has_thumbnail
       FROM upload_history
       WHERE user_id = ? AND id < ?
       ORDER BY id DESC
@@ -90,7 +100,7 @@ export function listUploads(
     .prepare(
       `
     SELECT id, provider, url, filename, mime, byte_size, width, height, created_at,
-           (thumbnail IS NOT NULL) AS has_thumbnail
+           thumbnail_url, (thumbnail IS NOT NULL) AS has_thumbnail
     FROM upload_history
     WHERE user_id = ?
     ORDER BY id DESC

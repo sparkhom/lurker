@@ -73,6 +73,25 @@ describe('imagePipeline.optimize', () => {
       code: 'UNSUPPORTED_FORMAT',
     });
   });
+
+  it('passes SVG through unchanged in standalone (rasterOnly off)', async () => {
+    const svg = Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>',
+    );
+    const out = await optimize(svg, { maxDim: 1024, quality: 80 });
+    expect(out.mime).toBe('image/svg+xml');
+    expect(out.ext).toBe('svg');
+    expect(Buffer.compare(out.buffer, svg)).toBe(0);
+  });
+
+  it('rejects SVG with UNSUPPORTED_FORMAT when rasterOnly (node edition)', async () => {
+    const svg = Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>',
+    );
+    await expect(
+      optimize(svg, { maxDim: 1024, quality: 80, rasterOnly: true }),
+    ).rejects.toMatchObject({ code: 'UNSUPPORTED_FORMAT' });
+  });
 });
 
 describe('imagePipeline.thumbnail', () => {

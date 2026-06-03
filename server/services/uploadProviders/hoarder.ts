@@ -14,7 +14,7 @@ export const requiresSecrets = true;
 
 export async function upload(
   buffer: Buffer,
-  { filename, mime }: { filename: string; mime: string },
+  { filename, mime, kind }: { filename: string; mime: string; kind?: string },
   secrets: { url?: string; api_key?: string } = {},
 ): Promise<{ url: string }> {
   if (!secrets.url) {
@@ -30,6 +30,8 @@ export async function upload(
 
   const base = secrets.url.replace(/\/+$/, '');
   const form = new FormData();
+  // Text fields before the file so multipart parsers populate req.body reliably.
+  if (kind) form.append('kind', kind);
   form.append('file', new Blob([new Uint8Array(buffer)], { type: mime }), filename);
 
   const resp = await fetch(`${base}/api/upload`, {

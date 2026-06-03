@@ -111,6 +111,10 @@ router.post(
               ? limits.maxDim
               : Number(settings['uploads.image.max_dimension']) || 2048,
             quality: limits ? limits.quality : Number(settings['uploads.image.quality']) || 85,
+            // Hosted service is raster images + .txt only — reject SVG (the one
+            // non-raster format sharp would otherwise pass through). Standalone
+            // keeps SVG passthrough.
+            rasterOnly: isNodeMode(),
           });
         } catch (err) {
           const e = err as { code?: string; message?: string };
@@ -155,6 +159,29 @@ router.post(
         return;
       }
 
+      // In node edition the thumbnail goes to remote storage (a `thumbs/` prefix
+      // on the in-house dropper) instead of an inline BLOB, so it doesn't bloat
+      // the cell DB / R2 backups and is served straight from the CDN. Best-effort:
+      // a thumb-upload failure falls back to storing the BLOB (standalone path),
+      // so a hiccup never blocks the user's upload.
+      let thumbnailBlob: Buffer | null = thumb;
+      let thumbnailUrl: string | null = null;
+      if (isNodeMode() && thumb) {
+        try {
+          const tRes = await provider.upload(
+            thumb,
+            { filename: 'thumb.jpg', mime: 'image/jpeg', kind: 'thumb' },
+            secrets,
+          );
+          if (tRes && typeof tRes.url === 'string') {
+            thumbnailUrl = tRes.url;
+            thumbnailBlob = null;
+          }
+        } catch {
+          // keep thumbnailBlob — fall back to the inline BLOB
+        }
+      }
+
       const id = insertUpload(req.user!.id, {
         provider: providerId,
         url: result.url,
@@ -163,10 +190,11 @@ router.post(
         byte_size: outByteSize,
         width: outWidth,
         height: outHeight,
-        thumbnail: thumb,
+        thumbnail: thumbnailBlob,
+        thumbnail_url: thumbnailUrl,
       });
 
-      res.json({ id, url: result.url });
+      res.json({ id, url: result.url, ...(thumbnailUrl ? { thumbnail_url: thumbnailUrl } : {}) });
     } catch (err) {
       next(err);
     }
@@ -179,8 +207,11 @@ router.get('/', (req: Request, res: Response) => {
   const rows: UploadListRow[] = listUploads(req.user!.id, { before, limit });
   res.json({
     items: rows.map((r) => {
-      const { has_thumbnail, ...rest } = r;
-      return has_thumbnail ? { ...rest, thumbnail_url: `/api/uploads/${r.id}/thumb` } : rest;
+      const { has_thumbnail, thumbnail_url, ...rest } = r;
+      // Prefer a remote CDN thumbnail (node edition); otherwise fall back to the
+      // local BLOB-serving route when an inline thumbnail exists.
+      const thumb = thumbnail_url || (has_thumbnail ? `/api/uploads/${r.id}/thumb` : null);
+      return thumb ? { ...rest, thumbnail_url: thumb } : rest;
     }),
     providers: providerIds,
   });
@@ -188,7 +219,9 @@ router.get('/', (req: Request, res: Response) => {
 
 router.get('/:id/thumb', (req: Request, res: Response) => {
   const row = getThumbnail(req.user!.id, Number(req.params.id));
-  if (!row) {
+  // No inline BLOB → nothing to serve here. Node-edition uploads keep their
+  // thumbnail as a remote CDN object (thumbnail_url) the client uses directly.
+  if (!row || !row.thumbnail) {
     res.status(404).json({ error: 'not found' });
     return;
   }

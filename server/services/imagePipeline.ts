@@ -45,7 +45,7 @@ export function extensionFor(mime: string, fallback = 'bin'): string {
 // WebP / APNG don't lose animation on the way through Lurker.
 export async function optimize(
   buffer: Buffer,
-  { maxDim, quality }: { maxDim: number; quality: number },
+  { maxDim, quality, rasterOnly = false }: { maxDim: number; quality: number; rasterOnly?: boolean },
 ): Promise<OptimizeResult> {
   let meta: sharp.Metadata;
   try {
@@ -82,6 +82,15 @@ export async function optimize(
   // SVG is a static vector — we pass it through unchanged. sharp can rasterize
   // it but doing so silently strips interactivity and inflates the byte size.
   if (meta.format === 'svg') {
+    // The hosted (node) service stores raster images + .txt only: serving a
+    // user-uploaded SVG from the operator's CDN domain is a stored-XSS / abuse
+    // vector. Reject via the same UNSUPPORTED_FORMAT path the route already maps
+    // to a 415. Standalone keeps the passthrough below.
+    if (rasterOnly) {
+      const err = new Error('SVG uploads are not supported') as Error & { code: string };
+      err.code = 'UNSUPPORTED_FORMAT';
+      throw err;
+    }
     return {
       buffer,
       mime: fmt.mime,

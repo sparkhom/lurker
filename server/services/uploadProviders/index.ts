@@ -11,7 +11,10 @@ export interface UploadProvider {
   requiresSecrets: boolean;
   upload(
     buffer: Buffer,
-    meta: { filename: string; mime: string },
+    // `kind` is an optional hint forwarded to the in-house dropper so a thumbnail
+    // lands under a `thumbs/` prefix. Hosts that don't understand it ignore the
+    // extra form field.
+    meta: { filename: string; mime: string; kind?: string },
     secrets?: Record<string, string>,
   ): Promise<{ url: string }>;
 }

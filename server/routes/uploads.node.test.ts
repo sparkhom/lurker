@@ -28,12 +28,26 @@ const stub = {
   id: 'stub',
   requiresSecrets: false,
   capturedSecrets: null as Record<string, string> | null,
+  // Lets a test simulate the remote thumbnail upload failing so we can assert
+  // the BLOB fallback. Reset per-test by the specs that touch it.
+  thumbShouldThrow: false,
+  // Records the `kind` of every upload call in a request (undefined for the
+  // full image, 'thumb' for the thumbnail) so we can prove the thumb is sent
+  // as its own object flagged kind=thumb.
+  lastKinds: [] as (string | undefined)[],
   async upload(
     _buffer: Buffer,
-    meta: { filename: string; mime: string },
+    meta: { filename: string; mime: string; kind?: string },
     secrets?: Record<string, string>,
   ) {
     stub.capturedSecrets = secrets ?? null;
+    stub.lastKinds.push(meta.kind);
+    if (meta.kind === 'thumb') {
+      if (stub.thumbShouldThrow) {
+        throw Object.assign(new Error('thumb store down'), { code: 'PROVIDER_ERROR' });
+      }
+      return { url: `https://stub.example/thumbs/${meta.filename}` };
+    }
     return { url: `https://stub.example/${meta.filename}` };
   },
 };
@@ -49,9 +63,11 @@ vi.mock('../services/uploadProviders/index.js', () => ({
 // Mock the sharp pipeline so we can capture the maxDim/quality the route passes
 // it (the real pipeline runs in uploads.test.ts). Lets us assert those come
 // from the operator env, not the tenant's settings.
-const pipelineCapture = { opts: null as { maxDim: number; quality: number } | null };
+const pipelineCapture = {
+  opts: null as { maxDim: number; quality: number; rasterOnly?: boolean } | null,
+};
 vi.mock('../services/imagePipeline.js', () => ({
-  optimize: async (_buf: Buffer, opts: { maxDim: number; quality: number }) => {
+  optimize: async (_buf: Buffer, opts: { maxDim: number; quality: number; rasterOnly?: boolean }) => {
     pipelineCapture.opts = opts;
     return {
       buffer: Buffer.from('x'),
@@ -62,7 +78,9 @@ vi.mock('../services/imagePipeline.js', () => ({
       height: 10,
     };
   },
-  thumbnail: async () => null,
+  // A non-empty buffer so the route exercises the (node-edition) remote thumb
+  // upload + BLOB-fallback paths.
+  thumbnail: async () => Buffer.from('fake-jpeg-thumb-bytes'),
 }));
 
 let app: Express;
@@ -160,7 +178,50 @@ describe('POST /api/uploads (node edition)', () => {
       .post('/api/uploads')
       .attach('image', smallPng, { filename: 'dims.png', contentType: 'image/png' });
     expect(res.status).toBe(200);
-    // Operator env (512 / 40), not the tenant's 8192 / 100.
-    expect(pipelineCapture.opts).toEqual({ maxDim: 512, quality: 40 });
+    // Operator env (512 / 40), not the tenant's 8192 / 100. rasterOnly is on in
+    // node edition (raster + .txt only; SVG rejected).
+    expect(pipelineCapture.opts).toEqual({ maxDim: 512, quality: 40, rasterOnly: true });
+  });
+
+  it('stores the thumbnail as a remote thumbs/ object, not an inline BLOB', async () => {
+    stub.thumbShouldThrow = false;
+    stub.lastKinds = [];
+    const res = await agent
+      .post('/api/uploads')
+      .attach('image', smallPng, { filename: 'thumbed.png', contentType: 'image/png' });
+    expect(res.status).toBe(200);
+    // The POST response advertises the remote thumbnail immediately so the
+    // client never round-trips through the cell for it.
+    expect(res.body.thumbnail_url).toMatch(/^https:\/\/stub\.example\/thumbs\//);
+    // The thumb went up as its own object flagged kind=thumb.
+    expect(stub.lastKinds).toContain('thumb');
+
+    const list = await agent.get('/api/uploads');
+    const row = list.body.items.find((r: { id: number }) => r.id === res.body.id);
+    expect(row.thumbnail_url).toMatch(/^https:\/\/stub\.example\/thumbs\//);
+    // No inline BLOB was stored, so the local thumb route has nothing to serve.
+    const thumbRes = await agent.get(`/api/uploads/${res.body.id}/thumb`);
+    expect(thumbRes.status).toBe(404);
+  });
+
+  it('falls back to an inline BLOB when the remote thumb upload fails', async () => {
+    stub.thumbShouldThrow = true;
+    stub.lastKinds = [];
+    const res = await agent
+      .post('/api/uploads')
+      .attach('image', smallPng, { filename: 'fallback.png', contentType: 'image/png' });
+    expect(res.status).toBe(200);
+    // A thumb hiccup must never block the user's upload, and no remote
+    // thumbnail is advertised.
+    expect(res.body.thumbnail_url).toBeUndefined();
+    stub.thumbShouldThrow = false;
+
+    const list = await agent.get('/api/uploads');
+    const row = list.body.items.find((r: { id: number }) => r.id === res.body.id);
+    // GET falls back to the local BLOB-serving route, which now serves bytes.
+    expect(row.thumbnail_url).toBe(`/api/uploads/${res.body.id}/thumb`);
+    const thumbRes = await agent.get(`/api/uploads/${res.body.id}/thumb`);
+    expect(thumbRes.status).toBe(200);
+    expect(thumbRes.headers['content-type']).toBe('image/jpeg');
   });
 });
