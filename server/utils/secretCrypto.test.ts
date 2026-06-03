@@ -45,6 +45,21 @@ describe('secretCrypto (key configured)', () => {
     expect(decryptSecret('plain-legacy-password')).toBe('plain-legacy-password');
   });
 
+  it('does not misclassify plaintext that merely starts with "lk1."', () => {
+    // Only the full lk1.<8-hex-keyid>.<base64url> shape counts as ciphertext; a
+    // plaintext secret that just starts with "lk1." is left alone — otherwise
+    // encryptSecret would skip wrapping it and decryptSecret would throw on read.
+    expect(isEncrypted('lk1.connect to nickserv')).toBe(false); // space → wrong shape
+    expect(isEncrypted('lk1.zzzzzzzz.payload')).toBe(false); // keyid not hex
+    expect(isEncrypted('lk1.deadbeef')).toBe(false); // no payload segment
+    expect(decryptSecret('lk1.not-an-envelope')).toBe('lk1.not-an-envelope'); // passthrough, no throw
+    // Such a value still gets wrapped on encrypt (round-trips), not skipped.
+    const plain = 'lk1.my actual password';
+    const wrapped = encryptSecret(plain)!;
+    expect(isEncrypted(wrapped)).toBe(true);
+    expect(decryptSecret(wrapped)).toBe(plain);
+  });
+
   it('never double-wraps an already-encrypted value', () => {
     const wrapped = encryptSecret('once')!;
     expect(encryptSecret(wrapped)).toBe(wrapped);

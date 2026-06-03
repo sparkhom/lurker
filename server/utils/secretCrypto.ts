@@ -33,7 +33,16 @@ const ALGORITHM = 'aes-256-gcm';
 const KEY_BYTES = 32;
 const IV_BYTES = 12;
 const TAG_BYTES = 16;
+const KEYID_HEX_LEN = 8; // length of the keyid (sha256(key) prefix) in the envelope
 const PRIMARY_KEY_ENV = 'LURKER_SECRET_KEY';
+
+// The full envelope shape: lk1.<8-hex-keyid>.<base64url>. Matching the whole
+// shape — not just the `lk1.` prefix — means a legitimate plaintext secret that
+// merely starts with "lk1." isn't misclassified as ciphertext (which would make
+// encryptSecret skip wrapping it and decryptSecret throw on read).
+const ENVELOPE_RE = new RegExp(
+  `^${ENVELOPE_PREFIX}\\.[0-9a-f]{${KEYID_HEX_LEN}}\\.[A-Za-z0-9_-]+$`,
+);
 
 interface KeyEntry {
   keyid: string;
@@ -64,12 +73,15 @@ function decodeKey(raw: string): Buffer {
 }
 
 function fingerprint(key: Buffer): string {
-  return createHash('sha256').update(key).digest('hex').slice(0, 8);
+  return createHash('sha256').update(key).digest('hex').slice(0, KEYID_HEX_LEN);
 }
 
 // Built once, lazily, from the environment. `primary` is the key new writes are
-// encrypted under; `byId` also carries any retired keys (future rotation) so
-// existing ciphertext stays readable. null when no key is configured.
+// encrypted under, and `byId` indexes keys by keyid for decryption. Today only
+// the single LURKER_SECRET_KEY is loaded, so changing it makes existing
+// ciphertext undecryptable; the envelope carries a keyid purely so multi-key
+// rotation (load retired keys into byId here, re-wrap on next write) can be ADDED
+// later without a format change. null when no key is configured.
 let registry: Registry | null = null;
 let registryBuilt = false;
 
@@ -102,7 +114,7 @@ export function hasSecretKey(): boolean {
 
 /** True if `value` is one of our encrypted envelopes (vs legacy plaintext). */
 export function isEncrypted(value: string | null | undefined): boolean {
-  return typeof value === 'string' && value.startsWith(`${ENVELOPE_PREFIX}.`);
+  return typeof value === 'string' && ENVELOPE_RE.test(value);
 }
 
 // Encrypt a single secret for storage. null / empty-string pass through
