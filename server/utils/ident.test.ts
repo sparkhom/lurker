@@ -13,7 +13,7 @@ describe('deriveIdent', () => {
         networkUsername: 'whatever',
         nick: 'alice',
       }),
-    ).toBe('u42');
+    ).toBe('lu42');
   });
 
   it('node edition ignores the per-network username (uniqueness is forced)', () => {
@@ -26,7 +26,7 @@ describe('deriveIdent', () => {
         networkUsername: 'bob',
         nick: 'bob',
       }),
-    ).toBe('u7');
+    ).toBe('lu7');
     expect(
       deriveIdent({
         nodeMode: true,
@@ -34,7 +34,7 @@ describe('deriveIdent', () => {
         networkUsername: 'bob',
         nick: 'bob',
       }),
-    ).toBe('u8');
+    ).toBe('lu8');
   });
 
   it('node edition falls back safely for a non-acct username (e.g. the operator)', () => {
