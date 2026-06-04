@@ -38,14 +38,20 @@
     </div>
 
     <div class="stage" @click.self="$emit('close')">
-      <p v-if="failed" class="empty">Couldn't load image.</p>
+      <div v-if="failed" class="failed-card">
+        <p class="empty">
+          Failed to load image.
+          <button class="link" type="button" @click="openInBrowser">Open in browser.</button>
+        </p>
+      </div>
       <p v-else-if="loading" class="loading" aria-label="Loading image">
         <i class="fa-solid fa-circle-notch fa-spin"></i>
       </p>
       <img
         v-show="!loading && !failed"
         class="image"
-        :src="url"
+        :src="displayUrl"
+        referrerpolicy="no-referrer"
         alt=""
         @load="onLoad"
         @error="onError"
@@ -55,7 +61,9 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue';
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
+
+const LOAD_TIMEOUT_MS = 20_000;
 
 const props = defineProps<{
   url: string;
@@ -65,22 +73,45 @@ const emit = defineEmits<{ close: [] }>();
 
 const loading = ref(true);
 const failed = ref(false);
+const displayUrl = ref(props.url);
 const overlayEl = ref<HTMLElement | null>(null);
+const loadTimer = ref<number | null>(null);
 
 watch(
   () => props.url,
-  () => {
-    loading.value = true;
-    failed.value = false;
-  },
+  (nextUrl) => startLoading(nextUrl),
 );
 
 function onLoad(): void {
+  clearLoadTimer();
   loading.value = false;
   failed.value = false;
 }
 
 function onError(): void {
+  clearLoadTimer();
+  loading.value = false;
+  failed.value = true;
+}
+
+function startLoading(nextUrl: string): void {
+  clearLoadTimer();
+  displayUrl.value = nextUrl;
+  loading.value = true;
+  failed.value = false;
+  loadTimer.value = window.setTimeout(onLoadTimeout, LOAD_TIMEOUT_MS);
+}
+
+function clearLoadTimer(): void {
+  if (loadTimer.value == null) return;
+
+  window.clearTimeout(loadTimer.value);
+  loadTimer.value = null;
+}
+
+function onLoadTimeout(): void {
+  loadTimer.value = null;
+  displayUrl.value = '';
   loading.value = false;
   failed.value = true;
 }
@@ -92,6 +123,11 @@ function openInBrowser(): void {
 
 onMounted(() => {
   overlayEl.value?.focus();
+  startLoading(props.url);
+});
+
+onBeforeUnmount(() => {
+  clearLoadTimer();
 });
 </script>
 
@@ -169,9 +205,30 @@ onMounted(() => {
 .loading {
   font-size: var(--icon-lg);
 }
+.failed-card {
+  width: min(520px, 92vw);
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  padding: var(--space-9);
+}
 .empty {
-  font-style: italic;
-  padding: var(--space-10);
+  color: var(--fg);
+}
+.link {
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font: inherit;
+  padding: 0 var(--space-2);
+}
+.link:hover {
+  color: var(--accent);
+}
+.link:focus-visible {
+  color: var(--accent);
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
 }
 
 @keyframes lightbox-fade-in {

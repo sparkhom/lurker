@@ -2,44 +2,48 @@
 // SPDX-License-Identifier: MPL-2.0
 
 import { describe, expect, it } from 'vitest';
-import { isUploadImageUrl } from './uploadHostMatch.js';
+import { isImageUrl } from './uploadHostMatch.js';
 
-describe('isUploadImageUrl', () => {
-  it('matches x0 image URLs', () => {
-    expect(isUploadImageUrl('https://x0.at/abc.png', '')).toBe(true);
+describe('isImageUrl', () => {
+  it('matches image URLs on any host', () => {
+    expect(isImageUrl('https://example.com/abc.png')).toBe(true);
   });
 
-  it('matches catbox image URLs case-insensitively', () => {
-    expect(isUploadImageUrl('https://files.catbox.moe/abc.JPG', '')).toBe(true);
+  it('matches image extensions case-insensitively', () => {
+    expect(isImageUrl('https://files.catbox.moe/abc.JPG')).toBe(true);
   });
 
   it('matches image paths with query strings', () => {
-    expect(isUploadImageUrl('https://files.catbox.moe/abc.png?v=2', '')).toBe(true);
+    expect(isImageUrl('https://files.catbox.moe/abc.png?v=2')).toBe(true);
   });
 
-  it('rejects provider URLs without image extensions', () => {
-    expect(isUploadImageUrl('https://files.catbox.moe/abc.txt', '')).toBe(false);
+  it('matches image extensions in the middle of the path', () => {
+    expect(
+      isImageUrl(
+        'https://static.wikia.nocookie.net/onepiece/images/6/6d/Luffy.png/revision/latest?cb=20240306200817',
+      ),
+    ).toBe(true);
   });
 
-  it('rejects image URLs on unsupported hosts', () => {
-    expect(isUploadImageUrl('https://imgur.com/abc.png', '')).toBe(false);
+  it('matches mid-path extensions case-insensitively', () => {
+    expect(isImageUrl('https://example.com/path/foo.JPG/transform/x')).toBe(true);
+  });
+
+  it('rejects URLs without image extensions', () => {
+    expect(isImageUrl('https://files.catbox.moe/abc.txt')).toBe(false);
+  });
+
+  it('does not match extension-like substrings without dot and segment boundaries', () => {
+    expect(isImageUrl('https://example.com/png-guide')).toBe(false);
+    expect(isImageUrl('https://example.com/image-png/foo')).toBe(false);
+    expect(isImageUrl('https://example.com/foo.png-extra/bar')).toBe(false);
+  });
+
+  it('matches image URLs on previously unsupported hosts', () => {
+    expect(isImageUrl('https://imgur.com/abc.png')).toBe(true);
   });
 
   it('rejects malformed URLs', () => {
-    expect(isUploadImageUrl('not a url', '')).toBe(false);
-  });
-
-  it('matches the configured hoarder host', () => {
-    expect(isUploadImageUrl('https://drop.example.com/x.png', 'https://drop.example.com')).toBe(
-      true,
-    );
-  });
-
-  it('rejects hoarder URLs when the setting is empty', () => {
-    expect(isUploadImageUrl('https://drop.example.com/x.png', '')).toBe(false);
-  });
-
-  it('rejects hoarder URLs when the setting is malformed', () => {
-    expect(isUploadImageUrl('https://drop.example.com/x.png', 'not a url')).toBe(false);
+    expect(isImageUrl('not a url')).toBe(false);
   });
 });

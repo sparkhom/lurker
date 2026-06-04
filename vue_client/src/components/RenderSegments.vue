@@ -9,7 +9,7 @@
     <!-- Links render inside clickable rows (a history
          row jumps to the message on click), and a link activation shouldn't
          also fire the row's handler. onLinkClick preserves that propagation
-         guard, then optionally intercepts upload image URLs for the viewer. -->
+         guard, then optionally intercepts image URLs for the viewer. -->
     <a
       v-else-if="seg.url"
       class="msg-link"
@@ -17,8 +17,6 @@
       target="_blank"
       rel="noreferrer noopener"
       :style="styleFor(seg)"
-      @pointerenter="onLinkPreload(seg.url!)"
-      @focus="onLinkPreload(seg.url!)"
       @click="onLinkClick($event, seg.url!)"
       >{{ seg.text }}</a
     >
@@ -51,7 +49,7 @@ import { useSettingsStore } from '../stores/settings.js';
 import { useMircPalette } from '../composables/useNickColors.js';
 import { useImageModal } from '../composables/useImageModal.js';
 import { socketSend } from '../composables/useSocket.js';
-import { isUploadImageUrl } from '../utils/uploadHostMatch.js';
+import { isImageUrl } from '../utils/uploadHostMatch.js';
 import SpoilerText from './SpoilerText.vue';
 
 // The single renderer for an array of RenderSegments (the output of
@@ -91,13 +89,7 @@ function hasStyle(seg: RenderSegment): boolean {
 function isModalImageUrl(url: string): boolean {
   if (settings.effective('uploads.image_modal.enabled') !== true) return false;
 
-  const hoarderUrl = settings.effective('uploads.hoarder.url');
-  return isUploadImageUrl(url, typeof hoarderUrl === 'string' ? hoarderUrl : '');
-}
-
-function onLinkPreload(url: string): void {
-  if (!isModalImageUrl(url)) return;
-  imageModal.preload(url);
+  return isImageUrl(url);
 }
 
 function onLinkClick(event: MouseEvent, url: string): void {

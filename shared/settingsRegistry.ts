@@ -896,10 +896,8 @@ export const REGISTRY: readonly SettingOption[] = Object.freeze([
     type: 'bool',
     default: false,
     description:
-      'When enabled, clicking a URL to an image hosted by your upload providers ' +
-      '(x0.at, files.catbox.moe, and your configured Hoarder host) opens the image ' +
-      'in an in-app viewer instead of a new browser tab. Cmd/Ctrl-click always opens ' +
-      'in a new tab.',
+      'When enabled, clicking a URL to an image opens it in an in-app viewer instead ' +
+      'of a new browser tab. Cmd/Ctrl-click always opens in a new tab.',
   },
   {
     key: 'uploads.catbox.userhash',
