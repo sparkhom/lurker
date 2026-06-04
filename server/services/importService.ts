@@ -448,7 +448,9 @@ export async function importFromZipBuffer(
   zipBuffer: Buffer,
 ): Promise<ImportResult> {
   const tmp = path.join(os.tmpdir(), `lurker-import-${randomBytes(8).toString('hex')}.lurk`);
-  await fs.promises.writeFile(tmp, zipBuffer);
+  // 0600 — the archive carries decrypted network passwords; don't leave it
+  // world-readable under a permissive umask.
+  await fs.promises.writeFile(tmp, zipBuffer, { mode: 0o600 });
   try {
     return await importFromZipFile(targetUserId, tmp);
   } finally {

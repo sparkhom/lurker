@@ -176,8 +176,8 @@ export function setExportBuildRunnerForTests(fn: BuildRunner | null): void {
   buildRunner = fn ?? spawnWorkerBuild;
 }
 
-function relayProgress(jobId: number, userId: number, processed: number): void {
-  updateProgress(jobId, processed);
+function relayProgress(jobId: number, userId: number, processed: number, total: number): void {
+  updateProgress(jobId, processed, total);
   const now = Date.now();
   if (now - (lastEmitAt.get(jobId) ?? 0) < PROGRESS_THROTTLE_MS) return;
   lastEmitAt.set(jobId, now);
@@ -197,7 +197,7 @@ async function runBuild(
         includeMessages: opts.includeMessages,
         outPath: opts.outPath,
       },
-      (processed) => relayProgress(job.id, opts.userId, processed),
+      (processed, total) => relayProgress(job.id, opts.userId, processed, total),
     );
     markDone(job.id, {
       filePath: opts.outPath,

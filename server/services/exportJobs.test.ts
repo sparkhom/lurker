@@ -13,6 +13,7 @@ process.env.DATABASE_PATH = path.join(tmpDir, 'test.db');
 
 let createUser: typeof import('../db/users.js').createUser;
 let createNetwork: typeof import('../db/networks.js').createNetwork;
+let insertMessage: typeof import('../db/messages.js').insertMessage;
 let jobs: typeof import('./exportJobs.js');
 let dataExports: typeof import('../db/dataExports.js');
 
@@ -20,6 +21,7 @@ beforeAll(async () => {
   await import('../db/index.js');
   ({ createUser } = await import('../db/users.js'));
   ({ createNetwork } = await import('../db/networks.js'));
+  ({ insertMessage } = await import('../db/messages.js'));
   jobs = await import('./exportJobs.js');
   dataExports = await import('../db/dataExports.js');
   const { buildExportZip } = await import('./exportService.js');
@@ -82,6 +84,51 @@ describe('exportJobs lifecycle', () => {
     expect(done.file_path).toBeTruthy();
     expect(fs.existsSync(done.file_path!)).toBe(true);
     expect(done.expires_at).toBeTruthy();
+  });
+
+  it('persists the worker-reported total so progress never exceeds 100%', async () => {
+    const u = createUser('jobs-total');
+    const net = createNetwork(u.id, {
+      name: 'libera',
+      host: 'irc.libera.chat',
+      port: 6697,
+      tls: true,
+      nick: 't',
+    }) as Network;
+    for (let i = 0; i < 2500; i += 1) {
+      insertMessage({
+        networkId: net.id,
+        target: '#t',
+        time: '2026-05-17T10:00:00Z',
+        type: 'message',
+        nick: 't',
+        text: `m ${i}`,
+        self: false,
+      });
+    }
+
+    const { job } = jobs.startExport(u.id, true);
+    await waitFor(() => dataExports.getExportJob(job.id)?.status === 'done');
+    const done = dataExports.getExportJob(job.id)!;
+    expect(done.total_rows).toBe(2500);
+    expect(done.processed_rows).toBe(2500);
+    // The invariant the relay fix guarantees: the denominator never trails.
+    expect(done.processed_rows).toBeLessThanOrEqual(done.total_rows);
+  });
+
+  it('updateProgress overwrites a stale initial total with the worker-reported one', () => {
+    // Guards the relay fix deterministically: the worker's count is
+    // authoritative, so a progress frame carrying a total corrects a wrong
+    // initial markRunning estimate; a frame without one leaves it intact.
+    const u = createUser('jobs-progress');
+    const j = dataExports.createExportJob(u.id, true);
+    dataExports.markRunning(j.id, 1); // deliberately wrong estimate
+    dataExports.updateProgress(j.id, 2000, 5000);
+    expect(dataExports.getExportJob(j.id)!.total_rows).toBe(5000);
+    expect(dataExports.getExportJob(j.id)!.processed_rows).toBe(2000);
+    dataExports.updateProgress(j.id, 3000);
+    expect(dataExports.getExportJob(j.id)!.total_rows).toBe(5000);
+    expect(dataExports.getExportJob(j.id)!.processed_rows).toBe(3000);
   });
 
   it('refuses a second concurrent export for the same user', () => {

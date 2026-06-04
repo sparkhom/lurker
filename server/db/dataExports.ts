@@ -79,8 +79,20 @@ export function markRunning(id: number, totalRows: number): void {
   ).run(totalRows, id);
 }
 
-export function updateProgress(id: number, processedRows: number): void {
-  db.prepare('UPDATE data_exports SET processed_rows = ? WHERE id = ?').run(processedRows, id);
+export function updateProgress(id: number, processedRows: number, totalRows?: number): void {
+  // Keep total_rows in sync with the worker's own denominator when it reports
+  // one (> 0). The initial markRunning count is a main-thread estimate on a
+  // different snapshot; the worker's count is authoritative, and persisting it
+  // keeps the UI from ever showing processed > total.
+  if (typeof totalRows === 'number' && totalRows > 0) {
+    db.prepare('UPDATE data_exports SET processed_rows = ?, total_rows = ? WHERE id = ?').run(
+      processedRows,
+      totalRows,
+      id,
+    );
+  } else {
+    db.prepare('UPDATE data_exports SET processed_rows = ? WHERE id = ?').run(processedRows, id);
+  }
 }
 
 export function markDone(

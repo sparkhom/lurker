@@ -109,10 +109,15 @@ function* messagesNdjsonGenerator(
   let processed = 0;
   for (const row of cursor) {
     processed += 1;
-    if (onProgress && processed % PROGRESS_EVERY === 0) onProgress(processed, total);
+    // `total` is a COUNT(*) taken just before this iteration; a write committing
+    // between the two can make the stream yield more rows than the count. Report
+    // max(total, processed) so the denominator never trails the numerator.
+    if (onProgress && processed % PROGRESS_EVERY === 0) {
+      onProgress(processed, Math.max(total, processed));
+    }
     yield JSON.stringify(projectRow(row as Record<string, unknown>, def)) + '\n';
   }
-  if (onProgress) onProgress(processed, total);
+  if (onProgress) onProgress(processed, Math.max(total, processed));
 }
 
 function selectAll(

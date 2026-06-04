@@ -123,7 +123,10 @@ importRouter.use(requireAuth);
 // importer reads it from disk, so peak memory stays flat regardless of size.
 const HARD_IMPORT_LIMIT = 500 * 1024 * 1024;
 const IMPORT_TMP_DIR = path.join(os.tmpdir(), 'lurker-imports');
-fs.mkdirSync(IMPORT_TMP_DIR, { recursive: true });
+// Owner-only — an uploaded .lurk holds the source account's decrypted network
+// passwords, so other local users on a shared host mustn't be able to read the
+// staged upload. Matches the 0700/0600 posture on the export side.
+fs.mkdirSync(IMPORT_TMP_DIR, { recursive: true, mode: 0o700 });
 const upload = multer({
   dest: IMPORT_TMP_DIR,
   limits: { fileSize: HARD_IMPORT_LIMIT, files: 1 },
