@@ -19,6 +19,24 @@
 
 export const EXPORT_FORMAT_VERSION = 1;
 
+// Columns holding IRC network secrets that are encrypted at rest on hosted
+// cells (see server/utils/secretCrypto.ts). connect_commands is included
+// because it routinely carries `/msg NickServ identify <password>` and oper
+// passwords — IRCCloud encrypts it for the same reason. Encryption is a no-op
+// (plaintext passthrough) unless LURKER_SECRET_KEY is configured, so self-host
+// is unaffected.
+//
+// Lives here (a db-singleton-free module) rather than in db/networks.ts so the
+// worker-safe export builder can import it without pulling the db connection
+// into a worker thread's import graph. db/networks.ts re-exports it for the
+// callers that still reach for it there.
+export const ENCRYPTED_NETWORK_COLUMNS = [
+  'server_password',
+  'sasl_account',
+  'sasl_password',
+  'connect_commands',
+] as const;
+
 // FTS5 maintains its own shadow tables (messages_fts_data, _idx, _content,
 // _docsize, _config). Only the virtual `messages_fts` itself surfaces in
 // sqlite_master as a row the registry needs to address; the shadows are
@@ -364,6 +382,13 @@ export const EXPORT_TABLES = Object.freeze({
   app_meta: {
     mode: 'skip',
     reason: 'instance-level metadata (schema_version, etc.), not user data',
+  },
+
+  data_exports: {
+    mode: 'skip',
+    reason:
+      'per-user export job + artifact bookkeeping (status/progress/file path/TTL); ' +
+      'instance-local operational state, not portable user data',
   },
 });
 

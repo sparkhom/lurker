@@ -1,18 +1,31 @@
 // Copyright (c) 2026 Brad Root
 // SPDX-License-Identifier: MPL-2.0
 
-// Per-user data export. Streams a zip to a writable destination (typically
-// the HTTP response). Driven entirely by EXPORT_TABLES — if a table is
-// declared as exported there, it lands in the zip; if it's declared as
-// skipped, it doesn't. The schema tripwire in exportSchema.test.js
-// guarantees the registry covers every live table.
+// Per-user data export. Streams a zip to a writable destination (a file on
+// disk, written by the background export worker — or, in tests, a PassThrough).
+// Driven entirely by EXPORT_TABLES — if a table is declared as exported there,
+// it lands in the zip; if it's declared as skipped, it doesn't. The schema
+// tripwire in exportSchema.test.js guarantees the registry covers every live
+// table.
+//
+// IMPORTANT: this module is connection-agnostic — every function takes the
+// `better-sqlite3` connection to read from as its first argument and this file
+// deliberately does NOT import the db singleton (`db/index.ts`). That keeps it
+// safe to import inside a worker thread, which opens its OWN readonly
+// connection to the same WAL file. Holding a streaming `.iterate()` cursor open
+// on the *shared* connection while the IRC bouncer writes is what crashed the
+// process before (better-sqlite3 throws "database connection is busy"); a
+// separate reader connection makes that collision structurally impossible.
 
 import type { Writable } from 'stream';
 import { Readable } from 'stream';
+import type { Database } from 'better-sqlite3';
 import { ZipArchive } from 'archiver';
-import db from '../db/index.js';
-import { EXPORT_TABLES, EXPORT_FORMAT_VERSION } from '../db/exportSchema.js';
-import { ENCRYPTED_NETWORK_COLUMNS } from '../db/networks.js';
+import {
+  EXPORT_TABLES,
+  EXPORT_FORMAT_VERSION,
+  ENCRYPTED_NETWORK_COLUMNS,
+} from '../db/exportSchema.js';
 import { decryptSecret } from '../utils/secretCrypto.js';
 
 interface ExportTableDefWithScope {
@@ -25,6 +38,9 @@ interface ExportTableDefWithScope {
   rekeyOnImport?: boolean;
   fkRekey?: Record<string, string>;
 }
+
+/** Called periodically as messages stream out so the job row + WS can report progress. */
+export type ExportProgressFn = (processed: number, total: number) => void;
 
 // SQL fragment that filters a table to a single user's rows. Returned as
 // `{ where, params }` so callers can splice it into a SELECT.
@@ -49,7 +65,7 @@ function scopeFilter(scope: string, userId: number): { where: string; params: nu
   }
 }
 
-function countRows(table: string, scope: string, userId: number): number {
+function countRows(db: Database, table: string, scope: string, userId: number): number {
   const { where, params } = scopeFilter(scope, userId);
   return (db.prepare(`SELECT COUNT(*) AS n FROM ${table} ${where}`).get(...params) as { n: number })
     .n;
@@ -73,9 +89,16 @@ function projectRow(
   return out;
 }
 
+// How often to fire the progress callback while streaming messages. Cheap to
+// emit (the job manager throttles WS fan-out on top of this), but no point
+// calling it for every single row.
+const PROGRESS_EVERY = 2000;
+
 function* messagesNdjsonGenerator(
+  db: Database,
   userId: number,
-  networkIdToCount: { total: number },
+  total: number,
+  onProgress?: ExportProgressFn,
 ): Generator<string> {
   const def = EXPORT_TABLES.messages as ExportTableDefWithScope;
   const { where, params } = scopeFilter(def.scope, userId);
@@ -83,13 +106,22 @@ function* messagesNdjsonGenerator(
   const cursor = db
     .prepare(`SELECT ${cols} FROM messages ${where} ORDER BY id ASC`)
     .iterate(...params);
+  let processed = 0;
   for (const row of cursor) {
-    networkIdToCount.total += 1;
+    processed += 1;
+    // `total` is a COUNT(*) taken just before this iteration; a write committing
+    // between the two can make the stream yield more rows than the count. Report
+    // max(total, processed) so the denominator never trails the numerator.
+    if (onProgress && processed % PROGRESS_EVERY === 0) {
+      onProgress(processed, Math.max(total, processed));
+    }
     yield JSON.stringify(projectRow(row as Record<string, unknown>, def)) + '\n';
   }
+  if (onProgress) onProgress(processed, Math.max(total, processed));
 }
 
 function selectAll(
+  db: Database,
   table: string,
   def: ExportTableDefWithScope,
   userId: number,
@@ -104,6 +136,7 @@ function selectAll(
 }
 
 export function computeExportPreview(
+  db: Database,
   userId: number,
   { includeMessages = false } = {},
 ): Record<string, number> {
@@ -119,12 +152,22 @@ export function computeExportPreview(
       counts[table] = 0;
       continue;
     }
-    counts[table] = countRows(table, d.scope, userId);
+    counts[table] = countRows(db, table, d.scope, userId);
   }
   return counts;
 }
 
-function getSchemaVersion(): number {
+/** Total messages a with-history export will write for `userId` (the progress denominator). */
+export function countExportMessages(db: Database, userId: number): number {
+  return countRows(
+    db,
+    'messages',
+    (EXPORT_TABLES.messages as ExportTableDefWithScope).scope,
+    userId,
+  );
+}
+
+function getSchemaVersion(db: Database): number {
   const row = db.prepare(`SELECT value FROM app_meta WHERE key = 'schema_version'`).get() as
     | { value: string }
     | undefined;
@@ -135,14 +178,17 @@ function getSchemaVersion(): number {
 // archive has been finalized (every byte is in destStream's buffer or
 // further downstream). Rejects if archiver emits an error.
 //
-// The destination is typically the express `res` object; the caller is
-// responsible for setting Content-Type and Content-Disposition before
-// calling this. We don't set them here so the function is reusable from
-// tests that pipe into a `PassThrough`.
+// `db` is the connection to read from. In production this is the export
+// worker's own readonly connection; in tests it can be the singleton or a
+// second connection. The caller owns Content-Type / Content-Disposition (when
+// piping to an HTTP response) — we don't set them here so the function stays
+// reusable from the worker (piping to a file) and tests (piping to a stream).
 export async function buildExportZip(
+  db: Database,
   userId: number,
   { includeMessages = false } = {},
   destStream: Writable,
+  onProgress?: ExportProgressFn,
 ): Promise<void> {
   const archive = new ZipArchive({ zlib: { level: 6 } });
   const archiveDone = new Promise<void>((resolve, reject) => {
@@ -167,7 +213,7 @@ export async function buildExportZip(
     const d = def as ExportTableDefWithScope;
     if (d.mode !== 'export' && d.mode !== 'partial') continue;
     if (d.section && d.section !== 'data') continue;
-    const rows = selectAll(table, d, userId);
+    const rows = selectAll(db, table, d, userId);
     // Network secrets live encrypted at rest on hosted cells; decrypt them so
     // the export is portable plaintext (restorable on a self-host without the
     // key) — same content the user sees in the app. No-op on a self-host
@@ -195,24 +241,19 @@ export async function buildExportZip(
   // ---- messages.ndjson ----
   if (includeMessages) {
     sections.push('messages');
-    const totalRef = { total: 0 };
-    const messagesStream = Readable.from(messagesNdjsonGenerator(userId, totalRef), {
+    // COUNT(*) up front gives the progress denominator and the manifest count;
+    // it's cheap on the indexed selection and known before the stream drains.
+    const total = countExportMessages(db, userId);
+    counts.messages = total;
+    const messagesStream = Readable.from(messagesNdjsonGenerator(db, userId, total, onProgress), {
       encoding: 'utf8',
     });
     archive.append(messagesStream, { name: 'messages.ndjson' });
-    // We populate counts.messages from the registry preview, since the
-    // generator-based count is only known after the stream drains. The
-    // preview path uses COUNT(*) which is cheap for any indexed selection.
-    counts.messages = countRows(
-      'messages',
-      (EXPORT_TABLES.messages as ExportTableDefWithScope).scope,
-      userId,
-    );
 
     // ---- bookmarks.json ----
     sections.push('bookmarks');
     const bookmarksDef = EXPORT_TABLES.user_bookmarks as ExportTableDefWithScope;
-    const bookmarkRows = selectAll('user_bookmarks', bookmarksDef, userId).map((row) =>
+    const bookmarkRows = selectAll(db, 'user_bookmarks', bookmarksDef, userId).map((row) =>
       projectRow(row, bookmarksDef),
     );
     archive.append(JSON.stringify(bookmarkRows, null, 2), { name: 'bookmarks.json' });
@@ -227,7 +268,7 @@ export async function buildExportZip(
   // ---- manifest.json ----
   const manifest = {
     export_format_version: EXPORT_FORMAT_VERSION,
-    db_schema_version: getSchemaVersion(),
+    db_schema_version: getSchemaVersion(db),
     exported_at: new Date().toISOString(),
     source_user_id: userId,
     sections,

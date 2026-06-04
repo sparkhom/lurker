@@ -1,42 +1,47 @@
 // Copyright (c) 2026 Brad Root
 // SPDX-License-Identifier: MPL-2.0
 
-// Per-user data export/import endpoints. Lets a user download a zip
-// containing all of their data, and restore it on a fresh account on a
-// different Lurker instance. See server/db/exportSchema.js for the
-// per-table contract that drives both directions.
+// Per-user data export/import endpoints.
+//
+// Export is asynchronous: POST starts a background build (a worker thread on
+// its own readonly db connection — see services/exportJobs.ts), progress is
+// pushed over the WebSocket, and the finished .lurk artifact is fetched from a
+// separate authenticated, resumable download endpoint. Building the zip inline
+// on the request (and on the shared db connection) is what crashed the process
+// on large exports — lurker#175.
+//
+// Import restores an export zip into a fresh account. See
+// server/db/exportSchema.js for the per-table contract that drives both
+// directions.
 
 import { Router } from 'express';
 import type { Request, Response, NextFunction } from 'express';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import multer from 'multer';
 import { requireAuth } from '../middleware/auth.js';
-import {
-  buildExportZip,
-  buildExportFilename,
-  computeExportPreview,
-} from '../services/exportService.js';
-import { importFromZipBuffer, ImportError } from '../services/importService.js';
+import db from '../db/index.js';
+import { computeExportPreview } from '../services/exportService.js';
+import { startExport, toClientJob, exportArtifactPath } from '../services/exportJobs.js';
+import { getLatestJobForUser, getExportJobForUser, markDownloaded } from '../db/dataExports.js';
+import { importFromZipFile, ImportError } from '../services/importService.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 
 const router = Router();
 router.use(requireAuth);
 
-// Cap import zip size. 500 MB is generous for "a single user's logs"; if a
-// user trips this we want to see the report rather than silently accept
-// something unbounded. Streaming import is a follow-up; for now multer
-// buffers the whole zip in memory.
-const HARD_IMPORT_LIMIT = 500 * 1024 * 1024;
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: HARD_IMPORT_LIMIT, files: 1 },
-});
+function parseBool(v: unknown): boolean {
+  const s = String(v ?? '').toLowerCase();
+  return v === true || s === '1' || s === 'true';
+}
 
 // GET /api/exports/preview — return row counts for both flavors so the
 // client can show what's about to be downloaded.
 router.get('/preview', (req: Request, res: Response, next: NextFunction) => {
   try {
-    const settingsOnly = computeExportPreview(req.user!.id, { includeMessages: false });
-    const withMessages = computeExportPreview(req.user!.id, { includeMessages: true });
+    const settingsOnly = computeExportPreview(db, req.user!.id, { includeMessages: false });
+    const withMessages = computeExportPreview(db, req.user!.id, { includeMessages: true });
     res.json({
       settingsOnly,
       withMessages,
@@ -47,36 +52,85 @@ router.get('/preview', (req: Request, res: Response, next: NextFunction) => {
   }
 });
 
-// GET /api/exports?include_messages=1 — stream the zip to the response.
-router.get(
-  '/',
-  asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-    const includeMessages =
-      String(req.query.include_messages || '').toLowerCase() === '1' ||
-      String(req.query.include_messages || '').toLowerCase() === 'true';
-    const filename = buildExportFilename(req.user!.username, { includeMessages });
-    // octet-stream (not application/zip) so Safari's "open safe files after
-    // downloading" preference doesn't auto-unarchive the .lurk file.
-    res.setHeader('Content-Type', 'application/octet-stream');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    try {
-      await buildExportZip(req.user!.id, { includeMessages }, res);
-    } catch (err) {
-      // Headers are already out — best we can do is close the connection.
-      // The downstream will see a truncated zip and surface it as a corrupt
-      // download. Logging makes it diagnosable server-side.
-      console.error('[lurker] export failed:', err);
-      if (!res.headersSent) {
-        next(err);
-        return;
-      }
-      res.destroy();
+// GET /api/exports/latest — the user's most recent export job (any status), so
+// the client can restore "preparing…" / "ready to download" on page load.
+router.get('/latest', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const job = getLatestJobForUser(req.user!.id);
+    res.json({ job: job ? toClientJob(job) : null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/exports { include_messages } — start a background export. Refuses
+// to start a second concurrent build for the same user (returns the in-flight
+// job with alreadyRunning=true). Allowed for paused accounts too: exporting
+// your own data is the one thing a suspended user must always be able to do.
+router.post('/', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const includeMessages = parseBool(req.body?.include_messages ?? req.query.include_messages);
+    const { job, alreadyRunning } = startExport(req.user!.id, includeMessages);
+    res.status(alreadyRunning ? 200 : 202).json({ job: toClientJob(job), alreadyRunning });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/exports/:id/download — stream a finished artifact. Authenticated +
+// ownership-checked; supports HTTP Range (via res.download → sendFile) so an
+// interrupted download resumes instead of restarting.
+router.get('/:id/download', (req: Request, res: Response, next: NextFunction) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: 'bad export id' });
+    return;
+  }
+  const job = getExportJobForUser(id, req.user!.id);
+  if (!job) {
+    res.status(404).json({ error: 'export not found' });
+    return;
+  }
+  if (job.status !== 'done') {
+    res.status(409).json({ error: 'export is not ready', status: job.status });
+    return;
+  }
+  const filePath = job.file_path || exportArtifactPath(job.token);
+  if (!fs.existsSync(filePath)) {
+    // Row says done but the artifact is gone (expired sweep, or a stale row).
+    res.status(410).json({ error: 'export artifact is no longer available' });
+    return;
+  }
+  // res.download sets Content-Disposition: attachment and an octet-stream
+  // Content-Type for the unknown .lurk extension (so Safari won't try to
+  // auto-unarchive it), and honors Range requests.
+  res.download(filePath, job.filename || 'lurker-export.lurk', (err) => {
+    if (err) {
+      // Client aborted or the file vanished mid-send; headers are likely out.
+      if (!res.headersSent) next(err);
+      return;
     }
-  }),
-);
+    markDownloaded(job.id);
+  });
+});
 
 const importRouter = Router();
 importRouter.use(requireAuth);
+
+// Cap import zip size. 500 MB is generous for "a single user's logs"; if a
+// user trips this we want to see the report rather than silently accept
+// something unbounded. The upload streams to a temp file (not memory) and the
+// importer reads it from disk, so peak memory stays flat regardless of size.
+const HARD_IMPORT_LIMIT = 500 * 1024 * 1024;
+const IMPORT_TMP_DIR = path.join(os.tmpdir(), 'lurker-imports');
+// Owner-only — an uploaded .lurk holds the source account's decrypted network
+// passwords, so other local users on a shared host mustn't be able to read the
+// staged upload. Matches the 0700/0600 posture on the export side.
+fs.mkdirSync(IMPORT_TMP_DIR, { recursive: true, mode: 0o700 });
+const upload = multer({
+  dest: IMPORT_TMP_DIR,
+  limits: { fileSize: HARD_IMPORT_LIMIT, files: 1 },
+});
 
 // POST /api/imports — upload an export zip and restore it into the
 // caller's account. Refuses if the account already has data.
@@ -89,7 +143,7 @@ importRouter.post(
         res.status(400).json({ error: 'no archive uploaded' });
         return;
       }
-      const result = await importFromZipBuffer(req.user!.id, req.file.buffer);
+      const result = await importFromZipFile(req.user!.id, req.file.path);
       res.json({ ok: true, ...result });
     } catch (err) {
       if (err instanceof ImportError) {
@@ -119,6 +173,9 @@ importRouter.post(
         return;
       }
       next(err);
+    } finally {
+      // Drop the multer temp upload whether the import succeeded or failed.
+      if (req.file?.path) fs.promises.unlink(req.file.path).catch(() => {});
     }
   }),
 );

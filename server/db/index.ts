@@ -7,6 +7,10 @@ import fs from 'fs';
 import { isNodeMode } from '../utils/edition.js';
 
 const dbPath = process.env.DATABASE_PATH || path.join(import.meta.dirname, '../../data/lurker.db');
+// Absolute path to the SQLite file, exported so the export worker can open its
+// own readonly connection to the exact same database (and so exportJobs can
+// site the data/exports/ artifact dir next to it) without re-deriving the path.
+export const DATABASE_FILE = dbPath;
 const dbDir = path.dirname(dbPath);
 if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
 
@@ -410,6 +414,38 @@ function migrate() {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id);
+
+    -- Per-user data-export jobs. A request to export account data spawns a
+    -- background worker (separate readonly SQLite connection) that builds the
+    -- .lurk archive to disk under data/exports/<token>.lurk; the row tracks
+    -- status/progress/artifact so a "ready" export survives reloads and an
+    -- interrupted job is recoverable after a restart. status is one of
+    -- 'pending' | 'running' | 'done' | 'error'. token names the on-disk file
+    -- (unguessable); the download endpoint still gates on session + ownership.
+    -- expires_at drives the TTL sweep; the artifact is deleted once it lapses.
+    -- Not part of the export contract (instance-local operational state) — see
+    -- the 'skip' entry in db/exportSchema.ts.
+    CREATE TABLE IF NOT EXISTS data_exports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      include_messages INTEGER NOT NULL DEFAULT 0,
+      total_rows INTEGER NOT NULL DEFAULT 0,
+      processed_rows INTEGER NOT NULL DEFAULT 0,
+      filename TEXT,
+      file_path TEXT,
+      byte_size INTEGER,
+      token TEXT NOT NULL,
+      error TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      started_at TEXT,
+      completed_at TEXT,
+      expires_at TEXT,
+      downloaded_at TEXT,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_data_exports_user ON data_exports(user_id, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_data_exports_expires ON data_exports(expires_at);
   `);
 }
 

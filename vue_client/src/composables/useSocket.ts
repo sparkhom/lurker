@@ -20,6 +20,7 @@ import { useNickNotesStore } from '../stores/nickNotes.js';
 import { useWhoisStore } from '../stores/whois.js';
 import { useBookmarksStore } from '../stores/bookmarks.js';
 import { useSystemLogStore } from '../stores/systemLog.js';
+import { useDataExportStore } from '../stores/dataExport.js';
 import { notifyForEvent } from './useHighlightNotifier.js';
 
 export interface AckResult {
@@ -477,6 +478,12 @@ function handleMessage(raw: string): void {
   if (payload.kind === 'system-log') {
     const systemLog = useSystemLogStore();
     systemLog.applyLine(payload.line);
+    return;
+  }
+  if (payload.kind === 'export') {
+    // Background data-export progress / completion. The data settings pane
+    // renders from this store; it stays current even when that pane is closed.
+    useDataExportStore().apply(payload.job);
     return;
   }
 }

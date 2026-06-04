@@ -49,7 +49,7 @@ async function exportToBuffer(userId: number): Promise<Buffer> {
   const sink = new PassThrough();
   const chunks: Buffer[] = [];
   sink.on('data', (c: Buffer) => chunks.push(c));
-  await buildExportZip(userId, { includeMessages: false }, sink);
+  await buildExportZip(db, userId, { includeMessages: false }, sink);
   return Buffer.concat(chunks);
 }
 

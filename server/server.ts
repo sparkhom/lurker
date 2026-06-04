@@ -18,6 +18,11 @@ import { getEdition, isNodeMode } from './utils/edition.js';
 import { startOrchestratorClient, stopOrchestratorClient } from './services/orchestratorClient.js';
 import { startModerationReporter, stopModerationReporter } from './services/moderationReport.js';
 import { startIdentd, stopIdentd, isIdentdEnabled, identdPort } from './services/identd.js';
+import {
+  recoverInterruptedExports,
+  startExportSweeper,
+  shutdownExportJobs,
+} from './services/exportJobs.js';
 
 const PORT = Number(process.env.PORT || 8010);
 const EDITION = getEdition();
@@ -69,6 +74,11 @@ if (wrapped.encrypted > 0) {
 
 ircManager.initAll();
 
+// Fail any export job a prior crash/restart left mid-flight, drop partial
+// artifacts + expired ones, then sweep finished exports on an interval.
+recoverInterruptedExports();
+startExportSweeper();
+
 // In node edition, start reporting to the orchestrator (register on boot +
 // heartbeat on an interval). No-op in standalone or when unconfigured.
 startOrchestratorClient();
@@ -88,6 +98,7 @@ function shutdown(signal: string): void {
   stopOrchestratorClient();
   stopModerationReporter();
   stopIdentd();
+  shutdownExportJobs();
   ircManager.shutdown();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 5000).unref();

@@ -24,12 +24,37 @@
         </li>
       </ul>
       <label class="opt">
-        <input type="checkbox" v-model="includeMessages" />
+        <input type="checkbox" v-model="includeMessages" :disabled="isBuilding" />
         Include message history ({{ preview.withMessages.messages.toLocaleString() }})
       </label>
-      <div class="actions">
-        <button class="link" @click="onDownload">download export</button>
+
+      <!-- Building: large exports run in the background; progress arrives over
+           the WebSocket. -->
+      <div v-if="isBuilding" class="export-state">
+        <p class="muted small">Preparing your export… {{ progressLabel }}</p>
       </div>
+
+      <!-- Ready: the artifact is on the server; download it from the
+           authenticated, resumable endpoint. -->
+      <div v-else-if="readyJob" class="export-state">
+        <p class="muted small">
+          Export ready — {{ formatBytes(readyJob.byteSize || 0)
+          }}<span v-if="readyJob.includeMessages"> with message history</span>{{ expiryNote }}.
+        </p>
+        <div class="actions">
+          <a class="link" :href="`/api/exports/${readyJob.id}/download`">download .lurk</a>
+          <button class="link" @click="onStart">rebuild</button>
+        </div>
+      </div>
+
+      <!-- Idle / after a failure: offer to (re)start. -->
+      <div v-else class="actions">
+        <button class="link" @click="onStart">prepare export</button>
+      </div>
+
+      <p v-if="failedJob" class="error inline">
+        Export failed: {{ failedJob.error || 'unknown error' }}.
+      </p>
     </div>
 
     <hr class="hl-sep" />
@@ -69,6 +94,7 @@ import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { api, apiMultipart } from '../../api.js';
 import { resetSession } from '../../composables/useSessionReset.js';
+import { useDataExportStore } from '../../stores/dataExport.js';
 
 interface ExportPreview {
   settingsOnly: Record<string, number>;
@@ -80,6 +106,32 @@ const router = useRouter();
 const preview = ref<ExportPreview | null>(null);
 const exportError = ref('');
 const includeMessages = ref(false);
+
+// Background-export job state, kept live by `export` WS events (see useSocket).
+const exportStore = useDataExportStore();
+const job = computed(() => exportStore.job);
+const isBuilding = computed(
+  () => job.value?.status === 'pending' || job.value?.status === 'running',
+);
+const readyJob = computed(() => (job.value?.status === 'done' ? job.value : null));
+const failedJob = computed(() => (job.value?.status === 'error' ? job.value : null));
+const progressLabel = computed(() => {
+  const j = job.value;
+  if (!j) return '';
+  if (j.includeMessages && j.total > 0) {
+    const pct = Math.min(100, Math.round((j.processed / j.total) * 100));
+    return `${j.processed.toLocaleString()} / ${j.total.toLocaleString()} messages (${pct}%)`;
+  }
+  return 'almost done';
+});
+const expiryNote = computed(() => {
+  const iso = readyJob.value?.expiresAt;
+  if (!iso) return '';
+  const ms = new Date(iso).getTime() - Date.now();
+  if (!Number.isFinite(ms) || ms <= 0) return '';
+  const hours = Math.round(ms / (60 * 60 * 1000));
+  return hours >= 1 ? `, expires in ~${hours}h` : ', expires soon';
+});
 
 const fileInputEl = ref<HTMLInputElement | null>(null);
 const chosenFile = ref<File | null>(null);
@@ -106,12 +158,27 @@ onMounted(async () => {
   } catch (e: any) {
     exportError.value = e.message || 'failed to load export preview';
   }
+  // Restore any in-flight or ready export so the pane reflects reality on load
+  // (WS events keep it current after this).
+  try {
+    const res = await api('/api/exports/latest');
+    if (res.job) exportStore.apply(res.job);
+  } catch {
+    /* non-fatal — the pane just starts in the idle state */
+  }
 });
 
-function onDownload() {
-  const qs = includeMessages.value ? '?include_messages=1' : '';
-  // Plain navigation; the browser handles the Content-Disposition.
-  window.location.href = `/api/exports${qs}`;
+async function onStart() {
+  exportError.value = '';
+  try {
+    const res = await api('/api/exports', {
+      method: 'POST',
+      body: { include_messages: includeMessages.value },
+    });
+    exportStore.apply(res.job);
+  } catch (e: any) {
+    exportError.value = e.message || 'failed to start export';
+  }
 }
 
 function onFileChosen(e: Event) {
@@ -195,6 +262,10 @@ function formatBytes(n: number): string {
   display: flex;
   gap: 1ch;
   align-items: center;
+  padding-top: var(--space-3);
+}
+
+.export-state {
   padding-top: var(--space-3);
 }
 

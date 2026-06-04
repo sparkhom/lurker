@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: MPL-2.0
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import fs from 'fs';
+import { PassThrough } from 'stream';
+import Database from 'better-sqlite3';
 import type { LurkerTestAgent } from '../test-utils/testApp.js';
 import type { Express } from 'express';
 import {
@@ -22,11 +25,63 @@ let alice: User;
 let bob: User;
 let aliceNet: Network;
 
+let exportJobs: typeof import('../services/exportJobs.js');
+let buildExportZip: typeof import('../services/exportService.js').buildExportZip;
+
+// Build an export buffer the same way the worker would, but in-process (vitest
+// can't transform a .ts worker entry loaded via node:worker_threads).
+async function exportToBuffer(userId: number, includeMessages: boolean): Promise<Buffer> {
+  const reader = new Database(ctx.dbPath, { readonly: true });
+  const sink = new PassThrough();
+  const chunks: Buffer[] = [];
+  sink.on('data', (c: Buffer) => chunks.push(c));
+  try {
+    await buildExportZip(reader, userId, { includeMessages }, sink);
+  } finally {
+    reader.close();
+  }
+  return Buffer.concat(chunks);
+}
+
+function waitForStatus(agent: LurkerTestAgent, want: string, timeoutMs = 5000): Promise<any> {
+  const started = Date.now();
+  return new Promise((resolve, reject) => {
+    const tick = async () => {
+      const res = await agent.get('/api/exports/latest');
+      const job = res.body.job;
+      if (job && (job.status === want || job.status === 'error')) return resolve(job);
+      if (Date.now() - started > timeoutMs) return reject(new Error(`timeout waiting for ${want}`));
+      setTimeout(tick, 15);
+    };
+    void tick();
+  });
+}
+
 beforeAll(async () => {
   const { createUser } = await import('../db/users.js');
   const { createNetwork } = await import('../db/networks.js');
   const { insertMessage } = await import('../db/messages.js');
   const { exportsRouter, importRouter } = await import('./exports.js');
+  exportJobs = await import('../services/exportJobs.js');
+  ({ buildExportZip } = await import('../services/exportService.js'));
+
+  // Run the background build in-process on its own readonly connection.
+  exportJobs.setExportBuildRunnerForTests(async (spec, onProgress) => {
+    const reader = new Database(ctx.dbPath, { readonly: true });
+    try {
+      const out = fs.createWriteStream(spec.outPath);
+      await buildExportZip(
+        reader,
+        spec.userId,
+        { includeMessages: spec.includeMessages },
+        out,
+        onProgress,
+      );
+      return { byteSize: fs.statSync(spec.outPath).size };
+    } finally {
+      reader.close();
+    }
+  });
 
   alice = createUser('exports-alice');
   bob = createUser('exports-bob');
@@ -37,7 +92,6 @@ beforeAll(async () => {
     tls: true,
     nick: 'alice',
   })!;
-  // Seed messages so the export has something interesting to dump.
   for (let i = 0; i < 3; i += 1) {
     insertMessage({
       networkId: aliceNet.id,
@@ -54,7 +108,10 @@ beforeAll(async () => {
   bobAgent = await createAuthedAgent(app, bob.id);
 });
 
-afterAll(() => ctx.cleanup());
+afterAll(() => {
+  exportJobs.setExportBuildRunnerForTests(null);
+  ctx.cleanup();
+});
 
 describe('GET /api/exports/preview', () => {
   it('requires auth', async () => {
@@ -66,30 +123,49 @@ describe('GET /api/exports/preview', () => {
     const res = await aliceAgent.get('/api/exports/preview');
     expect(res.status).toBe(200);
     expect(res.body.username).toBe('exports-alice');
-    expect(typeof res.body.settingsOnly).toBe('object');
-    expect(typeof res.body.withMessages).toBe('object');
-    // Messages flavor should report >= settings-only by definition.
     const so = (Object.values(res.body.settingsOnly) as number[]).reduce((s, n) => s + n, 0);
     const wm = (Object.values(res.body.withMessages) as number[]).reduce((s, n) => s + n, 0);
     expect(wm).toBeGreaterThanOrEqual(so);
   });
 });
 
-describe('GET /api/exports', () => {
-  it('streams a non-empty zip', async () => {
-    const res = await aliceAgent
-      .get('/api/exports?include_messages=1')
+describe('export job flow', () => {
+  it('requires auth to start', async () => {
+    const res = await createAnonAgent(app).post('/api/exports').send({ include_messages: true });
+    expect(res.status).toBe(401);
+  });
+
+  it('starts a build, finishes it, and serves the artifact', async () => {
+    const start = await aliceAgent.post('/api/exports').send({ include_messages: true });
+    expect(start.status).toBe(202);
+    expect(['pending', 'running', 'done']).toContain(start.body.job.status);
+    const jobId = start.body.job.id;
+
+    const done = await waitForStatus(aliceAgent, 'done');
+    expect(done.status).toBe('done');
+    expect(done.id).toBe(jobId);
+    expect(done.byteSize).toBeGreaterThan(0);
+    expect(done.downloadable).toBe(true);
+
+    const dl = await aliceAgent
+      .get(`/api/exports/${jobId}/download`)
       .buffer(true)
       .parse((stream, cb) => {
         const chunks: Buffer[] = [];
         stream.on('data', (c: Buffer) => chunks.push(c));
         stream.on('end', () => cb(null, Buffer.concat(chunks)));
       });
-    expect(res.status).toBe(200);
-    expect(res.headers['content-type']).toMatch(/octet-stream/);
-    expect(res.body.length).toBeGreaterThan(50);
-    // PK zip signature.
-    expect(res.body.slice(0, 2).toString()).toBe('PK');
+    expect(dl.status).toBe(200);
+    expect(dl.headers['content-disposition']).toMatch(/attachment/);
+    expect((dl.body as Buffer).slice(0, 2).toString()).toBe('PK');
+  });
+
+  it("refuses to download another user's export", async () => {
+    const start = await aliceAgent.post('/api/exports').send({ include_messages: false });
+    const jobId = start.body.job.id;
+    await waitForStatus(aliceAgent, 'done');
+    const res = await bobAgent.get(`/api/exports/${jobId}/download`);
+    expect(res.status).toBe(404);
   });
 });
 
@@ -108,45 +184,32 @@ describe('POST /api/imports', () => {
   });
 
   it('refuses import when the account already has data', async () => {
-    // Alice has networks → not empty. Export her data then try to re-import.
-    const exp = await aliceAgent
-      .get('/api/exports?include_messages=1')
-      .buffer(true)
-      .parse((stream, cb) => {
-        const chunks: Buffer[] = [];
-        stream.on('data', (c: Buffer) => chunks.push(c));
-        stream.on('end', () => cb(null, Buffer.concat(chunks)));
-      });
+    const buf = await exportToBuffer(alice.id, true);
     const res = await aliceAgent
       .post('/api/imports')
-      .attach('archive', exp.body, { filename: 'export.lurk' });
+      .attach('archive', buf, { filename: 'export.lurk' });
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('account_not_empty');
   });
 
   it('round-trips an export into a fresh account', async () => {
-    const exp = await aliceAgent
-      .get('/api/exports?include_messages=1')
-      .buffer(true)
-      .parse((stream, cb) => {
-        const chunks: Buffer[] = [];
-        stream.on('data', (c: Buffer) => chunks.push(c));
-        stream.on('end', () => cb(null, Buffer.concat(chunks)));
-      });
-    // Bob is empty (no networks).
-    const res = await bobAgent
+    const { createUser } = await import('../db/users.js');
+    const carol = createUser('exports-carol');
+    const carolAgent = await createAuthedAgent(app, carol.id);
+    const buf = await exportToBuffer(alice.id, true);
+
+    const res = await carolAgent
       .post('/api/imports')
-      .attach('archive', exp.body, { filename: 'alice.lurk' });
+      .attach('archive', buf, { filename: 'alice.lurk' });
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
 
-    // Verify Bob now has alice's network and messages.
     const { listNetworksForUser } = await import('../db/networks.js');
     const { listMessages } = await import('../db/messages.js');
-    const bobNets = listNetworksForUser(bob.id);
-    expect(bobNets.length).toBe(1);
-    expect(bobNets[0].name).toBe('libera');
-    const bobMsgs = listMessages(bobNets[0].id, '#general', { limit: 100 });
-    expect(bobMsgs.length).toBe(3);
+    const carolNets = listNetworksForUser(carol.id);
+    expect(carolNets.length).toBe(1);
+    expect(carolNets[0].name).toBe('libera');
+    const carolMsgs = listMessages(carolNets[0].id, '#general', { limit: 100 });
+    expect(carolMsgs.length).toBe(3);
   });
 });

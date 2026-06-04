@@ -7,6 +7,7 @@ import os from 'os';
 import path from 'path';
 import { PassThrough } from 'stream';
 import yauzl from 'yauzl';
+import Database from 'better-sqlite3';
 import type { User } from '../db/users.js';
 import type { Network } from '../db/networks.js';
 
@@ -83,7 +84,7 @@ async function runExport(userId: number, opts: { includeMessages: boolean }): Pr
   const sink = new PassThrough();
   const chunks: Buffer[] = [];
   sink.on('data', (c: Buffer) => chunks.push(c));
-  await buildExportZip(userId, opts, sink);
+  await buildExportZip(db, userId, opts, sink);
   return Buffer.concat(chunks);
 }
 
@@ -240,6 +241,70 @@ describe('buildExportZip', () => {
   });
 });
 
+describe('export under concurrent IRC writes (lurker#175 regression)', () => {
+  it('does not throw "database connection is busy" when the bouncer writes mid-export', async () => {
+    const u = createUser('concurrent-writer');
+    const net = createNetwork(u.id, {
+      name: 'libera',
+      host: 'irc.libera.chat',
+      port: 6697,
+      tls: true,
+      nick: 'c',
+    }) as Network;
+    for (let i = 0; i < 3000; i += 1) {
+      insertMessage({
+        networkId: net.id,
+        target: '#c',
+        time: '2026-05-17T10:00:00Z',
+        type: 'message',
+        nick: 'c',
+        text: `seed ${i}`,
+        self: false,
+      });
+    }
+
+    const sink = new PassThrough();
+    const chunks: Buffer[] = [];
+    let liveWrites = 0;
+    let writeError: unknown = null;
+    sink.on('data', (chunk: Buffer) => {
+      chunks.push(chunk);
+      // The readonly export cursor is open right now. On the old single shared
+      // connection this insert threw "database connection is busy" and crashed
+      // the process (lurker#175); on a separate connection it must succeed.
+      if (liveWrites < 100) {
+        try {
+          insertMessage({
+            networkId: net.id,
+            target: '#c',
+            time: '2026-05-17T10:05:00Z',
+            type: 'message',
+            nick: 'c',
+            text: `live ${liveWrites}`,
+            self: false,
+          });
+          liveWrites += 1;
+        } catch (e) {
+          writeError = e;
+        }
+      }
+    });
+
+    // The export reads from its OWN readonly connection (as the worker does);
+    // insertMessage writes on the shared singleton. WAL lets them coexist.
+    const reader = new Database(process.env.DATABASE_PATH as string, { readonly: true });
+    try {
+      await buildExportZip(reader, u.id, { includeMessages: true }, sink);
+    } finally {
+      reader.close();
+    }
+
+    expect(writeError).toBeNull();
+    expect(liveWrites).toBeGreaterThan(0);
+    expect(Buffer.concat(chunks).slice(0, 2).toString()).toBe('PK');
+  });
+});
+
 describe('buildExportFilename', () => {
   it('includes username and date and a settings suffix when no messages', () => {
     const name = buildExportFilename('alice', { includeMessages: false });
@@ -260,7 +325,7 @@ describe('computeExportPreview', () => {
     const aliceRow = db.prepare(`SELECT id FROM users WHERE username = 'alice'`).get() as {
       id: number;
     };
-    const counts = computeExportPreview(aliceRow.id, { includeMessages: false });
+    const counts = computeExportPreview(db, aliceRow.id, { includeMessages: false });
     expect(counts.messages).toBe(0);
     expect(counts.networks).toBeGreaterThan(0);
   });
@@ -268,7 +333,7 @@ describe('computeExportPreview', () => {
     const aliceRow = db.prepare(`SELECT id FROM users WHERE username = 'alice'`).get() as {
       id: number;
     };
-    const counts = computeExportPreview(aliceRow.id, { includeMessages: true });
+    const counts = computeExportPreview(db, aliceRow.id, { includeMessages: true });
     expect(counts.messages).toBeGreaterThan(0);
   });
 });

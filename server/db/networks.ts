@@ -3,19 +3,13 @@
 
 import db from './index.js';
 import { encryptSecret, decryptSecret, isEncrypted, hasSecretKey } from '../utils/secretCrypto.js';
+import { ENCRYPTED_NETWORK_COLUMNS } from './exportSchema.js';
 
-// Columns holding IRC network secrets that are encrypted at rest on hosted
-// cells (see server/utils/secretCrypto.ts). connect_commands is included
-// because it routinely carries `/msg NickServ identify <password>` and oper
-// passwords — IRCCloud encrypts it for the same reason. Encryption is a no-op
-// (plaintext passthrough) unless LURKER_SECRET_KEY is configured, so self-host
-// is unaffected.
-export const ENCRYPTED_NETWORK_COLUMNS = [
-  'server_password',
-  'sasl_account',
-  'sasl_password',
-  'connect_commands',
-] as const;
+// The list of encrypted network-secret columns lives in db/exportSchema.ts (a
+// db-singleton-free module) so the worker-safe export builder can import it
+// without pulling this module's db connection into a worker. Re-exported here
+// for the callers that have always reached for it via db/networks.js.
+export { ENCRYPTED_NETWORK_COLUMNS };
 
 // Decrypt the secret columns on a freshly-read row, in place. No-op for legacy
 // plaintext and when no key is configured (decryptSecret passes those through).
