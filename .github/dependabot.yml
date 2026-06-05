@@ -6,9 +6,16 @@ version: 2
 #     compromises (chalk/debug phishing, the Shai-Hulud worm) were live for
 #     only hours before being pulled, so even a few days of cooldown sidesteps
 #     them. Security updates ignore cooldown, so real CVEs still come through.
-#   * groups — collapse low-risk minor/patch bumps into a single PR per
-#     ecosystem (one lockfile rebase instead of N conflicting ones). Major
-#     bumps stay as individual PRs so they each get a manual look.
+#   * groups — collapse low-risk minor/patch bumps into a single PR per npm
+#     ecosystem (one lockfile rebase instead of N conflicting ones); major
+#     bumps still arrive as individual PRs so they each get a manual look.
+#     NOTE: the npm groups intentionally use `update-types` with NO `patterns`
+#     selector. Adding `patterns: ['*']` would mark every matched dependency
+#     "handled" and can silently suppress its major-version PR entirely
+#     (dependabot-core#14202); update-types alone leaves majors as individual
+#     PRs, per the docs. The github-actions group has no update-types limit, so
+#     it bundles ALL action updates (majors included) — those are few and
+#     low-risk, and grouping them avoids that suppression edge case entirely.
 updates:
   # Server (root) npm dependencies
   - package-ecosystem: npm
