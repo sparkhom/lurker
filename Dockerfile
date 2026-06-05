@@ -7,7 +7,7 @@ FROM node:22-slim AS vue-builder
 WORKDIR /app/vue_client
 
 COPY vue_client/package*.json ./
-RUN npm install
+RUN npm ci
 
 COPY vue_client/ ./
 # Vue and server both import shared/settingsRegistry.js via relative paths,
@@ -35,7 +35,7 @@ FROM node:22-slim AS server-deps
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install --omit=dev
+RUN npm ci --omit=dev
 
 # Stage 3: Runtime image
 FROM node:22-slim

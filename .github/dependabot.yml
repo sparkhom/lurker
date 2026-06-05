@@ -1,14 +1,55 @@
 version: 2
+
+# Supply-chain hardening notes:
+#   * cooldown — don't surface a new version until it has been public long
+#     enough for a malicious or yanked release to be caught. The 2025 npm
+#     compromises (chalk/debug phishing, the Shai-Hulud worm) were live for
+#     only hours before being pulled, so even a few days of cooldown sidesteps
+#     them. Security updates ignore cooldown, so real CVEs still come through.
+#   * groups — collapse low-risk minor/patch bumps into a single PR per
+#     ecosystem (one lockfile rebase instead of N conflicting ones). Major
+#     bumps stay as individual PRs so they each get a manual look.
 updates:
+  # Server (root) npm dependencies
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+      semver-minor-days: 7
+      semver-patch-days: 3
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # Client (vue_client) npm dependencies
   - package-ecosystem: npm
     directory: /vue_client
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+      semver-minor-days: 7
+      semver-patch-days: 3
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # GitHub Actions
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns:
+          - "*"
