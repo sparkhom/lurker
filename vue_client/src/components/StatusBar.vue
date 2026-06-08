@@ -18,16 +18,26 @@
         ><span class="name">{{ promptLabel }}</span
         ><span v-if="awayLabel" class="away">&nbsp;{{ awayLabel }}</span></span
       >
-      <!-- Detached-jump indicator. Sits adjacent to the self/nick segment on
-         compact (mobile) per agreed placement, where it's the only exit
-         from a detached buffer back to live. On desktop seg.self is hidden,
-         so this lands right after the buffer name — also a natural spot.
-         Unlike [N new ↓] (which is hidden on compact), this button renders
-         in both modes. -->
-      <button v-if="detached" class="seg return-present" type="button" @click="onReturnToPresent">
-        Return to present<template v-if="liveDuringDetach > 0">
-          ({{ liveDuringDetach }} new)</template
-        >
+      <!-- Jump-to-unread. Scrolls (usually up) to the pinned unread divider
+         when it's off-screen and the user hasn't scrolled it into view yet
+         this visit. Renders in both modes — catching up matters as much on
+         mobile. -->
+      <button v-if="unreadAnchor" class="seg jump-unread" type="button" @click="onJumpToUnread">
+        Jump to unread {{ unreadArrow }}
+      </button>
+      <!-- Return-to-present: the single downward affordance. Shows whenever the
+         buffer is detached (viewing a historical slice) OR the user has
+         scrolled up off the live tail; the count badge reflects whichever
+         applies. Detached → reattach to live; scrolled-up → snap down. Renders
+         in both modes — merging the former desktop-only [N new ↓] button in
+         means mobile finally gets a way back to the present too. -->
+      <button
+        v-if="showPresent"
+        class="seg return-present"
+        type="button"
+        @click="onReturnToPresent"
+      >
+        Return to present<template v-if="presentCount > 0"> ({{ presentCount }} new)</template>
         ↓
       </button>
       <span v-if="peerStatusLabel" class="seg peer-status" :class="peerStatusClass">{{
@@ -37,14 +47,6 @@
       <span v-if="uploadLabel" class="seg upload" :class="{ failed: uploads.failedAt }">{{
         uploadLabel
       }}</span>
-      <button
-        v-if="newBelow > 0 && !compact"
-        class="seg jump"
-        type="button"
-        @click="onJumpToBottom"
-      >
-        {{ newBelow }} new ↓
-      </button>
       <span v-if="splitLabel" class="seg split" :class="splitClass">{{ splitLabel }}</span>
       <span v-if="typingSegments.length" class="seg typing"
         >Typing:
@@ -102,7 +104,11 @@ import { useSettingsStore } from '../stores/settings.js';
 import { useUploadsStore } from '../stores/uploads.js';
 import { useIgnoresStore } from '../stores/ignores.js';
 import { useNickColors } from '../composables/useNickColors.js';
-import { useScrollState, requestScrollToBottom } from '../composables/useScrollState.js';
+import {
+  useScrollState,
+  requestScrollToBottom,
+  requestScrollToUnread,
+} from '../composables/useScrollState.js';
 import { useComposing } from '../composables/useComposing.js';
 import { useSelfLabel } from '../composables/useSelfLabel.js';
 import { formatTimestamp } from '../utils/timestamp.js';
@@ -128,8 +134,9 @@ withDefaults(
     // (the buffer name is already in the mobile header, the clock isn't worth
     // the row), and renders the self identity (nick + channel-prefix + user
     // modes + away) here instead — freeing the input row to be just `>`,
-    // textarea, and the paperclip. Also hides lag and the "new ↓" jump button
-    // so the typing/split/upload signals stay legible at phone widths.
+    // textarea, and the paperclip. Also hides lag so the typing/split/upload
+    // signals stay legible at phone widths. (The scroll affordances —
+    // jump-to-unread and return-to-present — render in both modes.)
     compact?: boolean;
   }>(),
   { compact: false },
@@ -165,7 +172,7 @@ const uploadLabel = computed(() => {
   }
   return '';
 });
-const { newBelow } = useScrollState();
+const { newBelow, stuckToBottom, unreadAnchor } = useScrollState();
 
 const active = computed(() => networks.activeBuffer);
 const buffer = computed(() => (networks.activeKey ? buffers.byKey(networks.activeKey) : null));
@@ -317,23 +324,35 @@ onBeforeUnmount(() => {
 });
 const clock = computed(() => formatTimestamp(now.value.toISOString(), tsFormat.value));
 
-function onJumpToBottom() {
-  requestScrollToBottom();
-}
-
 const detached = computed(() => !!buffer.value?.detached);
 const liveDuringDetach = computed(() => buffer.value?.liveDuringDetach || 0);
+
+// One downward affordance covering both "scrolled up on the live tail" and
+// "viewing a detached historical slice". Detached forces stickToBottom false
+// when the slice lands, but the user can scroll to the bottom OF THE SLICE
+// (stuck=true) while still off the live tail — so detached must be its own
+// arm of the condition, not folded into !stuckToBottom.
+const showPresent = computed(() => detached.value || !stuckToBottom.value);
+// Count badge: messages that arrived while detached, else the live unread-
+// below count tracked by the scroll state.
+const presentCount = computed(() => (detached.value ? liveDuringDetach.value : newBelow.value));
 
 function onReturnToPresent() {
   const buf = buffer.value;
   if (!buf) return;
-  buffers.reattachToLive(buf.networkId, buf.target);
-  // The reattach response will replace messages and trip the wholesale-
-  // replace branch in MessageList's watcher (which snaps to bottom and
-  // resets stickToBottom). The explicit token here is belt-and-suspenders:
-  // if the response is slow, the user clicking again still requests a
-  // bottom snap once the slice eventually lands.
+  // Only a detached buffer needs to re-fetch the live tail; a plain scrolled-
+  // up live buffer just snaps down. The reattach response replaces messages
+  // and trips the wholesale-replace branch in MessageList's watcher (which
+  // snaps to bottom and resets stickToBottom); the token is belt-and-
+  // suspenders for a slow response.
+  if (buf.detached) buffers.reattachToLive(buf.networkId, buf.target);
   requestScrollToBottom();
+}
+
+const unreadArrow = computed(() => (unreadAnchor.value === 'down' ? '↓' : '↑'));
+
+function onJumpToUnread() {
+  requestScrollToUnread();
 }
 </script>
 
@@ -429,7 +448,7 @@ function onReturnToPresent() {
 .seg.split.bad {
   color: var(--bad);
 }
-.seg.jump,
+.seg.jump-unread,
 .seg.return-present {
   background: none;
   border: none;
@@ -438,7 +457,7 @@ function onReturnToPresent() {
   padding: 0;
   cursor: pointer;
 }
-.seg.jump:hover,
+.seg.jump-unread:hover,
 .seg.return-present:hover {
   color: var(--fg);
 }

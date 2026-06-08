@@ -18,7 +18,7 @@
     <div v-if="!buffer?.hasMoreOlder && messages.length" class="notice">— start of history —</div>
     <p v-if="!messages.length" class="notice empty">No messages yet.</p>
     <template v-for="row in renderRows" :key="row.key">
-      <div v-if="row.divider === 'unread'" class="notice unread-divider">
+      <div v-if="row.divider === 'unread'" :ref="setUnreadDividerEl" class="notice unread-divider">
         <span class="notice-label">unread</span>
       </div>
       <div v-else-if="row.divider === 'away'" class="notice presence-divider">
@@ -171,7 +171,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
-import type { CSSProperties } from 'vue';
+import type { CSSProperties, ComponentPublicInstance } from 'vue';
 import { useNetworksStore, type AwayState } from '../stores/networks.js';
 import { useBuffersStore } from '../stores/buffers.js';
 import { useSettingsStore } from '../stores/settings.js';
@@ -183,6 +183,7 @@ import {
   setStuckToBottom,
   bumpNewBelow,
   resetScrollState,
+  setUnreadAnchor,
   useScrollState,
 } from '../composables/useScrollState.js';
 import type { RenderSegment } from '../utils/nickColor.js';
@@ -287,7 +288,47 @@ const tsFormat = computed(() =>
 
 const scroller = ref<HTMLElement | null>(null);
 const stickToBottom = ref(true);
-const { scrollToBottomToken } = useScrollState();
+const { scrollToBottomToken, scrollToUnreadToken } = useScrollState();
+
+// Unread-divider visibility tracking. The divider is pinned for the whole
+// visit (dividerAfterId snapshot), so once the user has scrolled it into view
+// we stop nagging them with the "Jump to unread" button for the rest of the
+// visit — reset on buffer switch. An IntersectionObserver on the (single)
+// divider element drives setUnreadAnchor: off-screen-and-unseen surfaces the
+// button with an up/down arrow, on-screen clears it and flips unreadSeen.
+let unreadDividerEl: HTMLElement | null = null;
+let unreadObserver: IntersectionObserver | null = null;
+let unreadSeen = false;
+
+function evaluateUnread(entry: IntersectionObserverEntry): void {
+  if (entry.isIntersecting) {
+    unreadSeen = true;
+    setUnreadAnchor(null);
+    return;
+  }
+  if (unreadSeen) {
+    setUnreadAnchor(null);
+    return;
+  }
+  const top = entry.boundingClientRect.top;
+  const rootTop = entry.rootBounds?.top ?? scroller.value?.getBoundingClientRect().top ?? 0;
+  setUnreadAnchor(top < rootTop ? 'up' : 'down');
+}
+
+// Vue function ref on the unread divider: called with the element when it
+// mounts and null when it unmounts (e.g. dividerAfterId reset to 0). Keep the
+// observer pointed at the live element across re-renders. The param type is
+// Vue's VNodeRef union; this ref only ever binds a native <div>, but guard
+// with instanceof so the observer is never handed a non-Element (a no-op,
+// not a throw, if a component instance ever slipped through).
+function setUnreadDividerEl(el: Element | ComponentPublicInstance | null): void {
+  const next = el instanceof HTMLElement ? el : null;
+  if (next === unreadDividerEl) return;
+  if (unreadDividerEl && unreadObserver) unreadObserver.unobserve(unreadDividerEl);
+  unreadDividerEl = next;
+  if (next && unreadObserver) unreadObserver.observe(next);
+  else if (!next) setUnreadAnchor(null);
+}
 
 const buffer = computed(() => (networks.activeKey ? buffers.byKey(networks.activeKey) : null));
 const messages = computed(() => buffer.value?.messages || []);
@@ -1000,6 +1041,7 @@ watch(
   () => networks.activeKey,
   async () => {
     stickToBottom.value = true;
+    unreadSeen = false;
     resetScrollState();
     await nextTick();
     scrollToBottom();
@@ -1017,14 +1059,29 @@ watch(compactMode, async () => {
   if (stickToBottom.value) scrollToBottom();
 });
 
-// StatusBar's "[N new ↓]" click increments scrollToBottomToken. Watching the
-// token (rather than wiring a callback) keeps the composable stateless and
-// avoids leaking refs to MessageList's DOM out of the component.
+// StatusBar's "Return to present ↓" click increments scrollToBottomToken.
+// Watching the token (rather than wiring a callback) keeps the composable
+// stateless and avoids leaking refs to MessageList's DOM out of the component.
 watch(scrollToBottomToken, async () => {
   await nextTick();
   stickToBottom.value = true;
   setStuckToBottom(true);
   scrollToBottom();
+});
+
+// StatusBar's "Jump to unread" click increments scrollToUnreadToken. Center
+// the pinned divider; mark not-stuck so a live message can't yank us back to
+// the tail mid-read. The observer flips unreadSeen once the divider lands in
+// view, which retires the button for the rest of the visit.
+watch(scrollToUnreadToken, async () => {
+  await nextTick();
+  const el = scroller.value;
+  if (!el) return;
+  const target = el.querySelector('.unread-divider');
+  if (!target) return;
+  stickToBottom.value = false;
+  setStuckToBottom(false);
+  target.scrollIntoView({ block: 'center', behavior: 'smooth' });
 });
 
 // Anything that shrinks MessageList's clientHeight (iOS soft keyboard sliding
@@ -1063,6 +1120,18 @@ onMounted(() => {
     scrollerObserver = new ResizeObserver(onScrollerResize);
     scrollerObserver.observe(scroller.value);
   }
+  if (typeof IntersectionObserver !== 'undefined' && scroller.value) {
+    unreadObserver = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[entries.length - 1];
+        if (entry) evaluateUnread(entry);
+      },
+      { root: scroller.value, threshold: 0 },
+    );
+    // The divider may already be mounted (immediate activeKey render) before
+    // the observer exists — pick it up now if so.
+    if (unreadDividerEl) unreadObserver.observe(unreadDividerEl);
+  }
   nowTimer = setInterval(() => {
     now.value = Date.now();
   }, 60_000);
@@ -1073,6 +1142,10 @@ onBeforeUnmount(() => {
   if (scrollerObserver) {
     scrollerObserver.disconnect();
     scrollerObserver = null;
+  }
+  if (unreadObserver) {
+    unreadObserver.disconnect();
+    unreadObserver = null;
   }
   if (nowTimer) {
     clearInterval(nowTimer);
