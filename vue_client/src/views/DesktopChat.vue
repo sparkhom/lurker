@@ -64,16 +64,7 @@
     </header>
     <header v-else-if="active" class="topic">
       <div class="topic-meta">
-        <button
-          v-if="isDmHeader"
-          type="button"
-          class="buffer link"
-          title="View profile"
-          @click="openDmProfile"
-        >
-          {{ bufferLabel }}
-        </button>
-        <span v-else class="buffer">{{ bufferLabel }}</span>
+        <span class="buffer">{{ bufferLabel }}</span>
         <template v-if="topic">
           <span class="sep">│</span>
           <button
@@ -110,29 +101,51 @@
             <i class="fa-solid fa-gear"></i>
           </button>
         </template>
-        <button
-          v-if="showBufferCog"
-          ref="bufferCogBtn"
-          class="link"
-          title="Buffer actions"
-          @click="openBufferActions"
-        >
-          <i class="fa-solid fa-gear"></i>
-        </button>
-        <button
-          v-if="isChannel"
-          class="link"
-          :title="showMembers ? 'Hide members' : 'Show members'"
-          @click="toggleMembers"
-        >
-          <i class="fa-solid fa-users"></i>
-        </button>
-        <span
-          v-if="isChannel && memberCount != null"
-          class="member-count"
-          :title="`${memberCount} ${memberCount === 1 ? 'user' : 'users'} in channel`"
-          >{{ memberCount }}</span
-        >
+        <template v-else-if="isDmHeader">
+          <button
+            type="button"
+            class="link"
+            title="View profile"
+            aria-label="View profile"
+            @click="openDmProfile"
+          >
+            <i class="fa-solid fa-id-card"></i>
+          </button>
+          <button
+            type="button"
+            class="link"
+            :title="dmNoteLabel"
+            :aria-label="dmNoteLabel"
+            @click="openDmNote"
+          >
+            <i class="fa-solid fa-note-sticky"></i>
+          </button>
+        </template>
+        <template v-else-if="isChannel">
+          <button
+            type="button"
+            class="link notify"
+            :class="{ on: channelNotifyAlways }"
+            :title="channelNotifyLabel"
+            :aria-label="channelNotifyLabel"
+            @click="toggleChannelNotify"
+          >
+            <i :class="channelNotifyAlways ? 'fa-solid fa-bell' : 'fa-regular fa-bell'"></i>
+          </button>
+          <button
+            class="link"
+            :title="showMembers ? 'Hide members' : 'Show members'"
+            :aria-label="showMembers ? 'Hide members' : 'Show members'"
+            @click="toggleMembers"
+          >
+          </button>
+          <span
+            v-if="memberCount != null"
+            class="member-count"
+            :title="`${memberCount} ${memberCount === 1 ? 'user' : 'users'} in channel`"
+            >{{ memberCount }}</span
+          >
+        </template>
       </div>
     </header>
     <div v-if="active || isSystemConsole" class="topic-divider"></div>
@@ -193,7 +206,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import type { Network } from '../stores/networks.js';
-import type { BufferLike } from '../composables/useBufferActions.js';
 import type { Buffer } from '../stores/buffers.js';
 import { useNetworksStore } from '../stores/networks.js';
 import { useSocket } from '../composables/useSocket.js';
@@ -223,7 +235,7 @@ import { useKeyboardShortcuts } from '../composables/useKeyboardShortcuts.js';
 import { useNicklistCollapseStore } from '../stores/nicklistCollapse.js';
 import { useNickNotesStore } from '../stores/nickNotes.js';
 import { useWhoisStore } from '../stores/whois.js';
-import { useBufferActions } from '../composables/useBufferActions.js';
+import { useChannelNotifyStore } from '../stores/channelNotify.js';
 import { useChannelListModal } from '../composables/useChannelListModal.js';
 import { useImageModal } from '../composables/useImageModal.js';
 import { useNetworkEditor } from '../composables/useNetworkEditor.js';
@@ -241,7 +253,7 @@ const settings = useSettingsStore();
 const nicklistCollapse = useNicklistCollapseStore();
 const nickNotes = useNickNotesStore();
 const whois = useWhoisStore();
-const bufferActions = useBufferActions();
+const channelNotify = useChannelNotifyStore();
 
 const channelListModal = reactive(useChannelListModal());
 const imageModal = reactive(useImageModal());
@@ -256,19 +268,6 @@ const showKbdHelp = ref(false);
 const pendingScrollId = ref<number | null>(null);
 const messageInputRef = ref<{ focus: () => void } | null>(null);
 const messageListRef = ref<{ scrollByPage: (dir: number) => void } | null>(null);
-const bufferCogBtn = ref<HTMLElement | null>(null);
-
-// The cog opens the same menu as right-clicking the sidebar row — exposed
-// here so the actions are reachable for the currently-open buffer without a
-// trip to the sidebar (and so mobile users, who have no right-click, can get
-// at them at all). Server buffers already have dedicated controls in this
-// bar, so the cog is for channels and DMs only.
-const showBufferCog = computed(() => !!active.value && !isServerBuffer.value);
-
-function openBufferActions() {
-  if (!activeBuf.value) return;
-  bufferActions.openMenuFromButton(activeBuf.value as BufferLike, bufferCogBtn.value);
-}
 
 // Any modal open? Type-ahead must not steal focus from a modal's own fields.
 const anyModalOpen = computed(
@@ -362,6 +361,38 @@ const isDmHeader = computed(() => {
 function openDmProfile() {
   if (!active.value) return;
   whois.openViewer(active.value.networkId, active.value.target);
+}
+// DM note button — mirrors the old context-menu entry, surfaced inline so the
+// per-peer note is one click from the conversation. Label flips once a note
+// exists so the button doubles as a "has a note" tell.
+const dmNoteLabel = computed(() =>
+  active.value && nickNotes.hasNote(active.value.networkId, active.value.target)
+    ? 'Edit note'
+    : 'Add note',
+);
+function openDmNote() {
+  if (!active.value) return;
+  nickNotes.openEditor(active.value.networkId, active.value.target);
+}
+
+// Channel "always notify" toggle — the one non-pin, non-close action from the
+// buffer menu, promoted to an inline button (pin/close stay buffer-list
+// concerns, reachable by right-clicking the sidebar row). The bell fills and
+// goes accent when the override is on.
+const channelNotifyAlways = computed(() => {
+  if (!isChannel.value || !active.value) return false;
+  return channelNotify.notifyAlways(active.value.networkId, active.value.target);
+});
+const channelNotifyLabel = computed(() =>
+  channelNotifyAlways.value ? 'Stop always notifying' : 'Always notify',
+);
+function toggleChannelNotify() {
+  if (!isChannel.value || !active.value) return;
+  channelNotify.setNotifyAlways(
+    active.value.networkId,
+    active.value.target,
+    !channelNotifyAlways.value,
+  );
 }
 
 // User count for the active channel buffer. Sits in the topic bar (next to
@@ -634,16 +665,6 @@ useChatBootstrap({ onJump: onJumpToMessage });
 .topic .buffer {
   color: var(--accent);
 }
-/* DM headers double as a "view profile" trigger. Strip the .link padding so
-   the button-rendered label sits exactly where the span used to, and only
-   underline on hover so it doesn't read as a link in steady state. */
-button.buffer.link {
-  padding: 0;
-}
-button.buffer.link:hover {
-  text-decoration: underline;
-  color: var(--accent);
-}
 .topic .sep {
   color: var(--border);
 }
@@ -704,6 +725,15 @@ button.buffer.link:hover {
   align-items: baseline;
   gap: var(--space-4);
   flex-shrink: 0;
+}
+/* The always-notify bell reads as off (muted) until the override is on, when
+   it fills and switches to accent — distinct from the always-accent toggle
+   buttons beside it. */
+.topic-actions .notify {
+  color: var(--fg-muted);
+}
+.topic-actions .notify.on {
+  color: var(--accent);
 }
 .topic .member-count {
   color: var(--fg-muted);

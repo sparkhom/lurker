@@ -52,15 +52,17 @@ export function useBufferActions(): BufferActionsAPI {
     if (isChannel) {
       const isAlwaysNotify = channelNotify.notifyAlways(buf.networkId, buf.target);
       items.push(
+        // Icon reflects current state (solid = always-notifying, regular = not)
+        // to match the topic-bar toggle; the label states the action.
         isAlwaysNotify
           ? {
               label: 'Stop always notifying',
-              icon: 'fa-solid fa-bell-slash',
+              icon: 'fa-solid fa-bell',
               onClick: () => channelNotify.setNotifyAlways(buf.networkId, buf.target, false),
             }
           : {
               label: 'Always notify',
-              icon: 'fa-solid fa-bell',
+              icon: 'fa-regular fa-bell',
               onClick: () => channelNotify.setNotifyAlways(buf.networkId, buf.target, true),
             },
       );

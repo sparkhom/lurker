@@ -43,20 +43,14 @@
         <button class="icon back" title="Back" @click="goList">
           <i class="fa-solid fa-arrow-left"></i>
         </button>
-        <button
-          v-if="isDmHeader"
-          type="button"
-          class="title title-btn"
-          title="View profile"
-          @click="openDmProfile"
-        >
-          {{ bufferLabel }}
-        </button>
-        <span v-else class="title">{{ isSystemConsole ? 'System console' : bufferLabel }}</span>
+        <!-- The system console has no composer (so no placeholder to carry a
+             name) and no buffer actions — it keeps a plain title. Real buffers
+             drop the name (it moves to the input placeholder) and fold every
+             buffer/topic/member/server action into the single cog, since the
+             mobile header is already tight. Search/highlights/saved stay inline
+             as they're global and frequently reached. -->
+        <span v-if="isSystemConsole" class="title">System console</span>
         <span class="spacer"></span>
-        <button v-if="topic" class="icon" title="View topic" @click="showTopic = true">
-          <i class="fa-solid fa-circle-info"></i>
-        </button>
         <button class="icon" title="Search messages" @click="showSearch = true">
           <i class="fa-solid fa-magnifying-glass"></i>
         </button>
@@ -67,38 +61,13 @@
           <i class="fa-regular fa-bookmark"></i>
         </button>
         <button
-          v-if="isServerBuffer"
-          type="button"
-          class="icon"
-          title="Channel list"
-          aria-label="Channel list"
-          @click="active && channelListModal.open(active.networkId)"
-        >
-          <i class="fa-solid fa-hashtag"></i>
-        </button>
-        <button
-          v-if="isServerBuffer"
-          type="button"
-          class="icon"
-          :title="serverConnectActionLabel"
-          :aria-label="serverConnectActionLabel"
-          @click="toggleServerConnection"
-        >
-          <i :class="serverConnectActionIcon"></i>
-        </button>
-        <button
-          v-if="showBufferCog"
+          v-if="active"
           ref="bufferCogBtn"
           class="icon"
           title="Buffer actions"
+          aria-label="Buffer actions"
           @click="openBufferActions"
         >
-          <i class="fa-solid fa-gear"></i>
-        </button>
-        <button v-if="isChannel" class="icon" title="Members" @click="screen = 'members'">
-          <i class="fa-solid fa-users"></i>
-        </button>
-        <button v-if="isServerBuffer" class="icon" title="Edit network" @click="editActiveNetwork">
           <i class="fa-solid fa-gear"></i>
         </button>
       </header>
@@ -175,6 +144,8 @@ import { useSocket } from '../composables/useSocket.js';
 import { useChatBootstrap } from '../composables/useChatBootstrap.js';
 import { useActiveBuffer } from '../composables/useActiveBuffer.js';
 import { useBufferActions } from '../composables/useBufferActions.js';
+import { useContextMenu } from '../composables/useContextMenu.js';
+import type { ContextMenuItem } from '../composables/useContextMenu.js';
 import BufferList from '../components/BufferList.vue';
 import MessageList from '../components/MessageList.vue';
 import SystemConsole from '../components/SystemConsole.vue';
@@ -213,6 +184,7 @@ const {
   isSystemConsole,
 } = useActiveBuffer();
 const bufferActions = useBufferActions();
+const menu = useContextMenu();
 const nickNotes = useNickNotesStore();
 const whois = useWhoisStore();
 
@@ -242,25 +214,57 @@ const pendingScrollId = ref<number | null>(null);
 const messageInputRef = ref<{ focus: () => void } | null>(null);
 const bufferCogBtn = ref<HTMLElement | null>(null);
 
-// Server buffers already have a dedicated browse-channels action in the bar;
-// the cog is for channel/DM buffer-level actions (pin, always-notify).
-const showBufferCog = computed(() => !!active.value && !isServerBuffer.value);
-
-// True when the active buffer is a DM. Drives the clickable title that
-// opens the user profile modal — channel titles stay non-interactive.
-const isDmHeader = computed(() => {
-  if (!active.value) return false;
-  if (isChannel.value || isServerBuffer.value || isSystemConsole.value) return false;
-  return true;
-});
-function openDmProfile() {
-  if (!active.value) return;
-  whois.openViewer(active.value.networkId, active.value.target);
-}
-
+// Mobile folds every buffer/topic/member/server action behind one cog to keep
+// the header uncluttered. The menu is assembled per buffer type: view-topic and
+// members are navigation shortcuts unique to this layout, then either the shared
+// buffer-actions menu (pin/notify/profile/note/close) for channels & DMs, or the
+// server controls (browse/connect/edit) for server buffers. Anchored under the
+// cog like the desktop sidebar menu; ContextMenu clamps it to the viewport.
 function openBufferActions() {
-  if (!activeBuf.value) return;
-  bufferActions.openMenuFromButton(activeBuf.value as BufferLike, bufferCogBtn.value);
+  const a = active.value;
+  const el = bufferCogBtn.value;
+  if (!a || !el) return;
+  const items: ContextMenuItem[] = [];
+  if (topic.value) {
+    items.push({
+      label: 'View topic',
+      icon: 'fa-solid fa-circle-info',
+      onClick: () => {
+        showTopic.value = true;
+      },
+    });
+  }
+  if (isServerBuffer.value) {
+    items.push(
+      {
+        label: 'Channel list',
+        icon: 'fa-solid fa-hashtag',
+        onClick: () => channelListModal.open(a.networkId),
+      },
+      {
+        label: serverConnectActionLabel.value,
+        icon: serverConnectActionIcon.value,
+        onClick: toggleServerConnection,
+      },
+      { label: 'Edit network', icon: 'fa-solid fa-gear', onClick: editActiveNetwork },
+    );
+  } else {
+    if (isChannel.value) {
+      items.push({
+        label: 'Members',
+        icon: 'fa-solid fa-users',
+        onClick: () => {
+          screen.value = 'members';
+        },
+      });
+    }
+    const bufItems = bufferActions.buildItems(activeBuf.value as BufferLike);
+    if (items.length && bufItems.length) items.push({ divider: true });
+    items.push(...bufItems);
+  }
+  if (items.length === 0) return;
+  const rect = el.getBoundingClientRect();
+  menu.open(items, rect.left, rect.bottom + 2, el);
 }
 
 function openAddNetwork() {
@@ -402,19 +406,6 @@ useChatBootstrap({ onJump: onJumpToMessage });
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
-}
-/* DM headers double as a "view profile" trigger — match the .title look,
-   underline on tap. */
-.title-btn {
-  background: none;
-  border: none;
-  font: inherit;
-  cursor: pointer;
-  text-align: left;
-  padding: 0;
-}
-.title-btn:active {
-  text-decoration: underline;
 }
 .spacer {
   flex: 1;

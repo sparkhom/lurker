@@ -229,8 +229,22 @@ const isPaused = computed(() => auth.isPaused);
 const sendable = computed(() => !!active.value && !isServer.value && !isPaused.value);
 const placeholder = computed(() => {
   if (isPaused.value) return 'Account paused — read only';
-  if (!active.value) return 'Select a buffer';
-  if (isServer.value) return '/raw <line>';
+  const a = active.value;
+  if (!a) return 'Select a buffer';
+  // `/raw <line>` was cryptic; `/help` is the discoverable entry point and the
+  // server buffer is exactly where someone goes looking for it.
+  if (isServer.value) return 'try /help';
+  // Mobile drops the buffer name from the header and the compact status bar
+  // shows self/away instead, so the channel/peer context has no persistent home
+  // — the placeholder carries it, mirroring the desktop status bar's
+  // `network/target`. Modes are left off: they're volatile and belong in the
+  // status bar, not a glanceable hint. Desktop keeps `try /help` since the
+  // status bar already shows the buffer there.
+  if (isMobile.value) {
+    const net = a.network?.name;
+    // Network forced lowercase to match the status bar's `net/#chan` styling.
+    return net ? `${net.toLowerCase()}/${a.target}` : a.target;
+  }
   return 'try /help';
 });
 // Opt-in palette icon. The keyboard shortcuts in onKeydown ignore this gate —
