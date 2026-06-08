@@ -131,8 +131,8 @@ import type { EmojiMatch } from '../utils/emojiData.js';
 withDefaults(
   defineProps<{
     // Mobile/petite mode: drops the clock and buffer-name segments entirely
-    // (the buffer name is already in the mobile header, the clock isn't worth
-    // the row), and renders the self identity (nick + channel-prefix + user
+    // (the buffer name is already in the input placeholder, the clock isn't
+    // worth the row), and renders the self identity (nick + channel-prefix + user
     // modes + away) here instead — freeing the input row to be just `>`,
     // textarea, and the paperclip. Also hides lag so the typing/split/upload
     // signals stay legible at phone widths. (The scroll affordances —
