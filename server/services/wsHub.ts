@@ -295,6 +295,62 @@ export function buildBufferBacklog(userId: number, networkId: number, target: st
   };
 }
 
+// Upper bound on how many missed rows a resume frame ships per buffer. Wider
+// than the first-connect default so a normal flap fills in one shot, but
+// bounded so a long disconnect can't produce an unbounded payload.
+const RESUME_GAP_CAP = 500;
+// When the gap exceeds the cap we fall back to a fresh latest slice; size it
+// to match the first-connect default.
+const RESUME_LATEST_LIMIT = 200;
+
+// Decide the slice a resume snapshot ships for ONE buffer.
+//
+// Normal case: ship just the gap the client missed (id > sinceId). The client
+// appends it to its existing tail (replaceBacklog's gap-fill path).
+//
+// The catch: that gap is capped at RESUME_GAP_CAP to bound the payload, and
+// the client only retains MAX_PER_BUFFER rows anyway. So if the buffer took on
+// MORE than the cap while the client was away, appending the oldest slice of
+// the gap would splice a PERMANENT hole between the client's stale tail and the
+// live tail (the dropped middle is never re-sent — fanOut only carries events
+// created after reconnect). That's issue #205: a "big gap" only a full reload
+// clears. Because message ids are a single global sequence, the client can't
+// detect the hole from id-sparseness alone (a quiet buffer is legitimately
+// sparse) — only the server knows it truncated. So when we detect truncation we
+// ship the LATEST contiguous slice instead and flag `reset`, telling the client
+// to replace the buffer wholesale (land on live tail, page upward for older)
+// rather than append into a gap.
+export function buildResumeSlice(
+  userId: number,
+  networkId: number,
+  target: string,
+  sinceId: number,
+): { events: DecoratedEvent[]; reset: boolean; hasMoreOlder: boolean } {
+  if (sinceId > 0) {
+    const gap = listMessages(networkId, target, { afterId: sinceId, limit: RESUME_GAP_CAP });
+    const lastGapId = gap.length ? (gap[gap.length - 1].id ?? sinceId) : sinceId;
+    const truncated = gap.length >= RESUME_GAP_CAP && hasNewerRow(networkId, target, lastGapId);
+    if (!truncated) {
+      return {
+        events: gap.map((e) => decorateMessage(userId, e)),
+        reset: false,
+        hasMoreOlder: false,
+      };
+    }
+    // Truncated: fall through to the latest-slice replace below.
+  }
+  const latest = listMessages(networkId, target, { limit: RESUME_LATEST_LIMIT });
+  const oldestId = latest.length ? (latest[0].id ?? 0) : 0;
+  return {
+    events: latest.map((e) => decorateMessage(userId, e)),
+    // Only signal a replace on a real resume. First connect (sinceId<=0) lands
+    // on the client's empty-buffer seed path, which already replaces — flagging
+    // reset there is harmless but needlessly noisy.
+    reset: sinceId > 0,
+    hasMoreOlder: oldestId > 0 && hasOlderRow(networkId, target, oldestId),
+  };
+}
+
 // Backlog frames for every network the user owns that has NO live connection —
 // a paused account (the is_paused gate forbids connecting), a manually
 // disconnected network (stopNetwork deletes the connection), or one that was
@@ -843,17 +899,19 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
         ) {
           continue;
         }
-        // Resume cursor: ship only the gap (id > sinceId) when the client has
-        // local state to merge with. Cap at 500 — a wider net than the
-        // 200-row first-connect default — to cover longer flaps without
-        // unbounded payloads. If the gap is larger than 500, the client's
-        // dedupe still makes a later full re-fetch safe.
-        const sinceId = ws.sinceId || 0;
-        const events = (
-          sinceId > 0 && !isFreshNetwork
-            ? listMessages(conn.network.id, target, { afterId: sinceId, limit: 500 })
-            : listMessages(conn.network.id, target, { limit: 200 })
-        ).map((e) => decorateMessage(userId, e));
+        // Resume cursor: ship the gap the client missed (id > sinceId), or a
+        // fresh latest slice + reset flag when that gap exceeds the cap (see
+        // buildResumeSlice for the gap/reset rationale). isFreshNetwork forces
+        // the latest path: ws.sinceId was advanced by other networks' live
+        // events this session, so a cursor read here would wrongly return
+        // nothing and starve a just-connected network of its backlog.
+        const slice = buildResumeSlice(
+          userId,
+          conn.network.id,
+          target,
+          isFreshNetwork ? 0 : ws.sinceId || 0,
+        );
+        const events = slice.events;
         for (const e of events) {
           if (e.id != null && e.id > maxSentId) maxSentId = e.id;
         }
@@ -873,6 +931,11 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
           networkId: conn.network.id,
           target,
           events,
+          // reset=true means the resume gap overflowed the cap and `events` is
+          // a fresh latest slice — the client must replace its buffer, not
+          // append, or it splices a permanent hole (issue #205).
+          reset: slice.reset,
+          hasMoreOlder: slice.hasMoreOlder,
           speakers,
           // For channels: are we currently joined? Drives the dim/active style
           // in the buffer list. Non-channel buffers (DMs, :server:) have no

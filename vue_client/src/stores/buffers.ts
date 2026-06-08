@@ -254,6 +254,7 @@ export const useBuffersStore = defineStore('buffers', {
       speakers: SpeakerEntry[] | undefined,
       readState: any,
       joined: boolean | undefined,
+      opts: { reset?: boolean; hasMoreOlder?: boolean } = {},
     ) {
       const buf = ensureBuffer(this, networkId, target);
       // Detached: snapshot resume during detach is a no-op. The gap-fill
@@ -280,6 +281,16 @@ export const useBuffersStore = defineStore('buffers', {
         // pre-flap). Take the backlog wholesale.
         buf.messages = filtered.slice(-MAX_PER_BUFFER);
         buf.hasMoreOlder = filtered.length >= 50;
+      } else if (opts.reset) {
+        // The resume gap exceeded the server's cap, so it sent a fresh latest
+        // slice instead of the missed-since-cursor rows. Appending would splice
+        // a permanent hole between our stale tail and this slice — and the
+        // dropped middle is larger than MAX_PER_BUFFER anyway, so we'd evict it
+        // immediately. Replace wholesale; the user lands on the live tail and
+        // pages upward (hasMoreOlder) for the rest. This is the self-healing
+        // path for issue #205 — no full reload required.
+        buf.messages = filtered.slice(-MAX_PER_BUFFER);
+        buf.hasMoreOlder = opts.hasMoreOlder ?? filtered.length >= 50;
       } else {
         // Gap-fill on reconnect: filter to events newer than what we already
         // have and append. Keeps live state intact when the server's backlog

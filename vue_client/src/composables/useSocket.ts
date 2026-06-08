@@ -283,6 +283,9 @@ function applyBacklog(payload: any): void {
       clearedAt: payload.clearedAt,
     },
     payload.joined,
+    // reset: the resume gap overflowed the server cap, so `events` is a fresh
+    // latest slice meant to replace the buffer rather than gap-fill onto it.
+    { reset: !!payload.reset, hasMoreOlder: payload.hasMoreOlder },
   );
   if (payload.inputHistory) {
     const inputHistory = useInputHistoryStore();

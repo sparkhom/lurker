@@ -15,6 +15,7 @@ let closeBuffer: typeof import('../db/closedBuffers.js').closeBuffer;
 let isClosed: typeof import('../db/closedBuffers.js').isClosed;
 let setClearedState: typeof import('../db/bufferReads.js').setClearedState;
 let buildBufferBacklog: typeof import('./wsHub.js').buildBufferBacklog;
+let buildResumeSlice: typeof import('./wsHub.js').buildResumeSlice;
 let buildOfflineBacklogFrames: typeof import('./wsHub.js').buildOfflineBacklogFrames;
 let handleOpenBuffer: typeof import('./wsHub.js').handleOpenBuffer;
 
@@ -27,7 +28,7 @@ beforeAll(async () => {
   ({ insertMessage } = await import('../db/messages.js'));
   ({ closeBuffer, isClosed } = await import('../db/closedBuffers.js'));
   ({ setClearedState } = await import('../db/bufferReads.js'));
-  ({ buildBufferBacklog, buildOfflineBacklogFrames, handleOpenBuffer } =
+  ({ buildBufferBacklog, buildResumeSlice, buildOfflineBacklogFrames, handleOpenBuffer } =
     await import('./wsHub.js'));
 
   userId = createUser('alice').id;
@@ -43,16 +44,18 @@ beforeAll(async () => {
 
 afterAll(() => testDb.cleanup());
 
-function seed(target: string, text: string): void {
-  insertMessage({
-    networkId,
-    target,
-    time: new Date().toISOString(),
-    type: 'message',
-    nick: 'bob',
-    text,
-    self: false,
-  });
+function seed(target: string, text: string): number {
+  return Number(
+    insertMessage({
+      networkId,
+      target,
+      time: new Date().toISOString(),
+      type: 'message',
+      nick: 'bob',
+      text,
+      self: false,
+    }).id,
+  );
 }
 
 // A WebSocket stand-in that records the frames send() writes. send() gates on
@@ -102,6 +105,48 @@ describe('buildBufferBacklog', () => {
     const frame = buildBufferBacklog(userId, networkId, '#clear');
     expect(frame.clearedBeforeId).toBe(boundary);
     expect(frame.clearedAt).toBe(ts);
+  });
+});
+
+describe('buildResumeSlice', () => {
+  // Mirrors the server-side constants in wsHub.ts. If those change, these move.
+  const RESUME_GAP_CAP = 500;
+  const RESUME_LATEST_LIMIT = 200;
+
+  it('ships just the missed gap and does not reset when it fits the cap', () => {
+    const since = seed('#resumeSmall', 'm0');
+    const ids: number[] = [];
+    for (let i = 1; i <= 5; i++) ids.push(seed('#resumeSmall', `m${i}`));
+    const slice = buildResumeSlice(userId, networkId, '#resumeSmall', since);
+    expect(slice.reset).toBe(false);
+    expect(slice.events.length).toBe(5);
+    // The gap, oldest-first — exactly the rows after the cursor.
+    expect((slice.events[0] as { id: number }).id).toBe(ids[0]);
+    expect((slice.events.at(-1) as { id: number }).id).toBe(ids.at(-1));
+    // A non-reset frame doesn't drive hasMoreOlder (the client keeps its own).
+    expect(slice.hasMoreOlder).toBe(false);
+  });
+
+  it('resets to the latest slice when the gap overflows the cap (issue #205)', () => {
+    const since = seed('#resumeBig', 'm0');
+    let lastId = since;
+    // One more than the cap so the gap is provably truncated.
+    for (let i = 1; i <= RESUME_GAP_CAP + 10; i++) lastId = seed('#resumeBig', `m${i}`);
+    const slice = buildResumeSlice(userId, networkId, '#resumeBig', since);
+    expect(slice.reset).toBe(true);
+    // Latest contiguous slice, NOT the oldest-after-cursor rows.
+    expect(slice.events.length).toBe(RESUME_LATEST_LIMIT);
+    expect((slice.events.at(-1) as { id: number }).id).toBe(lastId);
+    // There's older history beyond the latest slice — the client can page up.
+    expect(slice.hasMoreOlder).toBe(true);
+  });
+
+  it('ships the latest slice without reset on first connect (sinceId=0)', () => {
+    seed('#resumeFresh', 'a');
+    seed('#resumeFresh', 'b');
+    const slice = buildResumeSlice(userId, networkId, '#resumeFresh', 0);
+    expect(slice.reset).toBe(false);
+    expect(slice.events.length).toBe(2);
   });
 });
 
