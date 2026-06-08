@@ -1350,7 +1350,13 @@ export class IrcConnection {
         });
         return;
       }
-      const ctx = [eventNick, event?.channel, event?.server].filter(Boolean).join(' ');
+      // ERR_UNKNOWNCOMMAND (421) carries the rejected command name in
+      // event.command (irc-framework parses it from the numeric's params).
+      // Include it so the buffer line names the offending command —
+      // "unknown_command FOO — Unknown command" — instead of just the tag.
+      const ctx = [eventNick, event?.channel, event?.command, event?.server]
+        .filter(Boolean)
+        .join(' ');
       const parts = [tag];
       if (ctx) parts.push(ctx);
       if (reason) parts.push(`— ${reason}`);
@@ -1361,6 +1367,16 @@ export class IrcConnection {
         target: this.serverTarget(),
         text,
         raw: event,
+        // Unknown slash commands are forwarded verbatim as raw IRC (see
+        // MessageInput's default case), so this 421 is the first sign the
+        // command was bad — and it lands in the server buffer, easy to miss
+        // when you typed in a channel. Tag it so the client can also raise a
+        // toast where the user is actually looking. Scoped to
+        // ERR_UNKNOWNCOMMAND with a known command name; other server errors
+        // stay buffer-only to keep toast noise down.
+        ...(tag === 'unknown_command' && event?.command
+          ? { unknownCommand: event.command as string }
+          : {}),
       });
     });
 

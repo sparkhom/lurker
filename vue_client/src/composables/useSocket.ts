@@ -21,6 +21,7 @@ import { useWhoisStore } from '../stores/whois.js';
 import { useBookmarksStore } from '../stores/bookmarks.js';
 import { useSystemLogStore } from '../stores/systemLog.js';
 import { useDataExportStore } from '../stores/dataExport.js';
+import { useToastsStore } from '../stores/toasts.js';
 import { notifyForEvent } from './useHighlightNotifier.js';
 
 export interface AckResult {
@@ -189,9 +190,26 @@ function applyEvent(event: any): void {
       });
       break;
     case 'motd':
-    case 'error':
-      buffers.pushMessage({ ...event, target: event.target || `:server:${event.networkId}` });
+    case 'error': {
+      const decorated = { ...event, target: event.target || `:server:${event.networkId}` };
+      const fresh = buffers.pushMessage(decorated);
+      // An unrecognized slash command (forwarded as raw IRC) only fails once
+      // the server 421s, and that lands in the server buffer — invisible if
+      // you typed in a channel. Mirror it as a toast so the feedback shows up
+      // where you're looking. Gated on `fresh` so a resume-gap replay of the
+      // same error can't re-fire it (same guard the message path uses).
+      if (fresh && event.unknownCommand) {
+        useToastsStore().push({
+          kind: 'warn',
+          title: 'Unknown command',
+          body: event.unknownCommand,
+          networkId: event.networkId,
+          target: decorated.target,
+          ttlMs: 6000,
+        });
+      }
       break;
+    }
     case 'whois_result': {
       const whois = useWhoisStore();
       whois.applyResult(event.networkId, event.whois || {});
