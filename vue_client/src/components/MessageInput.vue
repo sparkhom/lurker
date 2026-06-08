@@ -976,9 +976,6 @@ async function maybeConvertShortcode() {
 }
 
 function refreshPicker() {
-  // Any keystroke (this runs from onInput) dismisses the tap-opened recall
-  // menu — it's a momentary affordance, not something you type underneath.
-  closeHistoryPicker();
   const el = inputEl.value;
   if (!el) {
     closePicker();
@@ -1180,6 +1177,13 @@ function toggleHistory(): void {
 // resulting onInput from firing a typing notification or resetting state.
 function onHistorySelect(entry: string): void {
   closeHistoryPicker();
+  // The menu opens on a tap, bypassing the keystroke handlers that normally
+  // clear these — so a pick can land on top of a live Tab-completion session
+  // or an in-progress Up/Down walk. setInputAndCaretEnd suppresses onInput
+  // (its cycling guard), so clear them here or they'd act on the old text:
+  // Tab would keep cycling a stale completion, Down would restore a stale draft.
+  resetCompletion();
+  resetHistoryNav();
   setInputAndCaretEnd(entry);
   queueMicrotask(() => inputEl.value?.focus());
 }
@@ -1190,6 +1194,10 @@ function onInput() {
   // Done before the sendable gate so this still fires on :server: buffers
   // where `/raw` history is just as relevant.
   if (historyIndex !== null) resetHistoryNav();
+  // Same rationale: a keystroke dismisses the tap-opened recall menu, and it
+  // must fire before the sendable gate so it also closes on :server: buffers
+  // (editable but not "sendable"), where the menu can be open over /raw history.
+  closeHistoryPicker();
   // Any edit invalidates the "second press confirms" override — otherwise the
   // user could be holding a flood-confirm token from an entirely different
   // draft. Cheap to clear unconditionally.
