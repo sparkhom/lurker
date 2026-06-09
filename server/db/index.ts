@@ -16,6 +16,17 @@ if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
 
 const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
+// WAL leaves synchronous at FULL, which fsyncs on every auto-commit write — and
+// better-sqlite3 is synchronous on the main thread, so that fsync blocks the same
+// event loop serving WS fan-out, IRC socket reads, and HTTP. NORMAL is safe under
+// WAL (a power-loss can lose only the last transaction, never corrupt the file)
+// and lifts the fsync off the hot path — the dominant win for a cell absorbing a
+// netsplit's burst of membership-churn inserts, which arrive correlated across
+// every tenant on the same network at once.
+db.pragma('synchronous = NORMAL');
+// Don't let a transient lock (a WAL checkpoint, or any future second connection)
+// surface as an immediate SQLITE_BUSY throw — wait up to 5s for it to clear.
+db.pragma('busy_timeout = 5000');
 db.pragma('foreign_keys = ON');
 
 function migrate() {
