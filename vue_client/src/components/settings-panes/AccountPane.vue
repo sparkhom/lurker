@@ -257,7 +257,16 @@ async function onRemovePassword() {
 
 async function signOut() {
   await auth.logout();
-  router.replace('/login');
+  if (config.isNode) {
+    // On a hosted cell, sign-in lives at the control plane, not in this SPA.
+    // The in-memory router can't reach it — only a full-page navigation re-hits
+    // the reverse proxy, which now sees no cp_session and serves the hosted
+    // sign-in page. A router.replace would just swap SPA views while leaving the
+    // already-loaded app on screen, so the user never appears to sign out.
+    window.location.assign('/');
+  } else {
+    router.replace('/login');
+  }
 }
 </script>
 
