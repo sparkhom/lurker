@@ -5,6 +5,7 @@ import { defineStore } from 'pinia';
 import { startRegistration, startAuthentication } from '@simplewebauthn/browser';
 import { api } from '../api.js';
 import { resetSession } from '../composables/useSessionReset.js';
+import { useConfigStore } from './config.js';
 
 export interface AuthUser {
   id: number;
@@ -267,14 +268,16 @@ export const useAuthStore = defineStore('auth', {
       // httpOnly, so the browser can't drop cp_session itself — without this
       // the user stays authenticated to the proxy and /billing, making
       // sign-out effectively impossible. /_cp/* is always control-plane-served,
-      // never proxied to the cell. We hit it unconditionally rather than gating
-      // on edition: a standalone box has no cp_session and simply 404s here
-      // (caught below), and this stays correct even if /api/config never loaded
-      // — so sign-out can never silently leave cp_session behind.
-      try {
-        await api('/_cp/auth/logout', { method: 'POST' });
-      } catch (_err) {
-        // ignore — no control plane (standalone) or session already gone
+      // never proxied to the cell. Only a hosted cell has a cp_session, so this
+      // is gated on node mode — a standalone box has no control plane and we
+      // don't fire a doomed request at one. config is fetched at boot, long
+      // before any sign-out click, so isNode is reliable here.
+      if (useConfigStore().isNode) {
+        try {
+          await api('/_cp/auth/logout', { method: 'POST' });
+        } catch (_err) {
+          // ignore — session already gone; local state is still cleared below
+        }
       }
       // Clear user before resetSession so any late WS onclose handler sees a
       // null user and skips its 2s reconnect arm.
