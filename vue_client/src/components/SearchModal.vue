@@ -50,8 +50,16 @@ const emit = defineEmits<{
   jump: [payload: { networkId: number; target: string; messageId: number }];
 }>();
 
+// When `scope` is set (opened from a buffer's topic bar) the modal runs as an
+// ephemeral, pre-filtered session: it seeds the in:/on: filter, starts from a
+// clean slate, and restores the store on close so the *global* search modal's
+// persisted "where I was" survives untouched.
+const props = defineProps<{ scope?: string | null }>();
+const scoped = !!props.scope;
+
 const store = useSearchStore();
 const ignores = useIgnoresStore();
+let scopedSnapshot: typeof store.$state | null = null;
 
 // The server already drops senders ignored when the message arrived (the
 // insert-time from_ignored stamp). This second, live pass also hides anyone
@@ -69,8 +77,8 @@ const listEl = ref<HTMLUListElement | null>(null);
 const selected = ref(store.selectedIndex);
 
 // Local mirror of the store's raw query so we can debounce dispatch without
-// debouncing the text field itself.
-const queryInput = ref(store.query);
+// debouncing the text field itself. Scoped opens seed the prefilled filter.
+const queryInput = ref(scoped ? `${props.scope} ` : store.query);
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 watch(queryInput, (val) => {
   store.setQuery(val);
@@ -139,9 +147,33 @@ function onScroll() {
 }
 
 onMounted(() => {
+  if (scoped) {
+    // Snapshot the global session, then patch in a clean scoped slate so the
+    // prefilled filter shows the "type to search" prompt rather than the
+    // previous global results bleeding through.
+    scopedSnapshot = { ...store.$state };
+    store.$patch({
+      query: queryInput.value,
+      results: [],
+      hasMore: false,
+      nextBefore: null,
+      loading: false,
+      error: '',
+      searched: false,
+      scrollTop: 0,
+      selectedIndex: 0,
+    });
+  }
   setTimeout(() => {
     inputEl.value?.focus();
-    inputEl.value?.select();
+    if (scoped) {
+      // Cursor after the filter (not select-all) so the first keystroke adds a
+      // search term instead of wiping the scope.
+      const len = inputEl.value?.value.length ?? 0;
+      inputEl.value?.setSelectionRange(len, len);
+    } else {
+      inputEl.value?.select();
+    }
   }, 0);
   // Restore the scroll position after the list has rendered. The cursor was
   // already seeded from the store via the `selected` ref's initial value.
@@ -153,6 +185,12 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (debounceTimer) clearTimeout(debounceTimer);
+  if (scoped && scopedSnapshot) {
+    // Discard the scoped session and hand the store back to the global modal
+    // exactly as we found it.
+    store.$patch(scopedSnapshot);
+    return;
+  }
   // Persist DOM-only state back to the store so the next open restores it.
   // The Pinia store already keeps query, results, hasMore, nextBefore, and
   // searched across opens; this rounds out the user-perceived "where I was".

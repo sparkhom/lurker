@@ -55,9 +55,18 @@ const emit = defineEmits<{
   jump: [payload: { networkId: number; target: string; messageId: number }];
 }>();
 
+// `scope` (set when opened from a buffer's topic bar) runs the highlights feed
+// filtered to this buffer. Unlike search this loads immediately — highlights is
+// a filtered feed, not a type-to-search box, so the channel's highlights should
+// be visible at a glance. The global session is snapshotted and restored on
+// close so the list-bar highlights modal is unaffected.
+const props = defineProps<{ scope?: string | null }>();
+const scoped = !!props.scope;
+
 const settings = useSettingsStore();
 const store = useHighlightsStore();
 const ignores = useIgnoresStore();
+let scopedSnapshot: typeof store.$state | null = null;
 
 const listEl = ref<HTMLUListElement | null>(null);
 
@@ -78,7 +87,7 @@ let autoFillFetched = 0;
 // Local mirror of the store's raw filter so we can debounce the reload without
 // debouncing the text field itself. Seeded from the store so a closed-then-
 // reopened modal keeps the active filter.
-const queryInput = ref(store.query);
+const queryInput = ref(scoped ? `${props.scope} ` : store.query);
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 watch(queryInput, (val) => {
   store.setQuery(val);
@@ -90,6 +99,8 @@ watch(queryInput, (val) => {
 });
 onBeforeUnmount(() => {
   if (debounceTimer) clearTimeout(debounceTimer);
+  // Discard the scoped session, restoring the store for the global modal.
+  if (scoped && scopedSnapshot) store.$patch(scopedSnapshot);
 });
 
 function onScroll(): void {
@@ -121,6 +132,12 @@ async function toggleSound(): Promise<void> {
 }
 
 onMounted(() => {
+  if (scoped) {
+    // Snapshot the global session, then seed the scoped filter before the
+    // initial load so the feed opens showing this buffer's highlights.
+    scopedSnapshot = { ...store.$state };
+    store.setQuery(queryInput.value);
+  }
   store.loadInitial();
 });
 

@@ -13,10 +13,10 @@
         </button>
         <span v-if="!connected" class="status off" title="Disconnected">●</span>
         <span class="spacer"></span>
-        <button class="icon" title="Search messages" @click="showSearch = true">
+        <button class="icon" title="Search messages" @click="openSearch(false)">
           <i class="fa-solid fa-magnifying-glass"></i>
         </button>
-        <button class="icon" title="Highlights" @click="showHighlights = true">
+        <button class="icon" title="Highlights" @click="openHighlights(false)">
           <i class="fa-regular fa-bell"></i>
         </button>
         <button class="icon" title="Saved messages" @click="showBookmarks = true">
@@ -43,25 +43,24 @@
         <button class="icon back" title="Back" @click="goList">
           <i class="fa-solid fa-arrow-left"></i>
         </button>
-        <!-- The buffer label sits up top again now that the header has room;
-             the system console shows a static "System console" since it has no
-             buffer. The remaining buffer/topic/server actions fold into the
-             kebab menu to keep the tight header uncluttered, while
-             search/highlights/saved/uploads and the channel members toggle stay
-             inline — they're global or frequently reached. -->
-        <span class="title">{{ isSystemConsole ? 'System console' : bufferLabel }}</span>
+        <!-- Channels and DMs drop the name here — the message input's
+             placeholder carries net/#chan on mobile, so a header copy is just
+             redundant clutter (#222). The server buffer (placeholder is
+             "try /help") and the system console (no input row at all) have no
+             other persistent label, so they keep an explicit title. Otherwise
+             the bar holds only buffer-scoped actions: search & highlights open
+             pre-filtered to this buffer (in:<target> on:<network>), members
+             toggles the roster, the rest folds into the kebab. The *global*
+             search / highlights / saved / uploads live on the list top bar. -->
+        <span v-if="isServerBuffer || isSystemConsole" class="title">{{
+          isSystemConsole ? 'System console' : bufferLabel
+        }}</span>
         <span class="spacer"></span>
-        <button class="icon" title="Search messages" @click="showSearch = true">
+        <button class="icon" title="Search this buffer" @click="openSearch(true)">
           <i class="fa-solid fa-magnifying-glass"></i>
         </button>
-        <button class="icon" title="Highlights" @click="showHighlights = true">
+        <button class="icon" title="Highlights in this buffer" @click="openHighlights(true)">
           <i class="fa-regular fa-bell"></i>
-        </button>
-        <button class="icon" title="Saved messages" @click="showBookmarks = true">
-          <i class="fa-regular fa-bookmark"></i>
-        </button>
-        <button class="icon" title="Recent uploads" @click="showUploads = true">
-          <i class="fa-solid fa-paperclip"></i>
         </button>
         <button
           v-if="isChannel"
@@ -109,6 +108,7 @@
     />
     <HighlightsModal
       v-if="showHighlights"
+      :scope="highlightScope"
       @close="showHighlights = false"
       @jump="onJumpToMessage"
     />
@@ -125,7 +125,12 @@
       @close="channelListModal.close()"
     />
     <RecentUploadsModal v-if="showUploads" @close="showUploads = false" />
-    <SearchModal v-if="showSearch" @close="showSearch = false" @jump="onJumpToMessage" />
+    <SearchModal
+      v-if="showSearch"
+      :scope="searchScope"
+      @close="showSearch = false"
+      @jump="onJumpToMessage"
+    />
     <ImageViewerModal
       v-if="imageModal.isOpen && imageModal.url !== null"
       :url="imageModal.url"
@@ -222,9 +227,37 @@ const showBookmarks = ref(false);
 const showTopic = ref(false);
 const showUploads = ref(false);
 const showSearch = ref(false);
+const searchScope = ref<string | null>(null);
+const highlightScope = ref<string | null>(null);
 const pendingScrollId = ref<number | null>(null);
 const messageInputRef = ref<{ focus: () => void } | null>(null);
 const bufferCogBtn = ref<HTMLElement | null>(null);
+
+// in:/on: filter that scopes search & highlights to the current buffer when
+// they're opened from the topic bar. Null for the server buffer / system
+// console (no per-buffer scope there). The network name is omitted when it
+// contains whitespace — the filter parser splits tokens on spaces, so
+// `on:<name>` couldn't round-trip; `in:<target>` alone still scopes by
+// channel/nick in that case.
+const bufferScope = computed<string | null>(() => {
+  const a = active.value;
+  if (!a || isServerBuffer.value || isSystemConsole.value || !a.target) return null;
+  const netName = (a.network as { name?: string } | null)?.name;
+  const onTok = netName && !/\s/.test(netName) ? ` on:${netName}` : '';
+  return `in:${a.target}${onTok}`;
+});
+
+// Topic-bar buttons pass scoped=true so the modal opens pre-filtered to this
+// buffer; the buffer-list top bar passes false for the global view. Both share
+// one modal instance — the scope ref is what differentiates the two entries.
+function openSearch(scoped: boolean) {
+  searchScope.value = scoped ? bufferScope.value : null;
+  showSearch.value = true;
+}
+function openHighlights(scoped: boolean) {
+  highlightScope.value = scoped ? bufferScope.value : null;
+  showHighlights.value = true;
+}
 
 // Mobile folds the remaining buffer/topic/server actions behind one kebab menu
 // to keep the header uncluttered (Members is an inline header button — see
