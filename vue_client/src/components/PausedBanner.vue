@@ -7,14 +7,14 @@
   Persistent top-of-app banner shown while the account is paused (read-only).
   Mounted by App.vue inside the .app-shell wrapper, which reflows the route view
   beneath it. The copy is mode-aware: a self-hosted (standalone) user is told to
-  contact their admin, while a hosted (node) tenant gets a link to their account
+  contact their admin, while a hosted (node) tenant gets a link to the billing
   page to reactivate.
 -->
 
 <template>
   <div class="paused-banner" role="status">
     <span class="paused-banner__text"><strong>Account paused.</strong> {{ detail }}</span>
-    <a v-if="config.isNode" class="paused-banner__link" :href="ACCOUNT_URL">Reactivate</a>
+    <a v-if="config.isNode" class="paused-banner__link" :href="BILLING_URL">Reactivate</a>
   </div>
 </template>
 
@@ -24,9 +24,11 @@ import { useConfigStore } from '../stores/config.js';
 
 const config = useConfigStore();
 
-// The hosted account/billing page. It doesn't exist yet (B4/B5), but the URL is
-// stable, so the link is correct ahead of the page landing.
-const ACCOUNT_URL = 'https://app.lurker.chat/account';
+// Reactivation is a billing action (a paused account is past-due/canceled), so
+// this points at the control-plane billing page. Relative to the current origin
+// — the same host serves the cell and proxies /billing to the control plane —
+// so it's correct for any cell hostname.
+const BILLING_URL = '/billing';
 
 const detail = computed(() =>
   config.isNode

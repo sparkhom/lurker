@@ -57,6 +57,19 @@ export const useAuthStore = defineStore('auth', {
       }
       return this.user;
     },
+    // On a hosted cell the account's real identity — its email — lives on the
+    // control plane; the cell only knows a synthetic `acct-N` username. This
+    // same-origin GET carries cp_session and returns the email so the UI can
+    // show something meaningful. Returns null off the hosted service (the
+    // endpoint 404s) or if the session can't be read, so callers fall back.
+    async fetchHostedAccountEmail(): Promise<string | null> {
+      try {
+        const { account } = await api('/_cp/auth/me');
+        return account?.email ?? null;
+      } catch (_err) {
+        return null;
+      }
+    },
     async fetchSetupStatus() {
       try {
         this.setupStatus = await api('/api/auth/setup-status');

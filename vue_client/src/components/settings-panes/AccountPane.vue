@@ -6,8 +6,8 @@
 <template>
   <section id="account" class="settings-pane">
     <h2>account</h2>
-    <p v-if="auth.user" class="account-identity">
-      Signed in as <strong>{{ auth.user.username }}</strong>
+    <p v-if="auth.user && identityReady" class="account-identity">
+      Signed in as <strong>{{ identity }}</strong>
     </p>
     <template v-if="config.isNode">
       <p class="section-desc">
@@ -131,6 +131,13 @@ const auth = useAuthStore();
 const config = useConfigStore();
 const router = useRouter();
 
+// In node mode the cell only knows a synthetic `acct-N` username; the real
+// account email lives on the control plane, so we fetch it (see onMounted) and
+// prefer it. Standalone has no such concept and resolves immediately.
+const accountEmail = ref<string | null>(null);
+const identityReady = ref(!config.isNode);
+const identity = computed(() => accountEmail.value || auth.user?.username || '');
+
 const passkeys = ref<PasskeyRow[]>([]);
 const passkeyError = ref('');
 const passkeyBusy = ref(false);
@@ -153,12 +160,21 @@ const removePasskeyTitle = computed(() => {
 });
 
 onMounted(() => {
-  // In node edition sign-in lives at the control plane (lurker.chat); the cell
-  // exposes no passkey/password management, so skip those lookups entirely.
-  if (config.isNode) return;
+  // In node edition sign-in lives at the control plane; the cell exposes no
+  // passkey/password management, so skip those lookups. Instead resolve the
+  // real account email from the control plane to show in place of `acct-N`.
+  if (config.isNode) {
+    resolveHostedIdentity();
+    return;
+  }
   refreshPasskeys();
   refreshPasswordStatus();
 });
+
+async function resolveHostedIdentity() {
+  accountEmail.value = await auth.fetchHostedAccountEmail();
+  identityReady.value = true;
+}
 
 async function refreshPasskeys() {
   try {
