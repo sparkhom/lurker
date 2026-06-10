@@ -41,6 +41,12 @@ Lurker runs as an always-on server that stays connected to IRC on your behalf, k
 
 # Installation
 
+## Hosted (no setup)
+
+Don't want to run a server? **[lurker.chat](https://lurker.chat)** is official managed hosting: a private, always-on Lurker with backups, updates, and HTTPS handled for you — **$5/mo**, with a 14-day money-back guarantee.
+
+Prefer to self-host? Everything below is free, forever.
+
 ## Install (Docker — Recommended)
 
 ```bash
