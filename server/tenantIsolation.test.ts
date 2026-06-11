@@ -15,6 +15,13 @@
 // verb layer (the enforcement core shared by WebSocket + MCP), and the DB
 // primitives. Positive controls confirm A *can* reach A's own data, so a
 // blanket "everything 404s" bug couldn't make this suite pass.
+//
+// Covered HTTP routes: networks, uploads, highlight-rules, api-tokens,
+// bookmarks, highlights, push, drafts, exports (download-by-job-id IDOR).
+// Covered verbs: recent_messages, send_message, send_action, get_nick_note,
+// set_nick_note, search_messages, list_buffers, list_networks — plus the
+// read-only-ctx → `forbidden` scope gate on write verbs (re-audited via a
+// route/verb/DB sweep for #113; no gaps found, this locks it into CI).
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { Express } from 'express';
@@ -41,9 +48,13 @@ let userBId: number;
 let netAId: number;
 let netBId: number;
 let msgIdA: number;
+let matchedMsgIdA: number;
 let uploadIdA: number;
 let ruleIdA: number;
 let tokenIdA: number;
+let exportJobIdA: number;
+
+const PUSH_ENDPOINT_A = 'https://push.test/endpoint-A';
 
 // Late-bound module fns (imported after setupTestDb).
 let callVerb: typeof import('./services/verbRegistry.js').callVerb;
@@ -51,6 +62,8 @@ let searchMessages: typeof import('./db/messages.js').searchMessages;
 let getNetwork: typeof import('./db/networks.js').getNetwork;
 let addBookmark: typeof import('./db/bookmarks.js').addBookmark;
 let listBookmarkIdsForUser: typeof import('./db/bookmarks.js').listBookmarkIdsForUser;
+let listDraftsForUser: typeof import('./db/drafts.js').listForUser;
+let listPushForUser: typeof import('./db/pushSubscriptions.js').listAllForUser;
 
 // Asserts callVerb rejects with a specific error code (verbRegistry attaches
 // `.code` to its boundary errors). Captures the thrown value, then asserts
@@ -70,6 +83,16 @@ function verbCtx(userId: number, scope: 'read' | 'read-write' = 'read') {
   return { userId, scope, transport: 'test' };
 }
 
+// POST /api/drafts/flush takes a sendBeacon-style text/plain body, so post raw
+// JSON the way the real client does — express.json would otherwise swallow an
+// application/json body before the handler's JSON.parse, masking the check.
+function flushDrafts(agent: LurkerTestAgent, drafts: unknown[]) {
+  return agent
+    .post('/api/drafts/flush')
+    .set('Content-Type', 'text/plain')
+    .send(JSON.stringify({ drafts }));
+}
+
 beforeAll(async () => {
   const { createUser } = await import('./db/users.js');
   const networksDb = await import('./db/networks.js');
@@ -77,6 +100,9 @@ beforeAll(async () => {
   const { insertUpload } = await import('./db/uploadHistory.js');
   const { createToken } = await import('./db/apiTokens.js');
   const bookmarks = await import('./db/bookmarks.js');
+  const drafts = await import('./db/drafts.js');
+  const push = await import('./db/pushSubscriptions.js');
+  const { createExportJob } = await import('./db/dataExports.js');
   const { default: highlightRulesService } = await import('./services/highlightRulesService.js');
   // Side-effecting import registers every verb into the shared registry.
   await import('./services/verbs/index.js');
@@ -87,6 +113,8 @@ beforeAll(async () => {
   getNetwork = networksDb.getNetwork;
   addBookmark = bookmarks.addBookmark;
   listBookmarkIdsForUser = bookmarks.listBookmarkIdsForUser;
+  listDraftsForUser = drafts.listForUser;
+  listPushForUser = push.listAllForUser;
 
   userAId = createUser('tenant-a').id;
   userBId = createUser('tenant-b').id;
@@ -137,11 +165,41 @@ beforeAll(async () => {
   // A bookmarks A's own message: positive control + the row B must not see.
   addBookmark(userAId, msgIdA);
 
+  // A *matched* (highlight) message in A's buffer — the thing B's highlight
+  // feed must never surface. matchedRuleId set => searchMessages({matched:true})
+  // includes it.
+  matchedMsgIdA = Number(
+    insertMessage({
+      networkId: netAId,
+      target: SECRET_TARGET,
+      time: new Date().toISOString(),
+      type: 'message',
+      nick: 'someone',
+      text: `${SECRET_TOKEN}-highlight`,
+      matchedRuleId: ruleIdA,
+    }).id,
+  );
+
+  // A draft on A's network — B must not be able to read it or clobber it by
+  // flushing into A's network id.
+  drafts.upsertDraft(userAId, netAId, SECRET_TARGET, 'A-draft');
+
+  // A push subscription owned by A — B must not be able to delete or hijack it.
+  push.upsertSubscription(userAId, { endpoint: PUSH_ENDPOINT_A, p256dh: 'pA', auth: 'aA' });
+
+  // A pending export job — the enumerable :id/download is the classic
+  // "fetch-by-job-id-without-owner-check" IDOR surface.
+  exportJobIdA = createExportJob(userAId, false).id;
+
   const networksRouter = (await import('./routes/networks.js')).default;
   const uploadsRouter = (await import('./routes/uploads.js')).default;
   const highlightRulesRouter = (await import('./routes/highlightRules.js')).default;
   const apiTokensRouter = (await import('./routes/apiTokens.js')).default;
   const bookmarksRouter = (await import('./routes/bookmarks.js')).default;
+  const highlightsRouter = (await import('./routes/highlights.js')).default;
+  const pushRouter = (await import('./routes/push.js')).default;
+  const draftsRouter = (await import('./routes/drafts.js')).default;
+  const { exportsRouter } = await import('./routes/exports.js');
 
   app = createTestApp({
     '/api/networks': networksRouter,
@@ -149,6 +207,10 @@ beforeAll(async () => {
     '/api/highlight-rules': highlightRulesRouter,
     '/api/api-tokens': apiTokensRouter,
     '/api/bookmarks': bookmarksRouter,
+    '/api/highlights': highlightsRouter,
+    '/api/push': pushRouter,
+    '/api/drafts': draftsRouter,
+    '/api/exports': exportsRouter,
   });
   agentA = await createAuthedAgent(app, userAId);
   agentB = await createAuthedAgent(app, userBId);
@@ -198,6 +260,52 @@ describe('HTTP routes — tenant B cannot reach tenant A', () => {
     expect(res.status).toBe(200);
     expect(res.body.items).toHaveLength(0);
   });
+
+  it('highlights: B’s feed never surfaces A’s matched message', async () => {
+    const res = await agentB.get('/api/highlights');
+    expect(res.status).toBe(200);
+    expect(res.body.items.map((m: { id: number }) => m.id)).not.toContain(matchedMsgIdA);
+  });
+
+  it('exports: B cannot download A’s export job by id (job-id IDOR)', async () => {
+    // The owner check lives at the riskiest moment — download by enumerable id.
+    expect((await agentB.get(`/api/exports/${exportJobIdA}/download`)).status).toBe(404);
+  });
+
+  it('push: B cannot delete A’s subscription, nor hijack A’s endpoint', async () => {
+    // Unsubscribe is double-keyed on (user_id, endpoint), so B passing A’s
+    // endpoint deletes nothing. Assert the route actually succeeded (200) so a
+    // wrong-route/4xx couldn’t make the "A’s sub still present" check vacuous.
+    const del = await agentB.delete('/api/push/subscriptions').send({ endpoint: PUSH_ENDPOINT_A });
+    expect(del.status).toBe(200);
+    expect(listPushForUser(userAId).some((s) => s.endpoint === PUSH_ENDPOINT_A)).toBe(true);
+
+    // B tries to register A’s endpoint under B’s account — rejected 409, so B
+    // can’t rebind A’s browser registration to itself.
+    const res = await agentB
+      .post('/api/push/subscriptions')
+      .send({ endpoint: PUSH_ENDPOINT_A, keys: { p256dh: 'pB', auth: 'aB' } });
+    expect(res.status).toBe(409);
+    expect(listPushForUser(userBId).some((s) => s.endpoint === PUSH_ENDPOINT_A)).toBe(false);
+  });
+
+  it('drafts: B flushing into A’s network is a silent no-op (cannot clobber A’s draft)', async () => {
+    // Positive control: B *can* write a draft into B’s own network — proves the
+    // flush path works, so the A-network block below is really ownsNetwork.
+    await flushDrafts(agentB, [{ networkId: netBId, target: SECRET_TARGET, body: 'B-own-draft' }]);
+    expect(
+      listDraftsForUser(userBId).some((d) => d.networkId === netBId && d.body === 'B-own-draft'),
+    ).toBe(true);
+
+    // B flushes into A’s network: ownsNetwork() skips it, so no row lands for B
+    // and A’s existing draft is untouched.
+    await flushDrafts(agentB, [{ networkId: netAId, target: SECRET_TARGET, body: 'B-was-here' }]);
+    expect(listDraftsForUser(userBId).some((d) => d.networkId === netAId)).toBe(false);
+    const aDraft = listDraftsForUser(userAId).find(
+      (d) => d.networkId === netAId && d.target === SECRET_TARGET,
+    );
+    expect(aDraft?.body).toBe('A-draft');
+  });
 });
 
 describe('HTTP routes — owner A can reach own data (positive controls)', () => {
@@ -210,6 +318,18 @@ describe('HTTP routes — owner A can reach own data (positive controls)', () =>
 
     const bm = await agentA.get('/api/bookmarks');
     expect(bm.body.items.map((m: { id: number }) => m.id)).toContain(msgIdA);
+  });
+
+  it('A sees A’s highlight feed and reaches A’s export row (409, not 404)', async () => {
+    const hl = await agentA.get('/api/highlights');
+    expect(hl.body.items.map((m: { id: number }) => m.id)).toContain(matchedMsgIdA);
+
+    // The seeded job is pending, so A’s download is 409 "not ready" — crucially
+    // NOT a 404. Asserting the exact 409 proves A reaches the row (so the B→404
+    // above is real isolation, not a blanket "every export id 404s" bug) and
+    // that an unrelated 500 wouldn’t slip through.
+    const dl = await agentA.get(`/api/exports/${exportJobIdA}/download`);
+    expect(dl.status).toBe(409);
   });
 });
 
@@ -232,6 +352,54 @@ describe('Verb layer (WebSocket + MCP core) — tenant B is denied', () => {
     expectVerbError(
       () => callVerb('get_nick_note', verbCtx(userBId), { networkId: netAId, nick: 'someone' }),
       'unknown_network',
+    );
+  });
+
+  // The two write verbs not otherwise exercised above. Same registry gate, but
+  // assert it explicitly so a future refactor can’t silently drop the check for
+  // these.
+  it('write verbs send_action / set_nick_note throw unknown_network for B', () => {
+    expectVerbError(
+      () =>
+        callVerb('send_action', verbCtx(userBId, 'read-write'), {
+          networkId: netAId,
+          target: SECRET_TARGET,
+          text: '/me waves',
+        }),
+      'unknown_network',
+    );
+    expectVerbError(
+      () =>
+        callVerb('set_nick_note', verbCtx(userBId, 'read-write'), {
+          networkId: netAId,
+          nick: 'someone',
+          note: 'pwned',
+        }),
+      'unknown_network',
+    );
+  });
+
+  // Scope gate: a read-only ctx must not be able to invoke a write verb, even
+  // on the caller’s OWN network. Using A’s own network isolates the scope check
+  // from the ownership check (which would otherwise also reject).
+  it('read-only ctx cannot invoke write verbs (forbidden, even on own network)', () => {
+    expectVerbError(
+      () =>
+        callVerb('send_message', verbCtx(userAId, 'read'), {
+          networkId: netAId,
+          target: SECRET_TARGET,
+          text: 'hi',
+        }),
+      'forbidden',
+    );
+    expectVerbError(
+      () =>
+        callVerb('set_nick_note', verbCtx(userAId, 'read'), {
+          networkId: netAId,
+          nick: 'someone',
+          note: 'x',
+        }),
+      'forbidden',
     );
   });
 
