@@ -28,8 +28,8 @@
         :key="tag"
         type="button"
         class="tag-chip"
-        :class="{ on: active.has(tag) }"
-        :aria-pressed="active.has(tag)"
+        :class="{ on: active === tag }"
+        :aria-pressed="active === tag"
         @click="toggleTag(tag)"
       >
         {{ tag }}
@@ -83,7 +83,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue';
+import { computed, ref } from 'vue';
 import {
   builtinNetworks,
   builtinNetworkTags,
@@ -93,11 +93,12 @@ import {
 defineEmits<{ select: [net: BuiltinNetwork]; manual: [] }>();
 
 const query = ref('');
-const active = reactive(new Set<string>());
+// Single-select tag filter: clicking a chip selects it (clearing any other);
+// clicking the active chip again clears the filter.
+const active = ref<string | null>(null);
 
 function toggleTag(tag: string): void {
-  if (active.has(tag)) active.delete(tag);
-  else active.add(tag);
+  active.value = active.value === tag ? null : tag;
 }
 
 // Compact popularity label: 32976 -> "33k", 9208 -> "9.2k", 100 -> "100".
@@ -115,15 +116,14 @@ function siteLabel(url: string): string {
     .replace(/\/+$/, '');
 }
 
-// Text search narrows by name/host; tag chips are OR'd (a network shows if it
-// carries ANY selected tag) so adding chips broadens discovery rather than
-// quickly emptying the list. The two filters AND together.
+// Text search narrows by name; the (single) selected tag narrows by category;
+// the two AND together.
 const filtered = computed<BuiltinNetwork[]>(() => {
   const q = query.value.trim().toLowerCase();
-  const tags = [...active];
+  const tag = active.value;
   return builtinNetworks.filter((n) => {
     if (q && !n.name.toLowerCase().includes(q)) return false;
-    if (tags.length && !tags.some((t) => n.tags.includes(t))) return false;
+    if (tag && !n.tags.includes(tag)) return false;
     return true;
   });
 });
