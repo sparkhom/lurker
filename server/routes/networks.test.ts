@@ -129,11 +129,15 @@ describe('POST /api/networks', () => {
     const networksDb = await import('../db/networks.js');
     const spy = vi.spyOn(networksDb, 'createNetwork').mockReturnValueOnce(undefined);
     fakeManager.reset();
-    const res = await makeNet(aliceAgent, { name: 'doomed-create' });
-    expect(res.status).toBe(500);
-    // A failed creation must not leave a dangling connection attempt behind.
-    expect(fakeManager.calls.some(([m]) => m === 'startNetwork')).toBe(false);
-    spy.mockRestore();
+    try {
+      const res = await makeNet(aliceAgent, { name: 'doomed-create' });
+      expect(res.status).toBe(500);
+      // A failed creation must not leave a dangling connection attempt behind.
+      expect(fakeManager.calls.some(([m]) => m === 'startNetwork')).toBe(false);
+    } finally {
+      // Restore in finally so a thrown assertion can't leak the spy into later tests.
+      spy.mockRestore();
+    }
   });
 
   it('upserts default_channel into the channels list', async () => {
