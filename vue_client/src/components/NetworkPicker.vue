@@ -49,7 +49,6 @@
               <i class="fa-solid fa-users"></i> {{ formatUsers(net.users) }}
             </span>
           </span>
-          <span class="net-meta">{{ net.host }}</span>
           <span v-if="net.tags.length" class="net-tags">
             <span v-for="tag in net.tags" :key="tag" class="net-tag">{{ tag }}</span>
           </span>
@@ -96,7 +95,7 @@ const filtered = computed<BuiltinNetwork[]>(() => {
   const q = query.value.trim().toLowerCase();
   const tags = [...active];
   return builtinNetworks.filter((n) => {
-    if (q && !n.name.toLowerCase().includes(q) && !n.host.toLowerCase().includes(q)) return false;
+    if (q && !n.name.toLowerCase().includes(q)) return false;
     if (tags.length && !tags.some((t) => n.tags.includes(t))) return false;
     return true;
   });
@@ -182,12 +181,6 @@ const filtered = computed<BuiltinNetwork[]>(() => {
   color: var(--fg-muted);
   white-space: nowrap;
   flex-shrink: 0;
-}
-.net-meta {
-  color: var(--fg-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .net-tags {
   display: flex;
