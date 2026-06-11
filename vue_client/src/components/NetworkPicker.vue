@@ -28,9 +28,11 @@
         class="filter-toggle"
         :class="{ on: showFilters || !!active }"
         :aria-expanded="showFilters"
+        :aria-label="active ? `Filtering by ${active}` : 'Filter by tag'"
+        :title="active ? `Filtering by ${active}` : 'Filter by tag'"
         @click="showFilters = !showFilters"
       >
-        <i class="fa-solid fa-filter"></i> {{ active || 'Filter' }}
+        <i class="fa-solid fa-filter"></i>
       </button>
     </div>
 
@@ -147,14 +149,13 @@ const filtered = computed<BuiltinNetwork[]>(() => {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
+  justify-content: center;
   background: transparent;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--fg-muted);
   padding: var(--space-1) var(--space-3);
   cursor: pointer;
-  text-transform: lowercase;
 }
 .filter-toggle:hover {
   color: var(--fg);
