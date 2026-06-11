@@ -109,16 +109,20 @@ describe('POST /api/networks', () => {
     expect(res.status).toBe(400);
   });
 
-  it('starts the connection when autoconnect is true', async () => {
+  // Creating a network is the explicit "Save & connect" action, so it connects
+  // now whether or not autoconnect is set. autoconnect only governs automatic
+  // connection at cold-start / un-pause resume, not this initial setup.
+  it('starts the connection on create when autoconnect is true', async () => {
     const res = await makeNet(aliceAgent, { autoconnect: true, name: 'autoconn' });
     expect(res.status).toBe(201);
     expect(fakeManager.calls.some(([m]) => m === 'startNetwork')).toBe(true);
   });
 
-  it('does NOT start the connection when autoconnect is false', async () => {
+  it('still starts the connection on create when autoconnect is false (#186)', async () => {
     fakeManager.reset();
-    await makeNet(aliceAgent, { autoconnect: false, name: 'no-autoconn' });
-    expect(fakeManager.calls.some(([m]) => m === 'startNetwork')).toBe(false);
+    const res = await makeNet(aliceAgent, { autoconnect: false, name: 'no-autoconn' });
+    expect(res.status).toBe(201);
+    expect(fakeManager.calls.some(([m]) => m === 'startNetwork')).toBe(true);
   });
 
   it('upserts default_channel into the channels list', async () => {
