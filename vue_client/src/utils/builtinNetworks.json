@@ -6,28 +6,42 @@
     "tls": true,
     "website": "https://libera.chat",
     "users": 32976,
+    "saslSupported": true,
     "saslLikelyRequired": true,
-    "tags": []
+    "tags": [
+      "foss",
+      "tech",
+      "programming"
+    ]
   },
   {
     "name": "Undernet",
     "host": "irc.undernet.org",
-    "port": 6697,
-    "tls": true,
+    "port": 6667,
+    "tls": false,
     "website": "https://www.undernet.org",
     "users": 15212,
+    "saslSupported": false,
     "saslLikelyRequired": false,
-    "tags": []
+    "tags": [
+      "general-chat",
+      "community",
+      "social"
+    ]
   },
   {
     "name": "IRCnet",
     "host": "open.ircnet.net",
-    "port": 6697,
-    "tls": true,
+    "port": 6667,
+    "tls": false,
     "website": "https://www.ircnet.com",
     "users": 14376,
+    "saslSupported": true,
     "saslLikelyRequired": false,
-    "tags": []
+    "tags": [
+      "general-chat",
+      "community"
+    ]
   },
   {
     "name": "Rizon",
@@ -36,8 +50,13 @@
     "tls": true,
     "website": "https://rizon.net",
     "users": 9208,
+    "saslSupported": true,
     "saslLikelyRequired": false,
-    "tags": []
+    "tags": [
+      "general-chat",
+      "community",
+      "anime"
+    ]
   },
   {
     "name": "hackint",
@@ -46,8 +65,13 @@
     "tls": true,
     "website": "https://hackint.org",
     "users": 8624,
+    "saslSupported": true,
     "saslLikelyRequired": false,
-    "tags": []
+    "tags": [
+      "hacking",
+      "security",
+      "tech"
+    ]
   },
   {
     "name": "EFnet",
@@ -56,8 +80,13 @@
     "tls": true,
     "website": "https://www.efnet.org",
     "users": 8553,
+    "saslSupported": false,
     "saslLikelyRequired": false,
-    "tags": []
+    "tags": [
+      "general-chat",
+      "tech",
+      "community"
+    ]
   },
   {
     "name": "Chatzona",
@@ -66,8 +95,13 @@
     "tls": true,
     "website": "https://www.chatzona.org",
     "users": 6742,
+    "saslSupported": false,
     "saslLikelyRequired": false,
-    "tags": []
+    "tags": [
+      "social",
+      "community",
+      "spanish"
+    ]
   },
   {
     "name": "QuakeNet",
@@ -76,8 +110,13 @@
     "tls": false,
     "website": "https://www.quakenet.org",
     "users": 6335,
+    "saslSupported": false,
     "saslLikelyRequired": false,
-    "tags": []
+    "tags": [
+      "gaming",
+      "community",
+      "international"
+    ]
   },
   {
     "name": "freenode",
@@ -86,8 +125,13 @@
     "tls": true,
     "website": "https://freenode.net",
     "users": 5428,
+    "saslSupported": true,
     "saslLikelyRequired": false,
-    "tags": []
+    "tags": [
+      "foss",
+      "programming",
+      "tech"
+    ]
   },
   {
     "name": "DALnet",
@@ -96,18 +140,28 @@
     "tls": true,
     "website": "https://www.dal.net",
     "users": 5206,
+    "saslSupported": false,
     "saslLikelyRequired": false,
-    "tags": []
+    "tags": [
+      "general-chat",
+      "community",
+      "social"
+    ]
   },
   {
     "name": "IRC-Hispano",
     "host": "ssl.irc-hispano.org",
     "port": 6697,
     "tls": true,
-    "website": "https://www.irc-hispano.org",
+    "website": "https://chathispano.com",
     "users": 3905,
+    "saslSupported": true,
     "saslLikelyRequired": false,
-    "tags": []
+    "tags": [
+      "social",
+      "community",
+      "spanish"
+    ]
   },
   {
     "name": "KampungChat",
@@ -116,8 +170,14 @@
     "tls": true,
     "website": "https://www.kampungchat.org",
     "users": 3725,
+    "saslSupported": false,
     "saslLikelyRequired": false,
-    "tags": []
+    "tags": [
+      "general-chat",
+      "community",
+      "social",
+      "malay"
+    ]
   },
   {
     "name": "HybridIRC",
@@ -126,8 +186,12 @@
     "tls": true,
     "website": "https://www.hybridirc.com",
     "users": 3313,
+    "saslSupported": true,
     "saslLikelyRequired": false,
-    "tags": []
+    "tags": [
+      "general-chat",
+      "community"
+    ]
   },
   {
     "name": "SimosNap",
@@ -136,8 +200,13 @@
     "tls": true,
     "website": "https://www.simosnap.org",
     "users": 2967,
+    "saslSupported": true,
     "saslLikelyRequired": false,
-    "tags": []
+    "tags": [
+      "general-chat",
+      "social",
+      "italian"
+    ]
   },
   {
     "name": "GameSurge",
@@ -146,8 +215,12 @@
     "tls": false,
     "website": "https://gamesurge.net",
     "users": 2181,
+    "saslSupported": false,
     "saslLikelyRequired": false,
-    "tags": []
+    "tags": [
+      "gaming",
+      "community"
+    ]
   },
   {
     "name": "Snoonet",
@@ -156,8 +229,13 @@
     "tls": true,
     "website": "https://snoonet.org",
     "users": 2144,
+    "saslSupported": true,
     "saslLikelyRequired": false,
-    "tags": []
+    "tags": [
+      "community",
+      "social",
+      "general-chat"
+    ]
   },
   {
     "name": "EuropNet",
@@ -166,8 +244,14 @@
     "tls": true,
     "website": "https://www.europnet.org",
     "users": 2065,
+    "saslSupported": false,
     "saslLikelyRequired": false,
-    "tags": []
+    "tags": [
+      "general-chat",
+      "social",
+      "community",
+      "french"
+    ]
   },
   {
     "name": "synIRC",
@@ -176,8 +260,13 @@
     "tls": true,
     "website": "https://synirc.net",
     "users": 1707,
+    "saslSupported": true,
     "saslLikelyRequired": false,
-    "tags": []
+    "tags": [
+      "general-chat",
+      "community",
+      "social"
+    ]
   },
   {
     "name": "EsperNet",
@@ -186,8 +275,13 @@
     "tls": true,
     "website": "https://esper.net",
     "users": 1609,
+    "saslSupported": true,
     "saslLikelyRequired": false,
-    "tags": []
+    "tags": [
+      "general-chat",
+      "community",
+      "gaming"
+    ]
   },
   {
     "name": "DigitalIRC",
@@ -196,8 +290,12 @@
     "tls": true,
     "website": "https://digitalirc.org",
     "users": 1402,
+    "saslSupported": true,
     "saslLikelyRequired": false,
-    "tags": []
+    "tags": [
+      "general-chat",
+      "community"
+    ]
   },
   {
     "name": "MansionNET",
@@ -206,7 +304,12 @@
     "tls": true,
     "website": "https://inthemansion.com",
     "users": null,
+    "saslSupported": true,
     "saslLikelyRequired": false,
-    "tags": []
+    "tags": [
+      "privacy",
+      "programming",
+      "community"
+    ]
   }
 ]
