@@ -187,9 +187,9 @@ function onPick(net: BuiltinNetwork): void {
   form.host = net.host;
   form.port = net.port;
   form.tls = net.tls;
-  // Lurker-friendly networks have a #lurker channel to land in; otherwise don't
-  // auto-join a guessed lobby (names vary) — leave it blank for the user.
-  form.default_channel = net.tags.includes(LURKER_TAG) ? '#lurker' : '';
+  // Always land the user in a channel rather than an empty server buffer:
+  // #lurker for a lurker-tagged network, else #chat as a common-enough lobby.
+  form.default_channel = net.tags.includes(LURKER_TAG) ? '#lurker' : '#chat';
   picked.value = net;
   step.value = 'form';
 }
@@ -214,10 +214,9 @@ const showSaslHint = computed(
 // unauthenticated cloud IPs), drop the "(optional)" qualifier on the labels.
 const saslRequired = computed(() => showSaslHint.value);
 
-// Guide the default-channel field: #lurker for a lurker-tagged network, else a
-// nudge toward common lobby names since there's no universal default.
+// Placeholder echoes the prefilled default if the user clears the field.
 const channelPlaceholder = computed(() =>
-  picked.value && !picked.value.tags.includes(LURKER_TAG) ? '#chat, #lobby, #general' : '#lurker',
+  picked.value && !picked.value.tags.includes(LURKER_TAG) ? '#chat' : '#lurker',
 );
 
 const loading = ref(false);
