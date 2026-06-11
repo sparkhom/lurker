@@ -45,8 +45,10 @@
       </label>
       <template v-if="showSasl">
         <p v-if="showSaslHint" class="sasl-hint">
-          <strong>{{ picked?.name }}</strong> usually requires SASL auth when connecting from a
-          hosted server. Enter your account name and password below.
+          <strong>{{ picked?.name }}</strong> blocks unauthenticated connections from hosted
+          servers, so the SASL account and password below are
+          <strong>not optional</strong> — register your nick with the network first, then enter it
+          here.
         </p>
         <div class="row">
           <label class="grow">
