@@ -6,6 +6,7 @@
     "tls": true,
     "website": "https://libera.chat",
     "users": 32976,
+    "channels": 23143,
     "saslSupported": true,
     "saslLikelyRequired": true,
     "tags": [
@@ -21,6 +22,7 @@
     "tls": false,
     "website": "https://www.undernet.org",
     "users": 15212,
+    "channels": 5733,
     "saslSupported": false,
     "saslLikelyRequired": false,
     "tags": [
@@ -34,6 +36,7 @@
     "tls": false,
     "website": "https://www.ircnet.com",
     "users": 14376,
+    "channels": 7953,
     "saslSupported": true,
     "saslLikelyRequired": false,
     "tags": [
@@ -47,6 +50,7 @@
     "tls": true,
     "website": "https://rizon.net",
     "users": 9208,
+    "channels": 7925,
     "saslSupported": true,
     "saslLikelyRequired": false,
     "tags": [
@@ -61,6 +65,7 @@
     "tls": true,
     "website": "https://hackint.org",
     "users": 8624,
+    "channels": 2050,
     "saslSupported": true,
     "saslLikelyRequired": false,
     "tags": [
@@ -76,6 +81,7 @@
     "tls": true,
     "website": "https://www.efnet.org",
     "users": 8553,
+    "channels": 5547,
     "saslSupported": false,
     "saslLikelyRequired": false,
     "tags": [
@@ -90,6 +96,7 @@
     "tls": true,
     "website": "https://www.chatzona.org",
     "users": 6742,
+    "channels": 646,
     "saslSupported": false,
     "saslLikelyRequired": false,
     "tags": [
@@ -104,6 +111,7 @@
     "tls": false,
     "website": "https://www.quakenet.org",
     "users": 6335,
+    "channels": 6381,
     "saslSupported": false,
     "saslLikelyRequired": false,
     "tags": [
@@ -119,6 +127,7 @@
     "tls": true,
     "website": "https://freenode.net",
     "users": 5428,
+    "channels": 9997,
     "saslSupported": true,
     "saslLikelyRequired": false,
     "tags": [
@@ -134,6 +143,7 @@
     "tls": true,
     "website": "https://www.dal.net",
     "users": 5206,
+    "channels": 2665,
     "saslSupported": false,
     "saslLikelyRequired": false,
     "tags": [
@@ -147,6 +157,7 @@
     "tls": true,
     "website": "https://chathispano.com",
     "users": 3905,
+    "channels": 1938,
     "saslSupported": true,
     "saslLikelyRequired": false,
     "tags": [
@@ -161,6 +172,7 @@
     "tls": true,
     "website": "https://www.kampungchat.org",
     "users": 3725,
+    "channels": 446,
     "saslSupported": false,
     "saslLikelyRequired": false,
     "tags": [
@@ -175,6 +187,7 @@
     "tls": true,
     "website": "https://www.hybridirc.com",
     "users": 3313,
+    "channels": 248,
     "saslSupported": true,
     "saslLikelyRequired": false,
     "tags": [
@@ -188,6 +201,7 @@
     "tls": true,
     "website": "https://www.simosnap.org",
     "users": 2967,
+    "channels": 583,
     "saslSupported": true,
     "saslLikelyRequired": false,
     "tags": [
@@ -202,6 +216,7 @@
     "tls": false,
     "website": "https://gamesurge.net",
     "users": 2181,
+    "channels": 1560,
     "saslSupported": false,
     "saslLikelyRequired": false,
     "tags": [
@@ -216,6 +231,7 @@
     "tls": true,
     "website": "https://snoonet.org",
     "users": 2144,
+    "channels": 5380,
     "saslSupported": true,
     "saslLikelyRequired": false,
     "tags": [
@@ -229,6 +245,7 @@
     "tls": true,
     "website": "https://www.europnet.org",
     "users": 2065,
+    "channels": 1493,
     "saslSupported": false,
     "saslLikelyRequired": false,
     "tags": [
@@ -243,6 +260,7 @@
     "tls": true,
     "website": "https://synirc.net",
     "users": 1707,
+    "channels": 783,
     "saslSupported": true,
     "saslLikelyRequired": false,
     "tags": [
@@ -256,6 +274,7 @@
     "tls": true,
     "website": "https://esper.net",
     "users": 1609,
+    "channels": 1893,
     "saslSupported": true,
     "saslLikelyRequired": false,
     "tags": [
@@ -270,6 +289,7 @@
     "tls": true,
     "website": "https://digitalirc.org",
     "users": 1402,
+    "channels": 108,
     "saslSupported": true,
     "saslLikelyRequired": false,
     "tags": [
@@ -283,6 +303,7 @@
     "tls": true,
     "website": "https://inthemansion.com",
     "users": 100,
+    "channels": null,
     "saslSupported": true,
     "saslLikelyRequired": false,
     "tags": [

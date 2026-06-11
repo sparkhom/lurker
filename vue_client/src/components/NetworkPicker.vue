@@ -41,12 +41,21 @@
         <button type="button" class="net-row" @click="$emit('select', net)">
           <span class="net-head">
             <span class="net-name">{{ net.name }}</span>
-            <span
-              v-if="net.users != null"
-              class="net-users"
-              :title="`~${net.users.toLocaleString()} users (netsplit.de average)`"
-            >
-              <i class="fa-solid fa-users"></i> {{ formatUsers(net.users) }}
+            <span class="net-stats">
+              <span
+                v-if="net.users != null"
+                class="stat"
+                :title="`~${net.users.toLocaleString()} users (netsplit.de average)`"
+              >
+                <i class="fa-solid fa-users"></i> {{ formatCount(net.users) }}
+              </span>
+              <span
+                v-if="net.channels != null"
+                class="stat"
+                :title="`~${net.channels.toLocaleString()} channels (netsplit.de average)`"
+              >
+                <i class="fa-solid fa-hashtag"></i> {{ formatCount(net.channels) }}
+              </span>
             </span>
           </span>
           <span v-if="net.tags.length" class="net-tags">
@@ -82,7 +91,7 @@ function toggleTag(tag: string): void {
 }
 
 // Compact popularity label: 32976 -> "33k", 9208 -> "9.2k", 100 -> "100".
-function formatUsers(n: number): string {
+function formatCount(n: number): string {
   if (n >= 10000) return `${Math.round(n / 1000)}k`;
   if (n >= 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k`;
   return String(n);
@@ -115,27 +124,33 @@ const filtered = computed<BuiltinNetwork[]>(() => {
   width: 100%;
   box-sizing: border-box;
 }
+/* Squared tray of toggle buttons, styled after the message-list hover action
+   bar (.row-actions): bordered container, square corners, subtle --bg-soft
+   hover, --accent when on. */
 .tags {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2);
+  gap: var(--space-1);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1);
 }
 .tag-chip {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill, 999px);
+  border: 0;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--fg-muted);
-  padding: var(--space-1) var(--space-3);
+  padding: var(--space-1) var(--space-2);
   cursor: pointer;
   text-transform: lowercase;
 }
 .tag-chip:hover {
   color: var(--fg);
-  border-color: var(--fg-muted);
+  background: var(--bg-soft);
 }
 .tag-chip.on {
   background: var(--accent);
-  border-color: var(--accent);
   color: var(--bg);
 }
 /* Breakout so the scrollbar sits against the card edge, matching net-form. */
@@ -177,10 +192,15 @@ const filtered = computed<BuiltinNetwork[]>(() => {
   color: var(--fg);
   font-weight: 600;
 }
-.net-users {
+.net-stats {
+  display: flex;
+  gap: var(--space-3);
   color: var(--fg-muted);
   white-space: nowrap;
   flex-shrink: 0;
+}
+.stat i {
+  opacity: 0.75;
 }
 .net-tags {
   display: flex;
@@ -190,7 +210,7 @@ const filtered = computed<BuiltinNetwork[]>(() => {
 .net-tag {
   color: var(--fg-muted);
   border: 1px solid var(--border);
-  border-radius: var(--radius-pill, 999px);
+  border-radius: var(--radius-sm);
   padding: 0 var(--space-2);
 }
 .none {
