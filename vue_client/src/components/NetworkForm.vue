@@ -8,9 +8,15 @@
     :word="isEdit ? 'edit' : 'network'"
     :title="isEdit ? 'edit network' : 'add network'"
     size="sm"
+    :fill-height="step === 'pick'"
     @close="$emit('close')"
   >
-    <form class="net-form" @submit.prevent="submit">
+    <NetworkPicker v-if="step === 'pick'" @select="onPick" @manual="onManual" />
+
+    <form v-else class="net-form" @submit.prevent="submit">
+      <button v-if="!isEdit" type="button" class="back-link" @click="step = 'pick'">
+        ← {{ picked ? picked.name : 'pick a network' }}
+      </button>
       <label>
         <span>Name</span>
         <input v-model="form.name" placeholder="Libera" required />
@@ -37,9 +43,14 @@
         <span>Real name (optional)</span>
         <input v-model="form.realname" />
       </label>
+      <p v-if="showSaslHint" class="sasl-hint">
+        <strong>{{ picked?.name }}</strong> blocks unauthenticated connections from hosted servers,
+        so the SASL account and password below are <strong>not optional</strong> — register your
+        nick with the network first, then enter it here.
+      </p>
       <div class="row">
         <label class="grow">
-          <span>SASL account (optional)</span>
+          <span>SASL account{{ saslRequired ? '' : ' (optional)' }}</span>
           <input
             v-model="form.sasl_account"
             :placeholder="form.nick || 'defaults to nick'"
@@ -47,7 +58,7 @@
           />
         </label>
         <label class="grow">
-          <span>SASL password (optional)</span>
+          <span>SASL password{{ saslRequired ? '' : ' (optional)' }}</span>
           <input
             v-model="form.sasl_password"
             type="password"
@@ -73,7 +84,7 @@
         </label>
         <label v-if="!isEdit">
           <span>Default channel</span>
-          <input v-model="form.default_channel" placeholder="#lurker" />
+          <input v-model="form.default_channel" :placeholder="channelPlaceholder" />
         </label>
         <label>
           <span>Commands to run on connect</span>
@@ -115,7 +126,10 @@
 <script setup lang="ts">
 import { reactive, ref, computed } from 'vue';
 import AppModal from './AppModal.vue';
+import NetworkPicker from './NetworkPicker.vue';
 import { useNetworksStore, type Network } from '../stores/networks.js';
+import { useConfigStore } from '../stores/config.js';
+import { LURKER_TAG, type BuiltinNetwork } from '../utils/builtinNetworks.js';
 
 const props = withDefaults(
   defineProps<{
@@ -127,6 +141,7 @@ const props = withDefaults(
 );
 const emit = defineEmits<{ close: [] }>();
 const networks = useNetworksStore();
+const config = useConfigStore();
 
 const isEdit = computed(() => !!props.network);
 
@@ -156,6 +171,51 @@ const form = reactive({
 const showAdvanced = ref(
   !!props.network &&
     (!!netRaw?.has_password || !!netRaw?.connect_commands || netRaw?.autoconnect === false),
+);
+
+// Add-flow opens on the network picker (#169); editing jumps straight to the
+// form. Picking a built-in prefills the connection fields so the user only has
+// to supply a nick.
+const step = ref<'pick' | 'form'>(isEdit.value ? 'form' : 'pick');
+const picked = ref<BuiltinNetwork | null>(null);
+
+function onPick(net: BuiltinNetwork): void {
+  form.name = net.name;
+  form.host = net.host;
+  form.port = net.port;
+  form.tls = net.tls;
+  // Always land the user in a channel rather than an empty server buffer:
+  // #lurker for a lurker-tagged network, else #chat as a common-enough lobby.
+  form.default_channel = net.tags.includes(LURKER_TAG) ? '#lurker' : '#chat';
+  picked.value = net;
+  step.value = 'form';
+}
+function onManual(): void {
+  // Clear anything a prior pick prefilled so "enter manually" starts blank
+  // (the connection fields onPick touches); user-typed nick/realname/creds stay.
+  picked.value = null;
+  form.name = '';
+  form.host = '';
+  form.port = 6697;
+  form.tls = true;
+  form.default_channel = '#lurker';
+  step.value = 'form';
+}
+
+// Node (hosted-cell) clients connect from a datacenter IP, where some networks
+// (e.g. Libera) refuse unauthenticated connections — nudge the user to fill in
+// SASL. Self-hosted (standalone) connections don't hit this, so it's node-only.
+const showSaslHint = computed(
+  () => step.value === 'form' && config.isNode && !!picked.value?.saslLikelyRequired,
+);
+
+// When SASL is effectively required (a hosted cell on a network that blocks
+// unauthenticated cloud IPs), drop the "(optional)" qualifier on the labels.
+const saslRequired = computed(() => showSaslHint.value);
+
+// Placeholder echoes the prefilled default if the user clears the field.
+const channelPlaceholder = computed(() =>
+  picked.value && !picked.value.tags.includes(LURKER_TAG) ? '#chat' : '#lurker',
 );
 
 const loading = ref(false);
@@ -269,7 +329,8 @@ label small {
   text-transform: none;
   letter-spacing: normal;
 }
-.advanced-toggle {
+.advanced-toggle,
+.back-link {
   align-self: flex-start;
   background: transparent;
   border: 0;
@@ -278,8 +339,18 @@ label small {
   cursor: pointer;
   text-transform: lowercase;
 }
-.advanced-toggle:hover {
+.advanced-toggle:hover,
+.back-link:hover {
   text-decoration: underline;
+}
+.sasl-hint {
+  margin: 0;
+  color: var(--fg-muted);
+  border-left: 2px solid var(--accent);
+  padding-left: var(--space-3);
+}
+.sasl-hint strong {
+  color: var(--fg);
 }
 .advanced {
   display: flex;

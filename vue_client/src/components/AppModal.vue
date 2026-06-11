@@ -26,7 +26,12 @@
   >
     <WordBackdrop :word="backdropWord" />
 
-    <div class="card" :class="[`size-${size}`]" tabindex="-1" ref="cardEl">
+    <div
+      class="card"
+      :class="[`size-${size}`, { 'fill-height': fillHeight }]"
+      tabindex="-1"
+      ref="cardEl"
+    >
       <slot name="head">
         <header v-if="title || $slots.title || $slots.subtitle || $slots.actions" class="head">
           <div class="title-wrap">
@@ -65,6 +70,9 @@ const props = withDefaults(
     align?: string;
     closeOnBackdrop?: boolean;
     closeTitle?: string;
+    // Pin the card to full height on desktop (mobile is already a full sheet),
+    // so content changes — e.g. a filtering list — don't resize the modal.
+    fillHeight?: boolean;
   }>(),
   {
     word: '',
@@ -73,6 +81,7 @@ const props = withDefaults(
     align: 'center',
     closeOnBackdrop: true,
     closeTitle: 'close',
+    fillHeight: false,
   },
 );
 
@@ -176,6 +185,17 @@ onMounted(() => {
 }
 .card.size-xl {
   width: min(900px, 92vw);
+}
+
+/* Pin to full height on desktop so content changes (e.g. a filtering list)
+   don't resize the modal. min-width so the mobile full-sheet rules above win. */
+@media (min-width: 769px) {
+  .card.fill-height {
+    height: 85dvh;
+  }
+  .modal.align-top .card.fill-height {
+    height: 96dvh;
+  }
 }
 
 .head {
