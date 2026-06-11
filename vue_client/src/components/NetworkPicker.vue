@@ -41,8 +41,15 @@
         <button type="button" class="net-row" @click="$emit('select', net)">
           <span class="net-head">
             <span class="net-name">{{ net.name }}</span>
-            <span class="net-meta">{{ net.host }}</span>
+            <span
+              v-if="net.users != null"
+              class="net-users"
+              :title="`~${net.users.toLocaleString()} users (netsplit.de average)`"
+            >
+              <i class="fa-solid fa-users"></i> {{ formatUsers(net.users) }}
+            </span>
           </span>
+          <span class="net-meta">{{ net.host }}</span>
           <span v-if="net.tags.length" class="net-tags">
             <span v-for="tag in net.tags" :key="tag" class="net-tag">{{ tag }}</span>
           </span>
@@ -73,6 +80,13 @@ const active = reactive(new Set<string>());
 function toggleTag(tag: string): void {
   if (active.has(tag)) active.delete(tag);
   else active.add(tag);
+}
+
+// Compact popularity label: 32976 -> "33k", 9208 -> "9.2k", 100 -> "100".
+function formatUsers(n: number): string {
+  if (n >= 10000) return `${Math.round(n / 1000)}k`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k`;
+  return String(n);
 }
 
 // Text search narrows by name/host; tag chips are OR'd (a network shows if it
@@ -163,6 +177,11 @@ const filtered = computed<BuiltinNetwork[]>(() => {
 .net-name {
   color: var(--fg);
   font-weight: 600;
+}
+.net-users {
+  color: var(--fg-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .net-meta {
   color: var(--fg-muted);
