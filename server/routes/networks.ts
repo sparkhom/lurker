@@ -77,9 +77,18 @@ router.post('/', (req: Request, res: Response) => {
     sasl_password,
     connect_commands,
   });
+  if (!network) {
+    res.status(500).json({ error: 'failed to create network' });
+    return;
+  }
   const channel = (default_channel || '').trim();
-  if (channel) upsertChannel(network!.id, channel, true);
-  if (network?.autoconnect) ircManager.startNetwork(req.user!.id, network.id);
+  if (channel) upsertChannel(network.id, channel, true);
+  // Creating a network is an explicit "Save & connect" action, so connect now
+  // regardless of `autoconnect`. The `autoconnect` flag governs only whether a
+  // network is connected automatically at cold-start (connectScheduler /
+  // ircManager.initAll) and on un-pause resume — not whether this initial,
+  // user-initiated setup connects.
+  ircManager.startNetwork(req.user!.id, network.id);
   res.status(201).json({ network: networkPayload(network) });
 });
 
