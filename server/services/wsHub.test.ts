@@ -18,6 +18,7 @@ let buildBufferBacklog: typeof import('./wsHub.js').buildBufferBacklog;
 let buildResumeSlice: typeof import('./wsHub.js').buildResumeSlice;
 let buildOfflineBacklogFrames: typeof import('./wsHub.js').buildOfflineBacklogFrames;
 let handleOpenBuffer: typeof import('./wsHub.js').handleOpenBuffer;
+let sweepWsHeartbeat: typeof import('./wsHub.js').sweepWsHeartbeat;
 
 let userId: number;
 let networkId: number;
@@ -28,8 +29,13 @@ beforeAll(async () => {
   ({ insertMessage } = await import('../db/messages.js'));
   ({ closeBuffer, isClosed } = await import('../db/closedBuffers.js'));
   ({ setClearedState } = await import('../db/bufferReads.js'));
-  ({ buildBufferBacklog, buildResumeSlice, buildOfflineBacklogFrames, handleOpenBuffer } =
-    await import('./wsHub.js'));
+  ({
+    buildBufferBacklog,
+    buildResumeSlice,
+    buildOfflineBacklogFrames,
+    handleOpenBuffer,
+    sweepWsHeartbeat,
+  } = await import('./wsHub.js'));
 
   userId = createUser('alice').id;
   const net = createNetwork(userId, {
@@ -255,5 +261,69 @@ describe('handleOpenBuffer', () => {
     handleOpenBuffer(ws, userId, networkId, '');
     handleOpenBuffer(ws, userId, 0, '#x');
     expect(frames).toHaveLength(0);
+  });
+});
+
+// A minimal ws stand-in that counts ping/terminate calls. isAlive mirrors the
+// real per-socket flag the reaper reads and writes.
+function hbWs(isAlive: boolean) {
+  const calls = { ping: 0, terminate: 0 };
+  const ws = {
+    isAlive,
+    ping() {
+      calls.ping += 1;
+    },
+    terminate() {
+      calls.terminate += 1;
+    },
+  };
+  return { ws, calls };
+}
+
+// sweepWsHeartbeat is typed for real LurkerWebSockets; the mocks only carry the
+// three fields it touches, so cast at the boundary.
+function sweep(wss: Array<ReturnType<typeof hbWs>['ws']>): number {
+  return sweepWsHeartbeat(wss as unknown as Parameters<typeof sweepWsHeartbeat>[0]);
+}
+
+describe('sweepWsHeartbeat', () => {
+  it('pings a live socket and re-arms it as pending (isAlive=false)', () => {
+    const { ws, calls } = hbWs(true);
+    const terminated = sweep([ws]);
+    expect(calls.ping).toBe(1);
+    expect(calls.terminate).toBe(0);
+    expect(ws.isAlive).toBe(false);
+    expect(terminated).toBe(0);
+  });
+
+  it('terminates a socket that never ponged (isAlive still false next sweep)', () => {
+    const { ws, calls } = hbWs(true);
+    sweep([ws]); // ping; isAlive -> false
+    const terminated = sweep([ws]); // no pong arrived -> reap
+    expect(calls.terminate).toBe(1);
+    // A reaped socket is not re-pinged in the same sweep.
+    expect(calls.ping).toBe(1);
+    expect(terminated).toBe(1);
+  });
+
+  it('spares a socket that ponged between sweeps', () => {
+    const { ws, calls } = hbWs(true);
+    sweep([ws]); // ping; isAlive -> false
+    ws.isAlive = true; // simulate the pong handler firing
+    sweep([ws]); // still alive -> ping again, no terminate
+    expect(calls.terminate).toBe(0);
+    expect(calls.ping).toBe(2);
+  });
+
+  it('handles a mixed batch and reports the terminated count', () => {
+    const live = hbWs(true); // answered last round
+    const dead1 = hbWs(false); // missed last round's pong
+    const dead2 = hbWs(false);
+    const terminated = sweep([live.ws, dead1.ws, dead2.ws]);
+    expect(terminated).toBe(2);
+    expect(live.calls.terminate).toBe(0);
+    expect(live.calls.ping).toBe(1);
+    expect(dead1.calls.terminate).toBe(1);
+    expect(dead2.calls.terminate).toBe(1);
   });
 });

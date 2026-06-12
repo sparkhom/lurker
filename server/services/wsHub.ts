@@ -73,6 +73,15 @@ interface LurkerWebSocket extends WebSocket {
   userId?: number;
   sinceId?: number;
   presence?: { visible: boolean };
+  // Liveness flag for the heartbeat reaper (see sweepWsHeartbeat). Set true on
+  // connect and on every pong; set false right before each ping. A socket still
+  // false at the next sweep missed a full interval's pong and is terminated as
+  // dead. Without this, a client that dies uncleanly — a laptop sleeping with
+  // the tab foregrounded, a phone dropping off the network — never sends a TCP
+  // close, so the socket lingers OPEN with its last-reported presence (often
+  // visible=true) and userHasVisibleClient() stays true forever, permanently
+  // suppressing auto-away.
+  isAlive?: boolean;
   // Mirrors the account's is_paused at connect time, then flipped live by the
   // user-suspended / user-resumed handlers so the read-only write guard never
   // needs a per-message DB read. (Named accountPaused, not isPaused, to avoid
@@ -451,6 +460,84 @@ export function fanOutToUser(userId: number, payload: WsPayload, opts: FanOutOpt
   fanOut(userId, payload, opts);
 }
 
+// One sweep of the liveness heartbeat over a batch of sockets. A socket that
+// hasn't ponged since the previous sweep (isAlive still false) is terminated —
+// firing its 'close' handler → removeSocket → evaluatePresence, which lets
+// auto-away schedule normally. A socket that did pong is re-armed (isAlive set
+// false) and pinged again. The browser WebSocket API answers ping frames
+// automatically, so no client code participates. Exported (and pure over its
+// argument) so the terminate/ping decision is unit-testable without a live WSS.
+export function sweepWsHeartbeat(sockets: Iterable<LurkerWebSocket>): number {
+  let terminated = 0;
+  for (const ws of sockets) {
+    if (ws.isAlive === false) {
+      ws.terminate();
+      terminated += 1;
+      continue;
+    }
+    ws.isAlive = false;
+    try {
+      ws.ping();
+    } catch (_) {
+      // A ping can throw if the socket is already tearing down; the isAlive
+      // flag we just set means the next sweep terminates it regardless.
+    }
+  }
+  return terminated;
+}
+
+// Read-only introspection of the live socket registry for the admin presence
+// diagnostic. For each user with at least one open socket it reports how many
+// sockets are open and how many currently claim presence.visible=true — the
+// exact quantity auto-away keys on — alongside the persisted away row. Lets an
+// operator watch a dead socket (e.g. a slept laptop) get reaped by the
+// heartbeat and the user flip to away, confirming the fix on a live cell.
+// Mutates nothing.
+export interface PresenceDiagnosticRow {
+  userId: number;
+  openSockets: number;
+  visibleSockets: number;
+  away: {
+    active: boolean;
+    autoSet: boolean;
+    since: string | null;
+    message: string | null;
+  } | null;
+}
+
+export function presenceDiagnostics(): PresenceDiagnosticRow[] {
+  const rows: PresenceDiagnosticRow[] = [];
+  for (const [userId, set] of socketsByUser) {
+    let openSockets = 0;
+    let visibleSockets = 0;
+    for (const ws of set) {
+      if (ws.readyState !== ws.OPEN) continue;
+      openSockets += 1;
+      if (ws.presence?.visible) visibleSockets += 1;
+    }
+    // A user key lingers while their set is non-empty, but every socket in it
+    // can be mid-teardown (CLOSING/CLOSED) before the 'close' handler prunes it.
+    // Skip those transient all-zero rows so the diagnostic only lists users with
+    // a genuinely live socket — matching what this function claims to report.
+    if (openSockets === 0) continue;
+    const awayRow = getUserAwayState(userId);
+    rows.push({
+      userId,
+      openSockets,
+      visibleSockets,
+      away: awayRow
+        ? {
+            active: !!(awayRow.away_datetime && !awayRow.back_datetime),
+            autoSet: !!awayRow.auto_set,
+            since: awayRow.away_datetime ?? null,
+            message: awayRow.away_message ?? null,
+          }
+        : null,
+    });
+  }
+  return rows;
+}
+
 function parseSinceParam(rawUrl: string): number {
   try {
     const url = new URL(rawUrl, 'http://localhost');
@@ -474,6 +561,19 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
   // DB, and so a crash mid-/LIST self-clears on next process boot (the set
   // resets but the meta row can be cleaned by the next start handler).
   const chanlistInFlight = new Set();
+
+  // Liveness heartbeat. Every interval, ping each open socket and reap any that
+  // failed to pong since the previous sweep. This is the only thing that
+  // detects a peer that vanished without a TCP close (slept laptop, dropped
+  // mobile link) — and reaping such a socket is what finally lets auto-away
+  // fire for a user who's actually gone. unref() so it never holds the process
+  // open; matches the purgeExpiredSessions timer in server.ts.
+  const HEARTBEAT_MS = 30_000;
+  const heartbeat = setInterval(() => {
+    for (const set of socketsByUser.values()) sweepWsHeartbeat(set);
+  }, HEARTBEAT_MS);
+  heartbeat.unref?.();
+  wss.on('close', () => clearInterval(heartbeat));
 
   function clearAutoAwayTimer(userId: number): void {
     const t = autoAwayTimers.get(userId);
@@ -833,6 +933,7 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
       lurkerWs.userId = user.id;
       lurkerWs.sinceId = initialSinceId;
       lurkerWs.presence = { visible: false };
+      lurkerWs.isAlive = true;
       lurkerWs.accountPaused = user.is_paused === 1;
       addSocket(user.id, lurkerWs);
       onConnection(lurkerWs, user);
@@ -851,6 +952,12 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
         return;
       }
       handleClientMessage(ws, user, msg);
+    });
+
+    // The browser auto-answers ping frames; this just records that the answer
+    // arrived so the next heartbeat sweep spares the socket.
+    ws.on('pong', () => {
+      ws.isAlive = true;
     });
 
     ws.on('close', () => removeSocket(user.id, ws));

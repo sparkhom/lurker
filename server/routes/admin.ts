@@ -7,6 +7,7 @@ import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { listUsers, findUserById, deleteUser, countAdmins, setUserPaused } from '../db/users.js';
 import { createInvite, listInvites, deleteInvite, getInvite } from '../db/invites.js';
 import ircManager from '../services/ircManager.js';
+import { presenceDiagnostics } from '../services/wsHub.js';
 import { isNodeMode } from '../utils/edition.js';
 
 const router = Router();
@@ -154,6 +155,20 @@ router.post('/users/:id/resume', (req: Request, res: Response) => {
   setUserPaused(id, false);
   ircManager.resumeUser(id);
   res.json({ ok: true });
+});
+
+// Read-only presence diagnostic. Surfaces, per connected user, how many WS
+// sockets are open vs. how many the server believes are visible — the value
+// auto-away keys on — plus the persisted away row. An open socket count that
+// stays above visible/away counts, or a visible socket for a user who's
+// plainly gone, is the zombie-socket signature the heartbeat reaps. Safe in
+// both editions: it mutates nothing (unlike pause/resume, which are node-gated).
+router.get('/presence', (_req: Request, res: Response) => {
+  const presence = presenceDiagnostics().map((row) => {
+    const u = findUserById(row.userId);
+    return { ...row, username: u?.username ?? null };
+  });
+  res.json({ presence });
 });
 
 router.get('/invites', (req: Request, res: Response) => {
