@@ -1732,6 +1732,13 @@ export class IrcConnection {
     this.client.raw(line.replace(/[\u000d\u000a\u0000]/g, ''));
   }
   sendTyping(target: string, state: string): void {
+    // +typing is a client-only tag carried over TAGMSG, which only exists when
+    // the server negotiated the message-tags capability. Networks that don't
+    // speak it (DALnet and other non-IRCv3 servers) answer every TAGMSG with
+    // ERR_UNKNOWNCOMMAND, which our 'irc error' handler surfaces as a toast —
+    // so an ungated send spams an error on each keystroke. Typing indicators
+    // are a best-effort nicety; no cap, no send.
+    if (!this.client.network.cap.enabled.includes('message-tags')) return;
     // Suppress typing TAGMSGs to peers we know are offline — otherwise each
     // keystroke generates an ERR_NOSUCHNICK reply that lands as a persisted
     // error in the DM buffer (and pings push subscribers). The user finds
