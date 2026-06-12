@@ -80,6 +80,23 @@ describe('GET /api/admin/users', () => {
   });
 });
 
+describe('GET /api/admin/presence', () => {
+  it('403 for a non-admin', async () => {
+    expect((await userAgent.get('/api/admin/presence')).status).toBe(403);
+  });
+
+  it('returns an empty presence list when no sockets are connected', async () => {
+    // The route reads wsHub's live socket registry; this harness mounts the
+    // router without attaching a WS server, so the registry is empty. That's
+    // exactly the "everyone gone" baseline — the response is a well-formed
+    // empty list, not an error.
+    const res = await adminAgent.get('/api/admin/presence');
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.presence)).toBe(true);
+    expect(res.body.presence).toHaveLength(0);
+  });
+});
+
 describe('DELETE /api/admin/users/:id', () => {
   it('400 on a non-integer id', async () => {
     const res = await adminAgent.delete('/api/admin/users/abc');
