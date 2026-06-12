@@ -3,6 +3,7 @@
 
 import { defineStore } from 'pinia';
 import { useNetworksStore } from './networks.js';
+import { useToastsStore } from './toasts.js';
 import { socketSend } from '../composables/useSocket.js';
 
 const MAX_PER_BUFFER = 500;
@@ -10,6 +11,17 @@ const MAX_SPEAKERS = 128;
 const TYPING_DURATIONS: Record<string, number> = { active: 6000, paused: 30000 };
 
 const typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+// Modal-initiated joins are no longer opened optimistically (#260): requestJoin
+// records the intent here and the buffer is only activate()d once the server
+// confirms with channel-joined. A timeout backstops the silent case where the
+// server drops the JOIN with no numeric at all (the original symptom — a blank
+// buffer with no error anywhere).
+const pendingJoins = new Map<string, ReturnType<typeof setTimeout>>();
+const PENDING_JOIN_TIMEOUT = 10000;
+function joinKey(networkId: number | string, channel: string) {
+  return `${networkId}::${channel.toLowerCase()}`;
+}
 
 // Monotonic token tagged onto each loadAround / reattachToLive request. The
 // response handler drops slices whose token has been superseded (e.g. user
@@ -596,6 +608,44 @@ export const useBuffersStore = defineStore('buffers', {
     resetTimers() {
       for (const id of typingTimers.values()) clearTimeout(id);
       typingTimers.clear();
+      for (const id of pendingJoins.values()) clearTimeout(id);
+      pendingJoins.clear();
+    },
+    // Register intent to join a channel without opening its buffer yet (#260).
+    // confirmPendingJoin() activates it on the channel-joined confirmation;
+    // cancelPendingJoin() drops it on a join-error. The timeout is the backstop
+    // for a server that never replies at all.
+    requestJoin(networkId: number | string, channel: string) {
+      const k = joinKey(networkId, channel);
+      const existing = pendingJoins.get(k);
+      if (existing) clearTimeout(existing);
+      const timer = setTimeout(() => {
+        pendingJoins.delete(k);
+        useToastsStore().push({
+          kind: 'warn',
+          title: `No response joining ${channel}`,
+          body: 'The server didn’t confirm the join.',
+          networkId: typeof networkId === 'string' ? Number(networkId) : networkId,
+          target: channel,
+          ttlMs: 6000,
+        });
+      }, PENDING_JOIN_TIMEOUT);
+      pendingJoins.set(k, timer);
+    },
+    confirmPendingJoin(networkId: number | string, channel: string) {
+      const k = joinKey(networkId, channel);
+      const timer = pendingJoins.get(k);
+      if (!timer) return; // not a modal-initiated join — leave focus untouched
+      clearTimeout(timer);
+      pendingJoins.delete(k);
+      this.activate(networkId, channel);
+    },
+    cancelPendingJoin(networkId: number | string, channel: string) {
+      const k = joinKey(networkId, channel);
+      const timer = pendingJoins.get(k);
+      if (!timer) return;
+      clearTimeout(timer);
+      pendingJoins.delete(k);
     },
     setJoined(networkId: number | string, target: string, joined: boolean) {
       const buf = this.buffers[key(networkId, target)];

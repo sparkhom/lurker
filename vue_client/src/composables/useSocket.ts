@@ -165,6 +165,24 @@ function applyEvent(event: any): void {
     case 'channel-joined':
       buffers.ensure(event.networkId, event.target);
       buffers.setJoined(event.networkId, event.target, true);
+      // A join started from the channel-list modal waits for this confirmation
+      // before focusing the buffer (#260) — activate it now. No-op for joins
+      // that weren't pending (e.g. typed /join, reconnect rejoins).
+      buffers.confirmPendingJoin(event.networkId, event.target);
+      break;
+    case 'join-error':
+      // The server refused the join (invite-only, banned, needs registered
+      // nick, …). The buffer was never opened, so just cancel the pending
+      // activation and surface the reason as a toast on the channel (#260).
+      buffers.cancelPendingJoin(event.networkId, event.target);
+      useToastsStore().push({
+        kind: 'warn',
+        title: `Couldn’t join ${event.target}`,
+        body: event.text || 'The server refused the join.',
+        networkId: event.networkId,
+        target: event.target,
+        ttlMs: 6000,
+      });
       break;
     case 'channel-parted':
       // Keep the buffer around so the user can still scroll history; just

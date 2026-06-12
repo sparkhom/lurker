@@ -3,7 +3,13 @@
 
 import { describe, it, expect } from 'vitest';
 import { ircLineParser } from 'irc-framework';
-import { computeFallbackNick, formatServerNumeric } from './ircConnection.js';
+import {
+  computeFallbackNick,
+  formatServerNumeric,
+  formatUnknownNumeric,
+  joinRejectionMessage,
+  joinRejectionMessageByTag,
+} from './ircConnection.js';
 
 describe('computeFallbackNick', () => {
   it('appends 1..9 in order', () => {
@@ -129,5 +135,74 @@ describe('formatServerNumeric', () => {
     expect(fmt(':srv 372 nick :- MOTD line')).toBeNull(); // motd already handled separately
     expect(formatServerNumeric(null)).toBeNull();
     expect(formatServerNumeric({ command: '', params: [] })).toBeNull();
+  });
+});
+
+// The catch-all that surfaces server numerics irc-framework doesn't model (#262):
+// drop the leading recipient-nick param, join the rest.
+const fmtUnknown = (line: string) => formatUnknownNumeric(ircLineParser(line));
+
+describe('formatUnknownNumeric', () => {
+  it('renders RPL_TIME (391) — the canonical dropped reply', () => {
+    expect(
+      fmtUnknown(':irc.dal.net 391 nick irc.dal.net :Sunday June 12 2026 -- 16:30:00 +0000'),
+    ).toBe('irc.dal.net Sunday June 12 2026 -- 16:30:00 +0000');
+  });
+
+  it('joins the spread params of RPL_VERSION (351)', () => {
+    expect(fmtUnknown(':srv 351 nick bahamut-2.1.4 irc.dal.net :booted Tue')).toBe(
+      'bahamut-2.1.4 irc.dal.net booted Tue',
+    );
+  });
+
+  it('renders an allowlisted numeric too — the listener dedups via formatServerNumeric', () => {
+    // formatUnknownNumeric is intentionally numeric-agnostic; the double-render
+    // guard lives in the listener (skip when formatServerNumeric already claims
+    // it). This documents why that guard is necessary.
+    expect(fmtUnknown(':srv 001 nick :Welcome to the network nick')).toBe(
+      'Welcome to the network nick',
+    );
+  });
+
+  it('stays quiet on non-numeric command words', () => {
+    expect(fmtUnknown(':srv FOOBAR nick :something')).toBeNull();
+  });
+
+  it('returns null when only the recipient-nick param is present', () => {
+    expect(fmtUnknown(':srv 391 nick')).toBeNull();
+  });
+
+  it('returns null for bad input', () => {
+    expect(formatUnknownNumeric(null)).toBeNull();
+    expect(formatUnknownNumeric({ command: '', params: [] })).toBeNull();
+  });
+});
+
+describe('join-rejection messages (#260)', () => {
+  it('maps the unmapped-numeric rejections (476/477) by numeric', () => {
+    expect(joinRejectionMessage('477')).toBe('This channel requires a registered nickname.');
+    expect(joinRejectionMessage('476')).toBe('Bad channel mask.');
+    expect(joinRejectionMessage('473')).toBe('This channel is invite-only.');
+  });
+
+  it('maps the irc-framework-modeled rejections by error tag', () => {
+    expect(joinRejectionMessageByTag('invite_only_channel')).toBe('This channel is invite-only.');
+    expect(joinRejectionMessageByTag('banned_from_channel')).toBe(
+      'You are banned from this channel.',
+    );
+    expect(joinRejectionMessageByTag('channel_is_full')).toBe('This channel is full.');
+    expect(joinRejectionMessageByTag('bad_channel_key')).toBe(
+      'This channel requires a key (password).',
+    );
+    expect(joinRejectionMessageByTag('too_many_channels')).toBe(
+      'You have joined too many channels.',
+    );
+  });
+
+  it('returns null for non-join errors so they fall through to normal handling', () => {
+    expect(joinRejectionMessage('421')).toBeNull(); // ERR_UNKNOWNCOMMAND
+    expect(joinRejectionMessage('001')).toBeNull();
+    expect(joinRejectionMessageByTag('no_such_nick')).toBeNull();
+    expect(joinRejectionMessageByTag('password_mismatch')).toBeNull();
   });
 });
