@@ -102,40 +102,48 @@ export function useMemberActions(): MemberActionsAPI {
     member: MemberLike | string | null | undefined,
     ctx: MemberContext | null | undefined,
   ): ContextMenuItem[] {
-    if (!member || !ctx || ctx.isSelf(member)) return [];
+    if (!member || !ctx) return [];
     const nick = nickOf(member);
+    const isSelf = ctx.isSelf(member);
     const hasNote = nickNotes.hasNote(ctx.networkId, nick);
+    // Self gets a trimmed menu: you can view your own profile and note yourself,
+    // but Send DM, Ignore, and the moderation actions are all meaningless or
+    // nonsensical aimed at yourself, so they're left off below.
     const items: ContextMenuItem[] = [
       {
         label: 'View Profile…',
         icon: 'fa-solid fa-id-card',
         onClick: () => whois.openViewer(ctx.networkId, nick),
       },
-      {
+    ];
+    if (!isSelf) {
+      items.push({
         label: 'Send DM',
         icon: 'fa-solid fa-envelope',
         onClick: () => buffers.activate(ctx.networkId, nick),
-      },
-      {
-        label: hasNote ? 'Edit Note…' : 'Add Note…',
-        icon: 'fa-solid fa-note-sticky',
-        onClick: () => nickNotes.openEditor(ctx.networkId, nick),
-      },
-      {
+      });
+    }
+    items.push({
+      label: hasNote ? 'Edit Note…' : 'Add Note…',
+      icon: 'fa-solid fa-note-sticky',
+      onClick: () => nickNotes.openEditor(ctx.networkId, nick),
+    });
+    if (!isSelf) {
+      items.push({
         label: 'Ignore…',
         icon: 'fa-solid fa-ban',
         onClick: () => ctx.onIgnore(member),
-      },
-    ];
+      });
+    }
 
     // Channel-operator actions, gated on the current user's own modes in this
     // channel. Each sends a raw IRC line and lets the server's MODE/KICK echo
     // update state — the same path the /kick and /mode slash commands use, so
-    // no optimistic mutation here.
+    // no optimistic mutation here. Never offered against yourself.
     const channel =
       typeof ctx.channel === 'string' && ctx.channel.startsWith('#') ? ctx.channel : null;
     const selfModes = Array.isArray(ctx.selfModes) ? ctx.selfModes : [];
-    if (channel && hasAny(selfModes, MODERATE_MODES)) {
+    if (!isSelf && channel && hasAny(selfModes, MODERATE_MODES)) {
       const networkId = ctx.networkId;
       const targetModes = modesOf(member);
       const send = (l: string) => socketSend({ type: 'raw', networkId, line: l });

@@ -103,6 +103,7 @@ type WsPayload = Record<string, unknown>;
 const PAUSED_BLOCKED_TYPES = new Set([
   'send',
   'action',
+  'notice',
   'join',
   'open-buffer',
   'close-buffer',
@@ -1088,9 +1089,12 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
       const networkId = Number(msg.networkId);
       if (!Number.isInteger(networkId) || !ownsNetwork(userId, networkId)) {
         send(ws, { kind: 'error', text: 'unknown network' });
-        // Surface the failure on the originating send/action so the client
-        // can stop pretending the message succeeded.
-        if (msg.clientId && (msg.type === 'send' || msg.type === 'action')) {
+        // Surface the failure on the originating send/action/notice so the
+        // client can stop pretending the message succeeded.
+        if (
+          msg.clientId &&
+          (msg.type === 'send' || msg.type === 'action' || msg.type === 'notice')
+        ) {
           send(ws, {
             kind: 'send-result',
             clientId: msg.clientId,
@@ -1108,7 +1112,7 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
     // as pending instead of hanging forever.
     if (ws.accountPaused && PAUSED_BLOCKED_TYPES.has(msg.type as string)) {
       send(ws, { kind: 'error', text: 'account paused' });
-      if (msg.clientId && (msg.type === 'send' || msg.type === 'action')) {
+      if (msg.clientId && (msg.type === 'send' || msg.type === 'action' || msg.type === 'notice')) {
         send(ws, {
           kind: 'send-result',
           clientId: msg.clientId,
@@ -1136,6 +1140,36 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
         try {
           result = callVerb(
             verbName,
+            { userId, scope: 'read-write', transport: 'ws' },
+            {
+              networkId: msg.networkId,
+              target: msg.target,
+              text: msg.text,
+            },
+          ) as { ok: boolean; error?: string };
+        } catch (err) {
+          result = { ok: false, error: (err as NodeJS.ErrnoException).code || 'error' };
+        }
+        if (msg.clientId) {
+          send(ws, {
+            kind: 'send-result',
+            clientId: msg.clientId,
+            ok: !!result.ok,
+            error: result.ok ? undefined : result.error,
+          });
+        }
+        break;
+      }
+      case 'notice': {
+        // The verb sends the NOTICE and publishes a self-copy that fans out to
+        // every tab, so there's no optimistic bubble — but we still resolve the
+        // originating tab's ACK on clientId (like send/action) so a not-connected
+        // or validation failure surfaces as a toast instead of the input just
+        // clearing with nothing happening.
+        let result: { ok: boolean; error?: string };
+        try {
+          result = callVerb(
+            'send_notice',
             { userId, scope: 'read-write', transport: 'ws' },
             {
               networkId: msg.networkId,

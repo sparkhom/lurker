@@ -16,7 +16,6 @@
         <span class="prefix">{{ prefixOf(m) }}</span>
         <span class="nick" :style="nickStyle(m)" :title="nickOf(m)">{{ nickOf(m) }}</span>
         <button
-          v-if="!isSelf(m)"
           type="button"
           class="row-actions"
           title="Actions"
@@ -117,15 +116,15 @@ function menuContext() {
   };
 }
 function onRowClick(e: MouseEvent, m: BufferMember): void {
-  if (!buffer.value || isSelf(m)) return;
+  if (!buffer.value) return;
   memberActions.openMenuFor(m, menuContext(), e.clientX, e.clientY);
 }
 function onRowContextMenu(e: MouseEvent, m: BufferMember): void {
-  if (!buffer.value || isSelf(m)) return;
+  if (!buffer.value) return;
   memberActions.openMenuFor(m, menuContext(), e.clientX, e.clientY);
 }
 function onActionsClick(e: MouseEvent, m: BufferMember): void {
-  if (!buffer.value || isSelf(m)) return;
+  if (!buffer.value) return;
   memberActions.openMenuFromButton(m, menuContext(), e.currentTarget as Element);
 }
 function prefixOf(m: BufferMember): string {
