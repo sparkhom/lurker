@@ -169,7 +169,9 @@ function nickClass(t: ContactTarget): Record<string, boolean> {
   padding: var(--space-8) 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  /* Match the inter-target gap so the name row and the per-network rows are
+     evenly spaced — the search buttons line up at a uniform vertical rhythm. */
+  gap: var(--space-2);
 }
 /* First card sits up near the topic bar — only the container padding above it. */
 .card:first-child {
