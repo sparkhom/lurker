@@ -519,7 +519,9 @@ function isFriendDmActive(c: Contact): boolean {
   return networks.activeKey === `${t.networkId}::${existing ? existing.target : t.nick}`;
 }
 function friendRowClasses(c: Contact): Record<string, boolean> {
-  const state = friends.presenceState(c.id);
+  // Reflect the PRIMARY DM's presence — that's the buffer this row opens, so an
+  // alt being online elsewhere must not make the row look reachable.
+  const state = friends.primaryPresence(c.id);
   return {
     active: isFriendDmActive(c),
     'peer-offline': state === 'offline',

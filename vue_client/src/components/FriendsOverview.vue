@@ -21,7 +21,7 @@
     <ul v-else class="cards">
       <li v-for="c in friends.contacts" :key="c.id" class="card">
         <div class="card-head">
-          <span class="dot" :class="friends.presenceState(c.id)"></span>
+          <span class="dot" :class="friends.primaryPresence(c.id)"></span>
           <span class="name">{{ c.displayName }}</span>
           <span class="summary">{{ summary(c) }}</span>
           <span class="spacer"></span>
@@ -79,18 +79,14 @@ function primaryNick(c: Contact): string {
   return primaryTargetOf(c)?.nick ?? c.displayName;
 }
 
-// One-line summary under the name. For online friends, name the network(s)
-// they're reachable on; otherwise just the aggregate state.
+// One-line summary under the name, describing the PRIMARY target (the DM Open DM
+// opens) and naming its network. The per-network breakdown below shows the rest.
 function summary(c: Contact): string {
-  const state = friends.presenceState(c.id);
-  if (state === 'online') {
-    const nets = c.targets
-      .filter((t) => friends.presenceForTarget(t.networkId, t.nick) === 'online')
-      .map((t) => networkName(t.networkId));
-    return nets.length ? `Online on ${nets.join(', ')}` : 'Online';
-  }
+  const state = friends.primaryPresence(c.id);
+  const net = primaryTargetOf(c) ? networkName(primaryTargetOf(c)!.networkId) : '';
+  if (state === 'online') return net ? `Online on ${net}` : 'Online';
   if (state === 'away') return 'Away';
-  if (state === 'offline') return 'Offline';
+  if (state === 'offline') return net ? `Offline on ${net}` : 'Offline';
   return 'Presence unknown';
 }
 </script>

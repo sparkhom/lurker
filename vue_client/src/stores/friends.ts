@@ -59,46 +59,38 @@ function targetPresence(
   return netState?.peerPresence?.[t.nick.toLowerCase()] ?? null;
 }
 
+function deriveState(row: { state: string | null } | null): FriendPresence {
+  if (isPeerOnline(row)) return 'online';
+  if (isPeerAway(row)) return 'away';
+  if (isPeerOffline(row)) return 'offline';
+  return 'unknown';
+}
+
 export const useFriendsStore = defineStore('friends', {
   state: () => ({
     contacts: [] as Contact[],
     editor: { open: false, contact: null, prefill: null } as FriendEditorState,
   }),
   getters: {
-    // Best presence across a friend's targets: online wins, then away, then a
-    // definitive offline; all-unknown stays 'unknown' (renders un-muted, like a
-    // DM row with no presence). Drives the FRIENDS row tint.
-    presenceState:
+    // Presence of the PRIMARY target — the DM that opens when the friend is
+    // clicked. This is what the sidebar row + overview header show, so the dot
+    // never claims "online" when the DM you'd open is actually offline (a friend
+    // online under a different nick/network shows in the per-network breakdown,
+    // not here). Disconnected-aware: a down network reads offline.
+    primaryPresence:
       (state) =>
       (contactId: number): FriendPresence => {
-        const networks = useNetworksStore();
         const c = state.contacts.find((x) => x.id === contactId);
-        if (!c) return 'unknown';
-        const rows = c.targets.map((t) => targetPresence(networks, t));
-        if (rows.some(isPeerOnline)) return 'online';
-        if (rows.some(isPeerAway)) return 'away';
-        if (rows.some(isPeerOffline)) return 'offline';
-        return 'unknown';
-      },
-    // Definitively online on at least one target — used for the header count.
-    isOnline:
-      (state) =>
-      (contactId: number): boolean => {
-        const networks = useNetworksStore();
-        const c = state.contacts.find((x) => x.id === contactId);
-        return !!c && c.targets.map((t) => targetPresence(networks, t)).some(isPeerOnline);
+        const t = c ? primaryTargetOf(c) : null;
+        if (!t) return 'unknown';
+        return deriveState(targetPresence(useNetworksStore(), t));
       },
     // Presence for a single (network, nick) target — the per-network breakdown
-    // in the Friends overview. Same disconnected-aware derivation as presenceState.
+    // in the Friends overview.
     presenceForTarget:
       () =>
-      (networkId: number, nick: string): FriendPresence => {
-        const row = targetPresence(useNetworksStore(), { networkId, nick, isPrimary: false });
-        if (isPeerOnline(row)) return 'online';
-        if (isPeerAway(row)) return 'away';
-        if (isPeerOffline(row)) return 'offline';
-        return 'unknown';
-      },
+      (networkId: number, nick: string): FriendPresence =>
+        deriveState(targetPresence(useNetworksStore(), { networkId, nick, isPrimary: false })),
     // `${networkId}::${nickLower}` for every contact's PRIMARY target — the DMs
     // surfaced under FRIENDS, so BufferList hides them from their real network.
     primaryDmKeys: (state): Set<string> => {
