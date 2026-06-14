@@ -1320,6 +1320,13 @@ export class IrcConnection {
         const m = ch.members.get((u.nick as string).toLowerCase());
         if (!m) continue;
         const next = !!u.away;
+        // Bridge the WHO away flag to the DM/friend presence rail for tracked
+        // peers. away-notify keeps presence live, but it doesn't fire on join —
+        // so without this a friend who's away when we (re)connect and share a
+        // channel would read as online. The transition gates in markPeerEvent
+        // make this idempotent: 'away' sets away; 'back' only clears a stale
+        // away and otherwise no-ops, so it never disturbs online/offline.
+        this.markPeerEvent(u.nick as string, next ? 'away' : 'back');
         if (m.away !== next) {
           m.away = next;
           changed = true;
