@@ -60,6 +60,18 @@ export const useNetworksStore = defineStore('networks', {
   }),
   getters: {
     networkById: (state) => (id: number) => state.networks.find((n) => n.id === id) || null,
+    // Presence row for a (network, nick), disconnected-aware: a down network's
+    // cached rows are stale, so report a synthetic 'offline'. Connected with no
+    // row stays null (unknown = "potentially online", the no-MONITOR case).
+    // Single source of truth for the sidebar, status bar, profile, and Friends.
+    peerFor:
+      (state) =>
+      (networkId: number | string, nick: string): PeerPresenceEntry | null => {
+        const netState = state.states[networkId];
+        if (netState && netState.state !== 'connected')
+          return { nick, state: 'offline', stateAt: null, awayMessage: null };
+        return netState?.peerPresence?.[nick.toLowerCase()] ?? null;
+      },
     activeBuffer(state): ActiveBuffer | null {
       if (!state.activeKey) return null;
       // Virtual buffers (:system:, :friends:) use a flat sentinel key (no `::`).

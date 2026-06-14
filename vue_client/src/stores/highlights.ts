@@ -49,8 +49,9 @@ export const useHighlightsStore = defineStore('highlights', {
       params.set('limit', String(PAGE_SIZE));
       const parsed = parseSearchQuery(this.query);
       if (parsed.query) params.set('q', parsed.query);
-      // The highlights feed filters by a single nick; use the first from:.
-      if (parsed.from.length) params.set('nick', parsed.from[0]);
+      // `from:` may repeat (a friend's alts) — append each so the feed OR-matches
+      // every nick, matching the search modal rather than dropping all but one.
+      for (const nick of parsed.from) params.append('nick', nick);
       if (parsed.in) params.set('target', parsed.in);
       if (parsed.on) {
         const networks = useNetworksStore();

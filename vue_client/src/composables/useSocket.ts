@@ -205,16 +205,24 @@ function applyEvent(event: any): void {
       );
       break;
     case 'peer-presence': {
+      // Capture the prior known state BEFORE applying the update — the
+      // came-online toast must fire only on a transition we actually witnessed.
+      const prevPeerState =
+        networks.states[event.networkId]?.peerPresence?.[String(event.nick).toLowerCase()]?.state ??
+        null;
       networks.applyPeerPresence(event.networkId, event.nick, {
         state: event.state,
         stateAt: event.stateAt,
         awayMessage: event.awayMessage,
       });
       const friends = useFriendsStore();
-      // Came-online toast: only on a real online transition (the server emits
-      // 'online' only on offline→online), only for a watched contact whose
-      // notify_online flag is set, gated by the notifications setting.
-      if (event.state === 'online') {
+      // Came-online toast: only on a real offline→online transition. The server
+      // also reports current state on the MONITOR seed and whenever a nick is
+      // freshly added to the watch (RPL_MONONLINE with no prior presence row),
+      // so keying purely off `state === 'online'` would fire when you add an
+      // already-online friend or on a first connect. Gate on the prior client
+      // state being 'offline' so only genuine transitions notify.
+      if (event.state === 'online' && prevPeerState === 'offline') {
         const contact = friends.notifyContactFor(event.networkId, event.nick);
         if (contact && useSettingsStore().effective('notifications.friend_online.enabled')) {
           useToastsStore().push({

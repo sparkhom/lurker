@@ -41,9 +41,11 @@ interface BufferOrderArgs {
   friends?: FriendsOrder;
 }
 
-// Sentinel network id for the FRIENDS group — its members carry their real
-// networkId for activation but nav-group together, apart from that network.
-export const FRIENDS_GROUP_ID = 0;
+// Sentinel nav-group id for the FRIENDS group — its members carry their real
+// networkId for activation but nav-group together, apart from that network. A
+// non-numeric string so it can never alias a real network id (which are
+// positive integers), even though groupId shares the `string | number` space.
+export const FRIENDS_GROUP_ID = 'group:friends';
 
 interface BufferOrderEntry {
   networkId: string | number;
@@ -90,7 +92,7 @@ export function flattenBufferOrder({
   // All carry FRIENDS_GROUP_ID so per-network nav treats them as one group.
   if (friends?.feedKey) {
     out.push({
-      networkId: 0,
+      networkId: FRIENDS_GROUP_ID,
       target: friends.feedKey,
       key: friends.feedKey,
       groupId: FRIENDS_GROUP_ID,

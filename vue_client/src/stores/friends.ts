@@ -46,19 +46,9 @@ function byDisplayName(a: Contact, b: Contact): number {
 
 export type FriendPresence = 'online' | 'away' | 'offline' | 'unknown';
 
-// The presence row (online/away/offline/back) for one target, or null when
-// unknown. A disconnected network has no live MONITOR feed, so any cached state
-// is stale — treat as offline. Connected-but-no-row stays null (unknown =
-// "potentially online"), which is the normal case on networks without MONITOR.
-function targetPresence(
-  networks: ReturnType<typeof useNetworksStore>,
-  t: ContactTarget,
-): { state: string | null } | null {
-  const netState = (networks.states as any)[t.networkId];
-  if (netState && netState.state !== 'connected') return { state: 'offline' };
-  return netState?.peerPresence?.[t.nick.toLowerCase()] ?? null;
-}
-
+// Presence rows come from networks.peerFor (the single disconnected-aware
+// source): a down network reads 'offline', connected-but-no-row stays null
+// (unknown = "potentially online", the no-MONITOR case).
 function deriveState(row: { state: string | null } | null): FriendPresence {
   if (isPeerOnline(row)) return 'online';
   if (isPeerAway(row)) return 'away';
@@ -72,25 +62,45 @@ export const useFriendsStore = defineStore('friends', {
     editor: { open: false, contact: null, prefill: null } as FriendEditorState,
   }),
   getters: {
+    // contactId → contact, rebuilt only when the contact list changes. Lets the
+    // per-row presence getter be O(1) instead of re-scanning on every render.
+    contactById(state): Map<number, Contact> {
+      const m = new Map<number, Contact>();
+      for (const c of state.contacts) m.set(c.id, c);
+      return m;
+    },
+    // `${networkId}::${nickLower}` → contact, for the menu Add/Edit label and the
+    // came-online toast gate without scanning every contact on each presence
+    // event. (network, nick) maps to at most one contact by the server's
+    // uniqueness rule, so a flat map is exact.
+    contactByTarget(state): Map<string, Contact> {
+      const m = new Map<string, Contact>();
+      for (const c of state.contacts)
+        for (const t of c.targets) m.set(`${t.networkId}::${t.nick.toLowerCase()}`, c);
+      return m;
+    },
     // Presence of the PRIMARY target — the DM that opens when the friend is
     // clicked. This is what the sidebar row + overview header show, so the dot
     // never claims "online" when the DM you'd open is actually offline (a friend
     // online under a different nick/network shows in the per-network breakdown,
-    // not here). Disconnected-aware: a down network reads offline.
-    primaryPresence:
-      (state) =>
-      (contactId: number): FriendPresence => {
-        const c = state.contacts.find((x) => x.id === contactId);
+    // not here). Disconnected-aware via networks.peerFor: a down network reads
+    // offline.
+    primaryPresence(): (contactId: number) => FriendPresence {
+      const byId = this.contactById;
+      const networks = useNetworksStore();
+      return (contactId) => {
+        const c = byId.get(contactId);
         const t = c ? primaryTargetOf(c) : null;
         if (!t) return 'unknown';
-        return deriveState(targetPresence(useNetworksStore(), t));
-      },
+        return deriveState(networks.peerFor(t.networkId, t.nick));
+      };
+    },
     // Presence for a single (network, nick) target — the per-network breakdown
     // in the Friends overview.
-    presenceForTarget:
-      () =>
-      (networkId: number, nick: string): FriendPresence =>
-        deriveState(targetPresence(useNetworksStore(), { networkId, nick, isPrimary: false })),
+    presenceForTarget(): (networkId: number, nick: string) => FriendPresence {
+      const networks = useNetworksStore();
+      return (networkId, nick) => deriveState(networks.peerFor(networkId, nick));
+    },
     // `${networkId}::${nickLower}` for every contact's PRIMARY target — the DMs
     // surfaced under FRIENDS, so BufferList hides them from their real network.
     primaryDmKeys: (state): Set<string> => {
@@ -111,45 +121,27 @@ export const useFriendsStore = defineStore('friends', {
       for (const c of state.contacts) {
         const t = primaryTargetOf(c);
         if (!t) continue;
-        const lower = t.nick.toLowerCase();
-        const existing = buffers
-          .forNetwork(t.networkId)
-          .find(
-            (b) =>
-              b.target.toLowerCase() === lower &&
-              !b.target.startsWith('#') &&
-              !b.target.startsWith(':'),
-          );
+        const existing = buffers.findDm(t.networkId, t.nick);
         out.push({ networkId: t.networkId, target: existing ? existing.target : t.nick });
       }
       return out;
     },
     // The contact (if any) watching (networkId, nick) — drives the nick menu's
     // Add/Edit Friend label.
-    contactForTarget:
-      (state) =>
-      (networkId: number, nick: string): Contact | null => {
-        const lower = (nick || '').toLowerCase();
-        return (
-          state.contacts.find((c) =>
-            c.targets.some((t) => t.networkId === networkId && t.nick.toLowerCase() === lower),
-          ) || null
-        );
-      },
+    contactForTarget(): (networkId: number, nick: string) => Contact | null {
+      const byTarget = this.contactByTarget;
+      return (networkId, nick) =>
+        byTarget.get(`${networkId}::${(nick || '').toLowerCase()}`) ?? null;
+    },
     // Find a contact watching (networkId, nick) whose notify flag is on — used
     // by the came-online toast gate.
-    notifyContactFor:
-      (state) =>
-      (networkId: number, nick: string): Contact | null => {
-        const lower = (nick || '').toLowerCase();
-        return (
-          state.contacts.find(
-            (c) =>
-              c.notifyOnline &&
-              c.targets.some((t) => t.networkId === networkId && t.nick.toLowerCase() === lower),
-          ) || null
-        );
-      },
+    notifyContactFor(): (networkId: number, nick: string) => Contact | null {
+      const byTarget = this.contactByTarget;
+      return (networkId, nick) => {
+        const c = byTarget.get(`${networkId}::${(nick || '').toLowerCase()}`);
+        return c && c.notifyOnline ? c : null;
+      };
+    },
   },
   actions: {
     // ---- snapshot + live sync ----
@@ -217,15 +209,7 @@ export const useFriendsStore = defineStore('friends', {
     // so we don't fork a second buffer that differs only by nick case.
     openDmTarget(networkId: number, nick: string) {
       const buffers = useBuffersStore();
-      const lower = nick.toLowerCase();
-      const existing = buffers
-        .forNetwork(networkId)
-        .find(
-          (b) =>
-            b.target.toLowerCase() === lower &&
-            !b.target.startsWith('#') &&
-            !b.target.startsWith(':'),
-        );
+      const existing = buffers.findDm(networkId, nick);
       buffers.activate(networkId, existing ? existing.target : nick);
     },
     // Open the friend's primary DM. A target-less contact falls back to its editor.

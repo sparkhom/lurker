@@ -8,13 +8,15 @@
 //   :system:  — the per-user server-lifecycle log. renderMode 'console': its
 //               own store (systemLog) + the SystemConsole component, no nicklist
 //               or input.
-//   :friends: — the cross-network Friends buffer. renderMode 'buffer': a real
-//               Buffer object in the buffers store, so it renders through the
-//               normal MessageList + MemberList. Has a (synthetic) nicklist; no
-//               input (you don't type into it).
+//   :friends: — the cross-network Friends buffer. renderMode 'overview': a
+//               bespoke FriendsOverview component (a management pane, not a
+//               message feed), no nicklist or input.
 //
-// Keeping these in one registry means a future :highlights: buffer is a single
-// entry, not another round of scattered `=== ':system:'` checks.
+// renderMode/hasInput/hasNicklist are load-bearing: useActiveBuffer surfaces
+// them and the views dispatch the body component + input + member list off
+// them, so a future :highlights: buffer is one registry entry plus (if it needs
+// a new body) one renderMode branch — not another round of scattered
+// `=== ':system:'` checks.
 
 export const SYSTEM_KEY = ':system:';
 export const FRIENDS_KEY = ':friends:';

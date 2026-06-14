@@ -101,11 +101,11 @@
           <i class="fa-solid fa-ellipsis-vertical"></i>
         </button>
       </header>
-      <SystemConsole v-if="isSystemConsole" />
-      <FriendsOverview v-else-if="isFriendsBuffer" @view-activity="onViewActivity" />
+      <SystemConsole v-if="renderMode === 'console'" />
+      <FriendsOverview v-else-if="renderMode === 'overview'" @view-activity="onViewActivity" />
       <MessageList v-else :pending-scroll-id="pendingScrollId" />
       <StatusBar compact />
-      <div v-if="!isVirtual" class="composer-host" :class="{ 'keyboard-open': keyboardOpen }">
+      <div v-if="hasInput" class="composer-host" :class="{ 'keyboard-open': keyboardOpen }">
         <MessageInput ref="messageInputRef" />
       </div>
     </section>
@@ -226,6 +226,8 @@ const {
   isSystemConsole,
   isVirtual,
   isFriendsBuffer,
+  renderMode,
+  hasInput,
 } = useActiveBuffer();
 const bufferActions = useBufferActions();
 const menu = useContextMenu();
@@ -287,9 +289,7 @@ function openSearch(scoped: boolean) {
 // "View activity" from the Friends overview: open Search with the scoped query
 // (from:<nick> on:<network>) and run it immediately.
 function onViewActivity(query: string) {
-  const search = useSearchStore();
-  search.setQuery(query);
-  search.runSearch();
+  useSearchStore().runQuery(query);
   searchScope.value = null;
   showSearch.value = true;
 }

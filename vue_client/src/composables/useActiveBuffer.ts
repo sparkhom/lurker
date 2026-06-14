@@ -6,7 +6,7 @@ import { computed } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useNetworksStore } from '../stores/networks.js';
 import { useBuffersStore } from '../stores/buffers.js';
-import { FRIENDS_KEY, virtualConfig } from '../lib/virtualBuffers.js';
+import { FRIENDS_KEY, virtualConfig, type VirtualRenderMode } from '../lib/virtualBuffers.js';
 
 export interface ActiveBufferState {
   activeKey: Ref<string | null>;
@@ -19,6 +19,12 @@ export interface ActiveBufferState {
   isSystemConsole: ComputedRef<boolean>;
   isVirtual: ComputedRef<boolean>;
   isFriendsBuffer: ComputedRef<boolean>;
+  // Registry-driven capabilities so views dispatch off the virtual-buffer
+  // config instead of hard-coding per-key checks. For a real IRC buffer these
+  // default to a normal message buffer with input + nicklist.
+  renderMode: ComputedRef<VirtualRenderMode>;
+  hasInput: ComputedRef<boolean>;
+  hasNicklist: ComputedRef<boolean>;
 }
 
 export function useActiveBuffer(): ActiveBufferState {
@@ -31,6 +37,11 @@ export function useActiveBuffer(): ActiveBufferState {
   const isVirtual = computed(() => virtualCfg.value != null);
   const isSystemConsole = computed(() => virtualCfg.value?.renderMode === 'console');
   const isFriendsBuffer = computed(() => activeKey.value === FRIENDS_KEY);
+  // A real IRC buffer renders the message list with input + (for channels) a
+  // nicklist; virtual buffers declare their own capabilities in the registry.
+  const renderMode = computed<VirtualRenderMode>(() => virtualCfg.value?.renderMode ?? 'buffer');
+  const hasInput = computed(() => virtualCfg.value?.hasInput ?? true);
+  const hasNicklist = computed(() => virtualCfg.value?.hasNicklist ?? true);
   const activeBuf = computed(() => {
     if (!activeKey.value) return null;
     // Only 'buffer'-mode virtual buffers have a Buffer object in the store;
@@ -60,5 +71,8 @@ export function useActiveBuffer(): ActiveBufferState {
     isSystemConsole,
     isVirtual,
     isFriendsBuffer,
+    renderMode,
+    hasInput,
+    hasNicklist,
   };
 }

@@ -201,6 +201,25 @@ export const useBuffersStore = defineStore('buffers', {
       !!state.buffers[`${networkId}::${target}`],
     forNetwork: (state) => (networkId: number | string) =>
       Object.values(state.buffers).filter((b) => b.networkId === networkId),
+    // The open DM buffer for a (network, nick), matched case-insensitively so we
+    // resolve to whatever case is already open rather than forking a second
+    // buffer that differs only by nick case. Channels and the flat virtual
+    // sentinels (`:server:`, `:friends:`…) are excluded. One home for the
+    // resolution the Friends sidebar, overview, and keyboard nav all need.
+    findDm:
+      (state) =>
+      (networkId: number | string, nick: string): Buffer | null => {
+        const lower = nick.toLowerCase();
+        return (
+          Object.values(state.buffers).find(
+            (b) =>
+              b.networkId === Number(networkId) &&
+              b.target.toLowerCase() === lower &&
+              !b.target.startsWith('#') &&
+              !b.target.startsWith(':'),
+          ) ?? null
+        );
+      },
   },
   actions: {
     ensure(networkId: number | string, target: string) {

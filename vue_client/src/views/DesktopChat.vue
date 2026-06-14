@@ -170,12 +170,12 @@
     </header>
     <div v-if="active || isVirtual" class="topic-divider"></div>
 
-    <SystemConsole v-if="isSystemConsole" />
-    <FriendsOverview v-else-if="isFriendsBuffer" @view-activity="onViewActivity" />
+    <SystemConsole v-if="renderMode === 'console'" />
+    <FriendsOverview v-else-if="renderMode === 'overview'" @view-activity="onViewActivity" />
     <MessageList v-else ref="messageListRef" :pending-scroll-id="pendingScrollId" />
-    <MemberList v-if="showMembers && !isSystemConsole" />
+    <MemberList v-if="showMembers && hasNicklist" />
     <StatusBar />
-    <MessageInput v-if="!isVirtual" ref="messageInputRef" />
+    <MessageInput v-if="hasInput" ref="messageInputRef" />
 
     <NetworkForm
       v-if="networkEditor.isOpen"
@@ -279,6 +279,9 @@ const {
   isSystemConsole,
   isVirtual,
   isFriendsBuffer,
+  renderMode,
+  hasInput,
+  hasNicklist,
 } = useActiveBuffer();
 
 function openSystemConsole() {
@@ -307,9 +310,7 @@ const pendingScrollId = ref<number | null>(null);
 // "View activity" from the Friends overview: open Search with the scoped query
 // (from:<nick> on:<network>) and run it immediately.
 function onViewActivity(query: string) {
-  const search = useSearchStore();
-  search.setQuery(query);
-  search.runSearch();
+  useSearchStore().runQuery(query);
   showSearch.value = true;
 }
 const messageInputRef = ref<{ focus: () => void } | null>(null);

@@ -209,14 +209,7 @@ const isSelf = computed(
   () => !!selfNick.value && selfNick.value.toLowerCase() === props.nick.toLowerCase(),
 );
 
-const peer = computed(() => {
-  const netState = networks.states[props.networkId];
-  // Disconnected → presence is stale, so the peer reads as offline. Connected
-  // with no row stays unknown (no MONITOR / not seen yet).
-  if (netState && netState.state !== 'connected')
-    return { nick: props.nick, state: 'offline', stateAt: null, awayMessage: null };
-  return netState?.peerPresence?.[props.nick.toLowerCase()] ?? null;
-});
+const peer = computed(() => networks.peerFor(props.networkId, props.nick));
 const awayMessage = computed(() => {
   // Prefer the live away-notify payload (peer-presence), fall back to the
   // whois reply's away line — the latter is only populated when whois ran

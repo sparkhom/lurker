@@ -141,9 +141,9 @@ function confirm() {
   const tgts = rows
     .filter((r) => r.networkId && r.nick.trim())
     .map((r) => ({ networkId: r.networkId, nick: r.nick.trim(), isPrimary: r === primaryRow }));
-  // Always exactly one primary; fall back to the first if the chosen row was
-  // emptied/removed. The server enforces this too.
-  if (tgts.length && !tgts.some((t) => t.isPrimary)) tgts[0].isPrimary = true;
+  // If the chosen primary row was left blank it's filtered out above, so no
+  // target carries the flag — the server then promotes the first to primary
+  // (setContact's `wanted ?? cleaned[0]`), so we don't re-assert it here.
   friends.saveContact({
     contactId: editorContact?.id ?? null,
     displayName: displayName.value.trim(),

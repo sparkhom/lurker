@@ -35,6 +35,12 @@ const fakeManager = {
   disposeNetwork(userId: number, networkId: number, reason: string) {
     this.calls.push(['disposeNetwork', userId, networkId, reason]);
   },
+  // DELETE re-publishes the contact list after the cascade; the route reads it
+  // back from here to fan out a fresh contacts-snapshot.
+  listContacts(userId: number) {
+    this.calls.push(['listContacts', userId]);
+    return [];
+  },
   joinChannel(userId: number, networkId: number, channel: string) {
     this.calls.push(['joinChannel', userId, networkId, channel]);
     return this.joinReturn !== undefined ? this.joinReturn : true;
@@ -206,6 +212,9 @@ describe('DELETE /api/networks/:id', () => {
     const res = await aliceAgent.delete(`/api/networks/${net.body.network.id}`);
     expect(res.status).toBe(200);
     expect(fakeManager.calls.some(([m]) => m === 'disposeNetwork')).toBe(true);
+    // Cascaded contact_targets are re-published so the Friends UI doesn't keep
+    // stale targets pointing at the deleted network.
+    expect(fakeManager.calls.some(([m]) => m === 'listContacts')).toBe(true);
     const list = await aliceAgent.get('/api/networks');
     expect(
       list.body.networks.find((n: { id: number }) => n.id === net.body.network.id),

@@ -16,6 +16,7 @@ import {
   upsertChannel,
 } from '../db/networks.js';
 import ircManager from '../services/ircManager.js';
+import { fanOutToUser } from '../services/wsHub.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -131,6 +132,14 @@ router.delete('/:id', (req: Request, res: Response) => {
   }
   ircManager.disposeNetwork(req.user!.id, id, 'network removed');
   deleteNetwork(id, req.user!.id);
+  // Deleting the network cascades away its contact_targets, so re-publish the
+  // contact list to every open tab — otherwise the Friends UI keeps stale
+  // targets (and a possibly-dead primary DM) pointing at the gone network until
+  // the next reconnect re-snapshots.
+  fanOutToUser(req.user!.id, {
+    kind: 'contacts-snapshot',
+    contacts: ircManager.listContacts(req.user!.id),
+  });
   res.json({ ok: true });
 });
 

@@ -1658,7 +1658,10 @@ export class IrcConnection {
     if (this.trackedDmPeers.has(lower)) return false;
     this.trackedDmPeers.add(lower);
     if (this.useMonitor && this.state === 'connected') {
-      if (this.trackedDmPeers.size > this.monitorLimit) {
+      // DM peers and friends share one per-connection MONITOR budget, so the
+      // cap check is against the deduped union, not just the DM-peer set
+      // (mirrors trackFriend).
+      if (this.monitoredNicks().length > this.monitorLimit) {
         // Over-limit add: keep the in-memory tracking but skip MONITOR.
         // We surface this once per overflow so the user knows live updates
         // are degraded for the overflow nicks.

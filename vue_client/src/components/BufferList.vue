@@ -492,16 +492,19 @@ function selectFriends(): void {
 // watched) falls back to opening its editor.
 //
 // Resolve to an EXISTING DM buffer case-insensitively so we never fork a second
-// buffer that differs from the open one only by nick case.
+// buffer that differs from the open one only by nick case. Computed once per
+// render as a contactId → buffer map so the per-row getters below (presence,
+// unread, highlight, active) don't each re-scan the network's buffers.
+const dmBufByContact = computed<Map<number, Buffer | null>>(() => {
+  const map = new Map<number, Buffer | null>();
+  for (const c of friends.contacts) {
+    const t = primaryTargetOf(c);
+    map.set(c.id, t ? buffers.findDm(t.networkId, t.nick) : null);
+  }
+  return map;
+});
 function friendDmBuffer(c: Contact): Buffer | null {
-  const t = primaryTargetOf(c);
-  if (!t) return null;
-  const lower = t.nick.toLowerCase();
-  return (
-    buffers
-      .forNetwork(t.networkId)
-      .find((b) => isDmBuffer(b) && b.target.toLowerCase() === lower) ?? null
-  );
+  return dmBufByContact.value.get(c.id) ?? null;
 }
 function openFriendDm(c: Contact): void {
   friends.openDm(c);
@@ -571,12 +574,7 @@ function isUnjoined(buf: Buffer, networkId: number): boolean {
 }
 
 function peerOf(buf: Buffer): PeerPresenceEntry | null {
-  const netState = networks.states[buf.networkId];
-  // Disconnected from the network → presence is stale, so the peer reads as
-  // offline. Connected-but-no-row stays unknown (no MONITOR / not seen yet).
-  if (netState && netState.state !== 'connected')
-    return { nick: buf.target, state: 'offline', stateAt: null, awayMessage: null };
-  return netState?.peerPresence?.[buf.target.toLowerCase()] ?? null;
+  return networks.peerFor(buf.networkId, buf.target);
 }
 function isPeerOffline(buf: Buffer): boolean {
   return isDmBuffer(buf) && derivePeerOffline(peerOf(buf));
