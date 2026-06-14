@@ -33,6 +33,15 @@
           >
             <i class="fa-solid fa-user-pen"></i>
           </button>
+          <button
+            type="button"
+            class="icon-btn"
+            title="Search all activity"
+            aria-label="Search all activity"
+            @click="emit('view-activity', searchAllQuery(c))"
+          >
+            <i class="fa-solid fa-magnifying-glass"></i>
+          </button>
         </div>
 
         <ul class="targets">
@@ -74,7 +83,7 @@
 </template>
 
 <script setup lang="ts">
-import { useFriendsStore, type ContactTarget } from '../stores/friends.js';
+import { useFriendsStore, type Contact, type ContactTarget } from '../stores/friends.js';
 import { useNetworksStore } from '../stores/networks.js';
 
 // Emits the raw search query string for "view activity" — the parent opens the
@@ -94,6 +103,20 @@ function searchQueryFor(t: ContactTarget): string {
   const name = networkName(t.networkId);
   const onTok = name && !/\s/.test(name) ? ` on:${name}` : '';
   return `from:${t.nick}${onTok}`;
+}
+
+// Search every one of the friend's nicks (OR), no network filter — "all their
+// activity across identities". Dedupes nicks case-insensitively.
+function searchAllQuery(c: Contact): string {
+  const seen = new Set<string>();
+  const nicks: string[] = [];
+  for (const t of c.targets) {
+    const lower = t.nick.toLowerCase();
+    if (seen.has(lower)) continue;
+    seen.add(lower);
+    nicks.push(t.nick);
+  }
+  return nicks.map((n) => `from:${n}`).join(' ');
 }
 
 // Format the nick by presence, mirroring DM rows in the buffer list: online =

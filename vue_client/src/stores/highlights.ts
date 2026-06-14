@@ -49,7 +49,8 @@ export const useHighlightsStore = defineStore('highlights', {
       params.set('limit', String(PAGE_SIZE));
       const parsed = parseSearchQuery(this.query);
       if (parsed.query) params.set('q', parsed.query);
-      if (parsed.from) params.set('nick', parsed.from);
+      // The highlights feed filters by a single nick; use the first from:.
+      if (parsed.from.length) params.set('nick', parsed.from[0]);
       if (parsed.in) params.set('target', parsed.in);
       if (parsed.on) {
         const networks = useNetworksStore();

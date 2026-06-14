@@ -1760,6 +1760,7 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
               networkId: msg.networkId || undefined,
               target: typeof msg.target === 'string' && msg.target ? msg.target : undefined,
               nick: typeof msg.nick === 'string' && msg.nick ? msg.nick : undefined,
+              nicks: Array.isArray(msg.nicks) ? msg.nicks : undefined,
               before: msg.before ? Number(msg.before) : undefined,
               limit: msg.limit,
             },

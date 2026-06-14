@@ -60,7 +60,7 @@ export const useSearchStore = defineStore('search', {
         limit: PAGE_SIZE,
       };
       if (parsed.query) payload.query = parsed.query;
-      if (parsed.from) payload.nick = parsed.from;
+      if (parsed.from.length) payload.nicks = parsed.from;
       if (parsed.in) payload.target = parsed.in;
       if (parsed.on) {
         const networks = useNetworksStore();
@@ -69,7 +69,7 @@ export const useSearchStore = defineStore('search', {
         );
         if (match) payload.networkId = match.id;
       }
-      if (!payload.query && !payload.nick && !payload.target && payload.networkId == null) {
+      if (!payload.query && !payload.nicks && !payload.target && payload.networkId == null) {
         return null;
       }
       if (before) payload.before = before;
