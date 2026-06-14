@@ -76,6 +76,17 @@ describe('createContact / setContactTargets / getContact', () => {
     expect(got!.targets.find((t) => t.nick === 'p1')!.isPrimary).toBe(false);
   });
 
+  it('allows several nicks on the same network', () => {
+    const id = mod.createContact({ userId: user.id, displayName: 'Alts', notifyOnline: false });
+    mod.setContactTargets(id, [
+      { networkId: net!.id, nick: 'eren', isPrimary: true },
+      { networkId: net!.id, nick: 'nostimo' },
+      { networkId: net!.id, nick: 'twomoon' },
+    ]);
+    const got = mod.getContact(id, user.id);
+    expect(got!.targets.map((t) => t.nick).toSorted()).toEqual(['eren', 'nostimo', 'twomoon']);
+  });
+
   it('scopes reads to the owner', () => {
     const id = mod.createContact({ userId: user.id, displayName: 'Mine', notifyOnline: false });
     expect(mod.getContact(id, other.id)).toBeNull();

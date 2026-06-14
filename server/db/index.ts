@@ -393,10 +393,11 @@ function migrate() {
 
     -- Friends / watch-list. A "contact" is a person, network-agnostic: it carries
     -- the display name and the per-contact "toast me when they come online" flag.
-    -- contact_targets is the per-network watch list — which (network, nick) to
-    -- follow for this person — so one contact can be watched as "darc" on Libera
-    -- and "jay" elsewhere. nick collates NOCASE; one watched nick per (person,
-    -- network). Both cascade on user/network delete.
+    -- contact_targets is the watch list — which (network, nick) to follow for
+    -- this person. A contact can have several nicks per network (alts/ghosts/
+    -- bouncer connections) and nicks across networks, so the key includes nick.
+    -- nick collates NOCASE; is_primary marks the one DM that opens on click.
+    -- Both cascade on user/network delete.
     CREATE TABLE IF NOT EXISTS contacts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
@@ -411,7 +412,8 @@ function migrate() {
       contact_id INTEGER NOT NULL,
       network_id INTEGER NOT NULL,
       nick TEXT NOT NULL COLLATE NOCASE,
-      PRIMARY KEY (contact_id, network_id),
+      is_primary INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (contact_id, network_id, nick),
       FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE CASCADE,
       FOREIGN KEY (network_id) REFERENCES networks(id) ON DELETE CASCADE
     );
@@ -596,10 +598,41 @@ db.exec(`CREATE INDEX IF NOT EXISTS idx_messages_matched
          ON messages(network_id, target, id DESC)
          WHERE matched_rule_id IS NOT NULL`);
 
-// Which of a contact's per-network targets is the "primary" — the DM that
-// opens when you click the friend in the FRIENDS sidebar group. Exactly one
-// per contact (enforced at the app layer); the rest are watch-only.
+// Which of a contact's targets is the "primary" — the DM that opens when you
+// click the friend in the FRIENDS sidebar. Exactly one per contact (enforced
+// at the app layer); the rest are watch-only.
 ensureColumn('contact_targets', 'is_primary', 'INTEGER NOT NULL DEFAULT 0');
+
+// contact_targets' key widened from (contact_id, network_id) to include nick so
+// a friend can have several nicks on one network. Rebuild old-shape tables in
+// place, preserving rows. Detect via the nick column not being part of the PK.
+// (Branch-only; SQLite can't ALTER a primary key, hence the rename/copy/drop.)
+{
+  const ctCols = db.prepare(`PRAGMA table_info(contact_targets)`).all() as Array<{
+    name: string;
+    pk: number;
+  }>;
+  const nickInPk = ctCols.some((c) => c.name === 'nick' && c.pk > 0);
+  if (ctCols.length > 0 && !nickInPk) {
+    db.exec(`
+      ALTER TABLE contact_targets RENAME TO contact_targets_old;
+      CREATE TABLE contact_targets (
+        contact_id INTEGER NOT NULL,
+        network_id INTEGER NOT NULL,
+        nick TEXT NOT NULL COLLATE NOCASE,
+        is_primary INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (contact_id, network_id, nick),
+        FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE CASCADE,
+        FOREIGN KEY (network_id) REFERENCES networks(id) ON DELETE CASCADE
+      );
+      INSERT INTO contact_targets (contact_id, network_id, nick, is_primary)
+        SELECT contact_id, network_id, nick, is_primary FROM contact_targets_old;
+      DROP TABLE contact_targets_old;
+      CREATE INDEX IF NOT EXISTS idx_contact_targets_net_nick
+        ON contact_targets(network_id, nick);
+    `);
+  }
+}
 
 // Per-(network, target) alt-row parity, computed at insert time so the client
 // can stripe chat lines without doing its own counting. Only chat-shaped types

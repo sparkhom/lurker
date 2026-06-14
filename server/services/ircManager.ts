@@ -558,8 +558,7 @@ class IrcManager extends EventEmitter {
       contactId?: number | null;
       displayName: string;
       notifyOnline: boolean;
-      targets: Array<{ networkId: number; nick: string }>;
-      primaryNetworkId?: number | null;
+      targets: Array<{ networkId: number; nick: string; isPrimary?: boolean }>;
     },
   ): ContactRecord | null {
     const displayName = (input.displayName || '').trim();
@@ -572,15 +571,20 @@ class IrcManager extends EventEmitter {
       const networkId = Number(t.networkId);
       const nick = typeof t.nick === 'string' ? t.nick.trim() : '';
       if (!nick || !ownedNetworkIds.has(networkId)) continue;
+      const lower = nick.toLowerCase();
+      // (network, nick) maps to at most one contact, and no exact dupes within
+      // this contact's own list — but multiple nicks on one network are allowed.
       const owner = findContactIdByTarget(userId, networkId, nick);
-      if (owner != null && owner !== input.contactId) continue; // another contact owns it
-      cleaned.push({ networkId, nick, isPrimary: false });
+      if (owner != null && owner !== input.contactId) continue;
+      if (cleaned.some((c) => c.networkId === networkId && c.nick.toLowerCase() === lower))
+        continue;
+      cleaned.push({ networkId, nick, isPrimary: !!t.isPrimary });
     }
     // Exactly one primary — the DM that opens when the friend is clicked. Honor
-    // the requested network if it survived filtering; otherwise fall back to the
-    // first target so there's always a launch destination.
+    // the flagged target if one survived filtering; otherwise the first.
     if (cleaned.length) {
-      const wanted = cleaned.find((t) => t.networkId === Number(input.primaryNetworkId));
+      const wanted = cleaned.find((t) => t.isPrimary);
+      cleaned.forEach((t) => (t.isPrimary = false));
       (wanted ?? cleaned[0]).isPrimary = true;
     }
 

@@ -219,7 +219,7 @@ describe('ircManager contacts', () => {
     expect(ircManager.listContacts(other.id)).toEqual([]);
   });
 
-  it('honors the requested primary target, falling back to the first', () => {
+  it('honors the flagged primary target, falling back to the first', () => {
     const user = createUser('irc-contacts-primary');
     const n1 = createNetwork(user.id, { name: 'n1', host: 'h', port: 6697, tls: true, nick: 'a' })!;
     const n2 = createNetwork(user.id, { name: 'n2', host: 'h', port: 6697, tls: true, nick: 'a' })!;
@@ -229,14 +229,13 @@ describe('ircManager contacts', () => {
       notifyOnline: false,
       targets: [
         { networkId: n1.id, nick: 'm1' },
-        { networkId: n2.id, nick: 'm2' },
+        { networkId: n2.id, nick: 'm2', isPrimary: true },
       ],
-      primaryNetworkId: n2.id,
     })!;
-    expect(chosen.targets.find((t) => t.networkId === n2.id)!.isPrimary).toBe(true);
-    expect(chosen.targets.find((t) => t.networkId === n1.id)!.isPrimary).toBe(false);
+    expect(chosen.targets.find((t) => t.nick === 'm2')!.isPrimary).toBe(true);
+    expect(chosen.targets.find((t) => t.nick === 'm1')!.isPrimary).toBe(false);
 
-    // A primary that isn't among the targets falls back to the first target.
+    // No target flagged → first becomes primary.
     const fallback = ircManager.setContact(user.id, {
       contactId: chosen.id,
       displayName: 'Multi',
@@ -245,9 +244,25 @@ describe('ircManager contacts', () => {
         { networkId: n1.id, nick: 'm1' },
         { networkId: n2.id, nick: 'm2' },
       ],
-      primaryNetworkId: 999999,
     })!;
-    expect(fallback.targets.find((t) => t.networkId === n1.id)!.isPrimary).toBe(true);
+    expect(fallback.targets.find((t) => t.nick === 'm1')!.isPrimary).toBe(true);
+  });
+
+  it('allows multiple nicks on the same network', () => {
+    const user = createUser('irc-contacts-alts');
+    const net = createNetwork(user.id, { name: 'n', host: 'h', port: 6697, tls: true, nick: 'a' })!;
+    const saved = ircManager.setContact(user.id, {
+      displayName: 'Alts',
+      notifyOnline: false,
+      targets: [
+        { networkId: net.id, nick: 'eren' },
+        { networkId: net.id, nick: 'nostimo' },
+        { networkId: net.id, nick: 'twomoon', isPrimary: true },
+        { networkId: net.id, nick: 'eren' }, // exact dupe dropped
+      ],
+    })!;
+    expect(saved.targets.map((t) => t.nick).toSorted()).toEqual(['eren', 'nostimo', 'twomoon']);
+    expect(saved.targets.filter((t) => t.isPrimary).map((t) => t.nick)).toEqual(['twomoon']);
   });
 
   it('deletes a contact only for its owner', () => {

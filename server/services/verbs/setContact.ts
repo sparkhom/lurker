@@ -24,21 +24,19 @@ registerVerb({
       notifyOnline: { type: 'boolean' },
       targets: {
         type: 'array',
-        description: 'Per-network watch targets. Each is one (networkId, nick) to follow.',
+        description:
+          'Watch targets. Each is one (networkId, nick); multiple nicks per network are allowed. ' +
+          'Mark exactly one isPrimary — the DM that opens when the friend is clicked (defaults to the first).',
         items: {
           type: 'object',
           properties: {
             networkId: { type: 'integer' },
             nick: { type: 'string' },
+            isPrimary: { type: 'boolean' },
           },
           required: ['networkId', 'nick'],
           additionalProperties: false,
         },
-      },
-      primaryNetworkId: {
-        type: 'integer',
-        description:
-          'Which target network the DM opens to when the friend is clicked. Defaults to the first target.',
       },
     },
     required: ['displayName', 'targets'],
@@ -57,15 +55,14 @@ registerVerb({
       ? (input.targets as Array<Record<string, unknown>>).map((t) => ({
           networkId: Number(t.networkId),
           nick: typeof t.nick === 'string' ? t.nick : '',
+          isPrimary: !!t.isPrimary,
         }))
       : [];
-    const primaryNetworkId = input.primaryNetworkId != null ? Number(input.primaryNetworkId) : null;
     const saved = ircManager.setContact(ctx.userId, {
       contactId,
       displayName,
       notifyOnline,
       targets,
-      primaryNetworkId,
     });
     if (!saved) {
       throw Object.assign(new Error('contact not found'), { code: 'not_found' });

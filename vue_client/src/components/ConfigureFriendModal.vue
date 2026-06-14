@@ -11,33 +11,42 @@
         <input v-model="displayName" type="text" maxlength="128" placeholder="e.g. Darc" />
       </label>
 
-      <fieldset class="networks">
-        <legend>Watch on</legend>
-        <p v-if="!rows.length" class="meta">Add a network first to watch a friend.</p>
-        <div v-for="row in rows" :key="row.networkId" class="net-row">
-          <label class="net-toggle">
-            <input v-model="row.enabled" type="checkbox" />
-            <span class="net-name">{{ row.name }}</span>
-          </label>
-          <input
-            v-model="row.nick"
-            type="text"
-            class="net-nick"
-            :disabled="!row.enabled"
-            placeholder="nick on this network"
-          />
-          <label class="net-primary" :class="{ dim: !row.enabled }" title="Open this DM on click">
-            <input
-              v-model="primaryNetworkId"
-              type="radio"
-              name="primary-net"
-              :value="row.networkId"
-              :disabled="!row.enabled"
-            />
-            <span>primary</span>
-          </label>
-        </div>
-        <p class="meta">The primary network is the DM that opens when you click the friend.</p>
+      <fieldset class="targets-field">
+        <legend>Watch nicks</legend>
+        <p v-if="!networks.networks.length" class="meta">Add a network first to watch a friend.</p>
+        <template v-else>
+          <div v-for="(row, i) in rows" :key="row.key" class="target-row">
+            <select v-model.number="row.networkId" class="net-select" aria-label="Network">
+              <option v-for="n in networks.networks" :key="n.id" :value="n.id">{{ n.name }}</option>
+            </select>
+            <input v-model="row.nick" type="text" class="nick-input" placeholder="nick" />
+            <label class="primary-toggle" title="Open this DM when the friend is clicked">
+              <input
+                type="radio"
+                name="primary-target"
+                :value="row.key"
+                v-model.number="primaryKey"
+              />
+              <span>primary</span>
+            </label>
+            <button
+              type="button"
+              class="row-remove"
+              title="Remove nick"
+              aria-label="Remove nick"
+              @click="removeRow(i)"
+            >
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+          <button type="button" class="add-row" @click="addRow">
+            <i class="fa-solid fa-plus"></i> Add nick
+          </button>
+          <p class="meta">
+            A friend can have several nicks per network. The primary nick is the DM that opens when
+            you click them.
+          </p>
+        </template>
       </fieldset>
 
       <label class="notify">
@@ -80,54 +89,69 @@ const prefill = friends.editor.prefill;
 const isEditing = computed(() => editorContact != null);
 const title = computed(() => (isEditing.value ? 'Edit friend' : 'Add friend'));
 
-// Seed the form from the contact being edited, or from the nick we were opened
-// on. Each network gets a row; a row is "watched" when its checkbox is on and
-// it carries a nick.
-interface NetRow {
+// A repeater of (network, nick) rows so a friend can have multiple nicks on one
+// network (alts/ghosts) or across networks. Each row has a stable `key` so the
+// primary selection survives add/remove. Seed from the contact being edited,
+// the nick we were opened on, or one blank row on the first network.
+interface TargetRow {
+  key: number;
   networkId: number;
-  name: string;
-  enabled: boolean;
   nick: string;
 }
-const rows = reactive<NetRow[]>(
-  networks.networks.map((n) => {
-    const fromContact = editorContact?.targets.find((t) => t.networkId === n.id);
-    const fromPrefill = prefill && prefill.networkId === n.id ? prefill.nick : '';
-    const nick = fromContact?.nick ?? fromPrefill ?? '';
-    return { networkId: n.id, name: n.name, enabled: !!nick, nick };
-  }),
-);
+let keySeq = 0;
+const nextKey = () => (keySeq += 1);
+const firstNetworkId = networks.networks[0]?.id ?? 0;
+
+function seedRows(): TargetRow[] {
+  if (editorContact && editorContact.targets.length) {
+    return editorContact.targets.map((t) => ({
+      key: nextKey(),
+      networkId: t.networkId,
+      nick: t.nick,
+    }));
+  }
+  if (prefill) return [{ key: nextKey(), networkId: prefill.networkId, nick: prefill.nick }];
+  return networks.networks.length ? [{ key: nextKey(), networkId: firstNetworkId, nick: '' }] : [];
+}
+const rows = reactive<TargetRow[]>(seedRows());
 
 const displayName = ref(editorContact?.displayName ?? prefill?.nick ?? '');
 const notifyOnline = ref(editorContact?.notifyOnline ?? false);
-// Which network's DM opens on click. Seed from the existing primary, else the
-// nick we were opened on, else the first watched network.
-const primaryNetworkId = ref<number | null>(
-  editorContact?.targets.find((t) => t.isPrimary)?.networkId ?? prefill?.networkId ?? null,
+
+// Primary tracked by row key (not index) so it doesn't drift on add/remove.
+const seededPrimaryIdx = editorContact ? editorContact.targets.findIndex((t) => t.isPrimary) : -1;
+const primaryKey = ref<number>(
+  (seededPrimaryIdx >= 0 ? rows[seededPrimaryIdx]?.key : undefined) ?? rows[0]?.key ?? 0,
 );
 
-const targets = computed(() =>
-  rows
-    .filter((r) => r.enabled && r.nick.trim())
-    .map((r) => ({ networkId: r.networkId, nick: r.nick.trim() })),
+const canSave = computed(
+  () => !!displayName.value.trim() && rows.some((r) => r.networkId && r.nick.trim()),
 );
-const canSave = computed(() => !!displayName.value.trim() && targets.value.length > 0);
+
+function addRow() {
+  const row = { key: nextKey(), networkId: networks.networks[0]?.id ?? 0, nick: '' };
+  rows.push(row);
+  if (!rows.some((r) => r.key === primaryKey.value)) primaryKey.value = row.key;
+}
+function removeRow(i: number) {
+  rows.splice(i, 1);
+  if (!rows.some((r) => r.key === primaryKey.value)) primaryKey.value = rows[0]?.key ?? 0;
+}
 
 function confirm() {
   if (!canSave.value) return;
-  // Resolve the primary to an actually-watched target (the chosen one may have
-  // been unchecked); fall back to the first. The server defaults too.
-  const tgts = targets.value;
-  const primaryNetworkIdResolved =
-    tgts.find((t) => t.networkId === primaryNetworkId.value)?.networkId ??
-    tgts[0]?.networkId ??
-    null;
+  const primaryRow = rows.find((r) => r.key === primaryKey.value);
+  const tgts = rows
+    .filter((r) => r.networkId && r.nick.trim())
+    .map((r) => ({ networkId: r.networkId, nick: r.nick.trim(), isPrimary: r === primaryRow }));
+  // Always exactly one primary; fall back to the first if the chosen row was
+  // emptied/removed. The server enforces this too.
+  if (tgts.length && !tgts.some((t) => t.isPrimary)) tgts[0].isPrimary = true;
   friends.saveContact({
     contactId: editorContact?.id ?? null,
     displayName: displayName.value.trim(),
     notifyOnline: notifyOnline.value,
     targets: tgts,
-    primaryNetworkId: primaryNetworkIdResolved,
   });
   friends.closeEditor();
 }
@@ -169,33 +193,35 @@ input[type='text']:focus {
 input[type='text']:disabled {
   opacity: 0.5;
 }
-.networks {
+.targets-field {
   border: 1px solid var(--border);
   padding: var(--space-4) var(--space-5);
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
 }
-.networks legend {
+.targets-field legend {
   color: var(--fg-muted);
   padding: 0 var(--space-2);
 }
-.net-row {
+.target-row {
   display: flex;
   align-items: center;
   gap: var(--space-4);
 }
-.net-toggle {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  min-width: 9em;
-  cursor: pointer;
+.net-select {
+  background: var(--bg-soft);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  padding: var(--space-3) var(--space-4);
+  font: inherit;
+  min-width: 8em;
 }
-.net-nick {
+.nick-input {
   flex: 1;
+  min-width: 0;
 }
-.net-primary {
+.primary-toggle {
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -203,8 +229,28 @@ input[type='text']:disabled {
   cursor: pointer;
   white-space: nowrap;
 }
-.net-primary.dim {
-  opacity: 0.4;
+.row-remove {
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font: inherit;
+  padding: 0 var(--space-2);
+}
+.row-remove:hover {
+  color: var(--bad);
+}
+.add-row {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 .notify {
   display: flex;

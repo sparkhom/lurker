@@ -202,8 +202,7 @@ export const useFriendsStore = defineStore('friends', {
       contactId?: number | null;
       displayName: string;
       notifyOnline: boolean;
-      targets: Array<{ networkId: number; nick: string }>;
-      primaryNetworkId: number | null;
+      targets: Array<{ networkId: number; nick: string; isPrimary: boolean }>;
     }) {
       socketSend({
         type: 'set-contact',
@@ -211,7 +210,6 @@ export const useFriendsStore = defineStore('friends', {
         displayName: payload.displayName,
         notifyOnline: payload.notifyOnline,
         targets: payload.targets,
-        primaryNetworkId: payload.primaryNetworkId,
       });
     },
     removeContact(contactId: number) {

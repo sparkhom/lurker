@@ -36,7 +36,7 @@
         </div>
 
         <ul class="targets">
-          <li v-for="t in c.targets" :key="t.networkId" class="target">
+          <li v-for="t in c.targets" :key="`${t.networkId}::${t.nick}`" class="target">
             <span class="dot small" :class="friends.presenceForTarget(t.networkId, t.nick)"></span>
             <span class="net">{{ networkName(t.networkId) }}</span>
             <span class="nick">{{ t.nick }}</span>
