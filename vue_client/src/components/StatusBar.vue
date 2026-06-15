@@ -13,7 +13,7 @@
             ><span v-if="networkLabel" class="net">{{ networkLabel }}/</span
             ><span class="name">{{ targetLabel }}</span></template
           ><span v-else class="name">{{ networkLabel }}</span
-          ><span v-if="modeSuffix" class="modes">{{ modeSuffix }}</span></span
+          ><span v-if="modeSuffix && !compact" class="modes">{{ modeSuffix }}</span></span
         >
         <!-- Jump-to-unread. Scrolls (usually up) to the pinned unread divider
            when it's off-screen and the user hasn't scrolled it into view yet
@@ -51,7 +51,7 @@
         }}</span>
         <span v-if="splitLabel" class="seg split" :class="splitClass">{{ splitLabel }}</span>
         <span v-if="typingSegments.length" class="seg typing"
-          >Typing:
+          ><i class="fa-regular fa-keyboard" title="Typing"></i>
           <template v-for="(seg, i) in typingSegments" :key="i"
             ><span :style="seg.color ? { color: seg.color } : null">{{ seg.text }}</span></template
           ></span
@@ -369,7 +369,7 @@ const presentCount = computed(() => (detached.value ? liveDuringDetach.value : n
 // leak into the rendered label — see the button markup for why that matters.
 const returnPresentLabel = computed(() => {
   const count = presentCount.value > 0 ? ` (${presentCount.value} new)` : '';
-  return `Return to present${count} ↓`;
+  return `Return${count} ↓`;
 });
 
 function onReturnToPresent() {
