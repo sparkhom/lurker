@@ -216,7 +216,7 @@ const peerForActive = computed(() => {
   if (!isDmBuffer.value) return null;
   const a = active.value;
   if (!a) return null;
-  return networks.states[a.networkId]?.peerPresence?.[a.target.toLowerCase()] || null;
+  return networks.peerFor(a.networkId, a.target);
 });
 const peerStatusLabel = computed(() => {
   const peer = peerForActive.value;

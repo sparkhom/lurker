@@ -391,6 +391,35 @@ function migrate() {
     CREATE INDEX IF NOT EXISTS idx_user_nick_notes_user_net
       ON user_nick_notes(user_id, network_id);
 
+    -- Friends / watch-list. A "contact" is a person, network-agnostic: it carries
+    -- the display name and the per-contact "toast me when they come online" flag.
+    -- contact_targets is the watch list — which (network, nick) to follow for
+    -- this person. A contact can have several nicks per network (alts/ghosts/
+    -- bouncer connections) and nicks across networks, so the key includes nick.
+    -- nick collates NOCASE; is_primary marks the one DM that opens on click.
+    -- Both cascade on user/network delete.
+    CREATE TABLE IF NOT EXISTS contacts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      display_name TEXT NOT NULL,
+      notify_online INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_contacts_user ON contacts(user_id);
+
+    CREATE TABLE IF NOT EXISTS contact_targets (
+      contact_id INTEGER NOT NULL,
+      network_id INTEGER NOT NULL,
+      nick TEXT NOT NULL COLLATE NOCASE,
+      is_primary INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (contact_id, network_id, nick),
+      FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE CASCADE,
+      FOREIGN KEY (network_id) REFERENCES networks(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_contact_targets_net_nick
+      ON contact_targets(network_id, nick);
+
     -- Per-(user, message) bookmarks. Operator hits "Save" on a message in the
     -- context menu to pin it for later recall via the bookmarks modal. The
     -- message_id FK cascades, so bookmarks evaporate when their underlying
