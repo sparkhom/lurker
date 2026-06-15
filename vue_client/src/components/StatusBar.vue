@@ -58,11 +58,14 @@
         >
       </div>
       <div class="bar-tools">
+        <!-- @mousedown.prevent keeps the composer focused (and the iOS keyboard
+             up) when tapping these tools — same affordance as the send button. -->
         <button
           type="button"
           class="tool-btn"
           :disabled="!sendable"
           title="upload image"
+          @mousedown.prevent
           @click="onPickFile"
         >
           <i class="fa-solid fa-paperclip"></i>
@@ -73,6 +76,7 @@
           class="tool-btn"
           :disabled="!sendable"
           title="mIRC formatting (Cmd/Ctrl+B/I/U for bold/italic/underline)"
+          @mousedown.prevent
           @click="onToggleColorPicker"
         >
           <i class="fa-solid fa-palette"></i>
