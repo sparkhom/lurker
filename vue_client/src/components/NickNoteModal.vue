@@ -114,34 +114,4 @@ textarea:focus {
   gap: var(--space-4);
   margin-top: var(--space-2);
 }
-.btn-primary,
-.btn-secondary {
-  background: none;
-  border: 1px solid var(--border);
-  color: var(--fg);
-  padding: var(--space-3) var(--space-6);
-  cursor: pointer;
-  font: inherit;
-}
-.btn-primary {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.btn-primary:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-.btn-primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
-}
-.btn-secondary:hover {
-  background: var(--bg-soft);
-}
-.btn-secondary.danger {
-  color: var(--bad);
-  border-color: var(--bad);
-}
-.btn-secondary.danger:hover {
-  background: color-mix(in srgb, var(--bad) 15%, transparent);
-}
 </style>

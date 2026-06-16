@@ -16,11 +16,11 @@
     </p>
     <pre class="preview">{{ content }}</pre>
     <footer class="foot">
-      <button type="button" class="btn secondary" @click="$emit('cancel')">Cancel</button>
+      <button type="button" class="btn-secondary" @click="$emit('cancel')">Cancel</button>
       <button
         ref="primaryBtn"
         type="button"
-        class="btn primary"
+        class="btn-primary"
         :disabled="uploading"
         @click="$emit('confirm')"
       >
@@ -86,28 +86,5 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
   gap: var(--space-4);
-}
-.btn {
-  background: var(--bg-soft);
-  border: 1px solid var(--border);
-  color: var(--fg);
-  cursor: pointer;
-  font: inherit;
-  padding: var(--space-3) var(--space-6);
-}
-.btn:hover:not(:disabled) {
-  border-color: var(--accent);
-}
-.btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.btn.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--bg);
-}
-.btn.primary:hover:not(:disabled) {
-  filter: brightness(1.1);
 }
 </style>

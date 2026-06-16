@@ -96,6 +96,14 @@
   --radius-sm: 2px;
   --radius-md: 6px;
   --radius-pill: 999px;
+
+  /* Elevation. Floating surfaces (context menus, the action bar, toasts, modal
+     and Cmd-K cards) share one drop shadow so they read as the same family.
+     The input autocomplete pickers open *above* the composer, so they cast
+     upward — same softness, flipped direction. Internal tokens (like spacing
+     and z-index); not in the settings registry. */
+  --shadow-popover: 0 4px 14px rgba(0, 0, 0, 0.45);
+  --shadow-popover-up: 0 -4px 12px rgba(0, 0, 0, 0.4);
 }
 
 /* Mobile bumps the base size to 16px. Two reasons: iOS Safari auto-zooms
@@ -153,6 +161,22 @@ body,
   -webkit-font-smoothing: var(--font-smoothing-webkit, auto);
   -moz-osx-font-smoothing: var(--font-smoothing-moz, auto);
   text-rendering: optimizeLegibility;
+}
+
+/* Headings inherit the base size like every other piece of text — the
+   one-font-size rule covers header text too. Without this, <h1>–<h6> fall back
+   to the browser's default heading sizes (which is why the modal title and the
+   profile section headers were rendering larger than body text). Hierarchy is
+   carried by weight/color/position, not size. The two intentionally oversized
+   titles — the login brand and the word backdrop — set their own font-size in
+   scoped styles, which outranks this bare-element rule. */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-size: var(--font-size);
 }
 
 /* Whole app behaves like a CLI window — no document-level scroll.
@@ -231,6 +255,59 @@ button:hover:not(:disabled) {
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Action buttons — modal footers, confirmations, the profile panel. One
+   system, promoted out of the per-modal copies that had drifted. Outline style
+   throughout: accent is the only color cue (primary = accent, danger = bad),
+   keeping the flat aesthetic and the menus' "accent for emphasis, not fill"
+   language. inline-flex so any button can carry a leading icon. */
+.btn-primary,
+.btn-secondary {
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: var(--space-3) var(--space-6);
+  cursor: pointer;
+}
+.btn-secondary:hover:not(:disabled) {
+  background: var(--bg-soft);
+}
+.btn-primary {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.btn-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+.btn-primary.danger,
+.btn-secondary.danger {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+.btn-primary.danger:hover:not(:disabled),
+.btn-secondary.danger:hover:not(:disabled) {
+  border-color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 15%, transparent);
+}
+.btn-primary:disabled,
+.btn-secondary:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+/* On mobile, footer buttons that pair an icon with a text label collapse to
+   icon-only to save room — wrap the label in <span class="label"> to opt in.
+   Text-only buttons (no .label) keep their text. */
+@media (max-width: 768px) {
+  .btn-primary .label,
+  .btn-secondary .label {
+    display: none;
+  }
 }
 
 input,

@@ -12,7 +12,7 @@
 -->
 
 <template>
-  <li :class="{ row: true, active }" @click="$emit('jump', message)" @mouseenter="$emit('hover')">
+  <li class="row" @click="$emit('jump', message)">
     <div class="head">
       <div class="where">
         <template v-if="targetLabel"
@@ -68,15 +68,13 @@ export interface HistoryMessage {
 const props = withDefaults(
   defineProps<{
     message: HistoryMessage;
-    active?: boolean;
     removable?: boolean;
   }>(),
-  { active: false, removable: false },
+  { removable: false },
 );
 
 defineEmits<{
   jump: [message: HistoryMessage];
-  hover: [];
   remove: [message: HistoryMessage];
 }>();
 
@@ -127,13 +125,15 @@ const nickStyle = computed((): CSSProperties | null => {
 <style scoped>
 .row {
   position: relative;
-  padding: var(--space-4) var(--space-5);
+  /* No horizontal padding — the list already insets to the card's content edge
+     (padding: 0 var(--card-pad-x) on its scroll container), so the row content
+     sits flush with its full-width separators rather than adding a second inset.
+     Roomy padding-bottom above the separator plus a margin below it space the
+     rows well apart. */
+  padding: var(--space-4) 0 var(--space-8);
   border-bottom: 1px solid var(--border);
+  margin-bottom: var(--space-4);
   cursor: pointer;
-}
-.row:hover,
-.row.active {
-  background: var(--bg-soft);
 }
 
 .remove {
@@ -192,9 +192,6 @@ const nickStyle = computed((): CSSProperties | null => {
 .body {
   white-space: pre-wrap;
   word-break: break-word;
-}
-.nick {
-  font-weight: 600;
 }
 .sep {
   color: var(--border);

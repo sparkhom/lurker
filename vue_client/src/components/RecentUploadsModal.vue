@@ -4,7 +4,7 @@
 -->
 
 <template>
-  <AppModal word="uploads" title="recent uploads" size="xl" @close="$emit('close')">
+  <AppModal word="uploads" title="recent uploads" size="xl" fill-height @close="$emit('close')">
     <p v-if="uploads.listError" class="error">{{ uploads.listError }}</p>
 
     <div ref="listEl" class="list-wrap" @scroll="onScroll">

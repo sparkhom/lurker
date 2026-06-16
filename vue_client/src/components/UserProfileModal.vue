@@ -16,7 +16,7 @@
 -->
 
 <template>
-  <AppModal word="profile" :title="nick" size="md" align="top" @close="onClose">
+  <AppModal word="profile" :title="nick" size="md" @close="onClose">
     <template #subtitle>
       <span :class="['presence', presenceClass]">
         <span class="dot" aria-hidden="true"></span>
@@ -138,28 +138,37 @@
         v-if="!isOffline"
         type="button"
         class="btn-secondary"
+        title="Send DM"
         @click="onSendDm"
         :disabled="isSelf"
       >
-        <i class="fa-solid fa-envelope"></i> Send DM
+        <i class="fa-solid fa-envelope"></i> <span class="label">Send DM</span>
       </button>
       <button
         v-if="!isOffline"
         type="button"
         class="btn-secondary"
+        title="Ignore…"
         @click="onIgnore"
         :disabled="isSelf"
       >
-        <i class="fa-solid fa-ban"></i> Ignore…
+        <i class="fa-solid fa-ban"></i> <span class="label">Ignore…</span>
       </button>
       <!-- Friending works regardless of presence — you can watch an offline
            peer — so this isn't gated on isOffline like Send DM / Ignore. -->
-      <button v-if="!isSelf" type="button" class="btn-secondary" @click="onAddFriend">
-        <i class="fa-solid fa-user-group"></i> {{ isFriend ? 'Edit Friend' : 'Add Friend' }}
+      <button
+        v-if="!isSelf"
+        type="button"
+        class="btn-secondary"
+        :title="isFriend ? 'Edit Friend' : 'Add Friend'"
+        @click="onAddFriend"
+      >
+        <i class="fa-solid fa-user-group"></i>
+        <span class="label">{{ isFriend ? 'Edit Friend' : 'Add Friend' }}</span>
       </button>
       <span class="spacer"></span>
       <button type="button" class="btn-secondary" @click="onRefresh" title="Re-run whois">
-        <i class="fa-solid fa-arrows-rotate"></i> Refresh
+        <i class="fa-solid fa-arrows-rotate"></i> <span class="label">Refresh</span>
       </button>
     </footer>
 
@@ -554,23 +563,5 @@ code {
 }
 .footer .spacer {
   flex: 1;
-}
-.btn-secondary {
-  background: none;
-  border: 1px solid var(--border);
-  color: var(--fg);
-  padding: var(--space-3) var(--space-6);
-  cursor: pointer;
-  font: inherit;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-.btn-secondary:hover:not(:disabled) {
-  background: var(--bg-soft);
-}
-.btn-secondary:disabled {
-  opacity: 0.4;
-  cursor: default;
 }
 </style>
