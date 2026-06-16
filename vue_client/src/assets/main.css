@@ -302,11 +302,23 @@ button:disabled {
 }
 /* On mobile, footer buttons that pair an icon with a text label collapse to
    icon-only to save room — wrap the label in <span class="label"> to opt in.
-   Text-only buttons (no .label) keep their text. */
+   Text-only buttons (no .label) keep their text.
+
+   Clip the label out of view rather than `display: none` so it stays in the
+   accessibility tree: the button is icon-only to the eye but still has a text
+   accessible name for screen readers, no per-call-site aria-label needed. */
 @media (max-width: 768px) {
   .btn-primary .label,
   .btn-secondary .label {
-    display: none;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 }
 
