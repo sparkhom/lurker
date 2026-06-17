@@ -249,20 +249,20 @@ const placeholder = computed(() => {
   if (isPaused.value) return 'Account paused — read only';
   const a = active.value;
   if (!a) return 'Select a buffer';
-  // `/raw <line>` was cryptic; `/help` is the discoverable entry point and the
-  // server buffer is exactly where someone goes looking for it.
-  if (isServer.value) return 'try /help';
+  // `/raw <line>` was cryptic; `/commands` is the discoverable entry point and
+  // the server buffer is exactly where someone goes looking for it.
+  if (isServer.value) return 'try /commands';
   // Mobile shows network/channel in the compact status bar now, so the
   // placeholder carries the self identity (nick + channel-prefix) instead, with
   // the away marker appended when set. User modes are dropped here to match the
   // compact status bar hiding channel modes on narrow screens; the desktop
-  // prompt still renders them. Desktop keeps `try /help` since the prompt
+  // prompt still renders them. Desktop keeps `try /commands` since the prompt
   // already shows the identity there.
   if (isMobile.value) {
     const self = promptLabelNoModes.value;
     return awayLabel.value ? `${self} ${awayLabel.value}` : self;
   }
-  return 'try /help';
+  return 'try /commands';
 });
 // HTML attribute values for the system text features. spellcheck is the only
 // one the browser parses as a boolean; the others take "on"/"off" or an enum.
@@ -1575,7 +1575,7 @@ function onLongMessageCancel() {
 }
 
 // Drop a synthetic, non-persisted info line into the current buffer so the
-// user sees the output of client-resolved commands like /help or argument
+// user sees the output of client-resolved commands like /commands or argument
 // validation errors. id-less so pushMessage's replay guard doesn't trip.
 function localInfo(networkId: number, target: string, lineText: string): void {
   buffers.pushMessage({
@@ -1614,12 +1614,12 @@ const HELP_LINES = [
   '  /reconnect             — reconnect to current network',
   '  /list                  — list channels on current network',
   '  /who [mask]            — find users (also /whowas /userhost /ison /names)',
-  '  /motd /version /time   — server info (also /admin /info /lusers /links /map /stats)',
+  '  /motd /version /time   — server info (also /admin /info /lusers /links /map /stats /help)',
   '  /jitsi                 — start a video call (alias: /talk)',
   '  /ignore [mask]         — list current ignores, or add (nick or nick!user@host)',
   '  /unignore <mask>       — remove an ignore entry',
   '  /raw <line>            — send a raw IRC line (alias: /quote)',
-  '  /help                  — this list',
+  '  /commands              — this list',
   '  //text                 — send literal "/text" as a message (escape)',
 ];
 
@@ -2074,7 +2074,7 @@ function handleCommand(line: string, networkId: number, target: string): boolean
     }
     // Info/query commands. These already function via the raw fallback now that
     // unhandled server numerics surface in the server buffer (#269) — listing
-    // them explicitly uppercases the verb, documents them in /help, and gives a
+    // them explicitly uppercases the verb, documents them in /commands, and gives a
     // single home for any future per-command argument handling. Each forwards
     // its IRC verb plus whatever args were typed (server/target/mask/nick…); a
     // missing-arg server error (e.g. bare /whowas) now surfaces on its own.
@@ -2091,14 +2091,18 @@ function handleCommand(line: string, networkId: number, target: string): boolean
     case 'map':
     case 'stats':
     case 'userhost':
-    case 'ison': {
+    case 'ison':
+    // `/help` queries the network's own HELP system (704/705/706 render in the
+    // server buffer like any other server reply); the local slash-command
+    // cheatsheet lives under `/commands` below (#316).
+    case 'help': {
       const verb = cmd.toUpperCase();
       return sendOrToast(
         { type: 'raw', networkId, line: argLine ? `${verb} ${argLine}` : verb },
         line,
       );
     }
-    case 'help':
+    case 'commands':
       for (const helpLine of HELP_LINES) localInfo(networkId, target, helpLine);
       return true;
     default:

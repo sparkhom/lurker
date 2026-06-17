@@ -8,7 +8,7 @@ function key(networkId: number | string, target: string) {
 }
 
 // Per-buffer history of every line submitted through the input bar (chat,
-// /commands, /raw, even client-only lines like /help). Server is the source of
+// /raw, even client-only lines like /commands). Server is the source of
 // truth; this store mirrors the most-recent slice the server ships on snapshot
 // plus optimistic local appends on submit. MessageInput drives up/down recall
 // off `forBuffer`.
