@@ -285,10 +285,11 @@ const typingNicks = computed(() => {
   const t = buffer.value?.typing;
   if (!t) return [];
   const networkId = active.value?.networkId;
-  if (!networkId) return Object.keys(t);
-  return Object.entries(t)
-    .filter(([nick, entry]) => !ignores.isIgnored(networkId, nick, entry.userhost ?? ''))
-    .map(([nick]) => nick);
+  // The map is keyed by lowercased nick; render the display nick from the entry.
+  if (!networkId) return Object.values(t).map((entry) => entry.nick);
+  return Object.values(t)
+    .filter((entry) => !ignores.isIgnored(networkId, entry.nick, entry.userhost ?? ''))
+    .map((entry) => entry.nick);
 });
 
 function nickSeg(nick: string): { text: string; color: string | null } {
