@@ -53,4 +53,12 @@ describe('closedKeySetForUser', () => {
     expect(set.has(`${net!.id}::#a`)).toBe(true);
     expect(set.has(`${net!.id}::#b`)).toBe(true);
   });
+
+  // Keys are case-folded so a buffer closed under one casing still matches a
+  // history row stored under another (#289/#319). Callers fold on lookup too.
+  it('case-folds target keys', () => {
+    closedBuffers.closeBuffer(user.id, net!.id, '#MixedCase');
+    const set = closedBuffers.closedKeySetForUser(user.id);
+    expect(set.has(`${net!.id}::#mixedcase`)).toBe(true);
+  });
 });

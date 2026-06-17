@@ -108,24 +108,19 @@
               :network-id="buffer?.networkId ?? null"
             />
             <template v-else-if="row.m?.type === 'join'"
-              ><NickRef :nick="row.m.nick ?? ''" /><template v-if="eventHost(row.m)">
-                ({{ eventHost(row.m) }})</template
-              >
-              joined</template
+              ><NickRef :nick="row.m.nick ?? ''" />{{ eventHostSuffix(row.m) }} joined</template
             >
             <template v-else-if="row.m?.type === 'part'"
-              ><NickRef :nick="row.m.nick ?? ''" /><template v-if="eventHost(row.m)">
-                ({{ eventHost(row.m) }})</template
+              ><NickRef :nick="row.m.nick ?? ''" />{{ eventHostSuffix(row.m) }} left<template
+                v-if="row.m.text"
               >
-              left<template v-if="row.m.text">
                 (<LinkedText :text="row.m.text" />)</template
               ></template
             >
             <template v-else-if="row.m?.type === 'quit'"
-              ><NickRef :nick="row.m.nick ?? ''" /><template v-if="eventHost(row.m)">
-                ({{ eventHost(row.m) }})</template
+              ><NickRef :nick="row.m.nick ?? ''" />{{ eventHostSuffix(row.m) }} quit<template
+                v-if="row.m.text"
               >
-              quit<template v-if="row.m.text">
                 (<LinkedText :text="row.m.text" />)</template
               ></template
             >
@@ -136,10 +131,9 @@
               ></template
             >
             <template v-else-if="row.m?.type === 'nick'"
-              ><NickRef :nick="row.m.nick ?? ''" /> is now
-              <NickRef :nick="row.m.newNick ?? ''" /><template v-if="eventHost(row.m)">
-                ({{ eventHost(row.m) }})</template
-              ></template
+              ><NickRef :nick="row.m.nick ?? ''" /> is now <NickRef :nick="row.m.newNick ?? ''" />{{
+                eventHostSuffix(row.m)
+              }}</template
             >
             <template v-else-if="row.m?.type === 'mode'"
               >mode by <NickRef :nick="row.m.nick ?? ''" /><template v-if="row.m.text"
@@ -808,18 +802,22 @@ function prefixText(m: ChatMessage | undefined): string {
 }
 
 // When the "Show user@host on join/part/quit" setting is on, return the
-// affected user's `user@host` for display next to their nick on a presence
-// event line — join, part, quit, nick (#322). Returns null when the setting is
-// off, the userhost is missing (pre-upgrade backlog rows, or an event with no
-// prefix), or either half is absent — the server stores an empty ident/host
-// when it lacks one (`nick!@host` / `nick!ident@`), and a half-mask like
-// `(@host)` reads worse than nothing, so we only render when both pieces are
-// present. Reuses parseUserHost so parsing matches the ignore flow exactly.
-function eventHost(m: ChatMessage | undefined): string | null {
-  if (!showEventHost.value) return null;
+// affected user's ` (user@host)` suffix (leading space + parens, ready to drop
+// straight after the nick) for a presence event line — join, part, quit, nick
+// (#322). Returns '' when the setting is off, the userhost is missing
+// (pre-upgrade backlog rows, or an event with no prefix), or either half is
+// absent — the server stores an empty ident/host when it lacks one
+// (`nick!@host` / `nick!ident@`), and a half-mask like `(@host)` reads worse
+// than nothing, so we only render when both pieces are present. The full
+// formatting (leading space + parens) lives here so the four presence-line
+// templates share one source of truth and each call it once (only the matching
+// branch renders per row); reuses parseUserHost so parsing matches the ignore
+// flow exactly.
+function eventHostSuffix(m: ChatMessage | undefined): string {
+  if (!showEventHost.value) return '';
   const { user, host } = parseUserHost(m?.userhost);
-  if (!user || !host) return null;
-  return `${user}@${host}`;
+  if (!user || !host) return '';
+  return ` (${user}@${host})`;
 }
 
 function prefixClass(m: ChatMessage | undefined) {

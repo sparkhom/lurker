@@ -36,11 +36,16 @@ export function isClosed(userId: number, networkId: number, target: string): boo
 }
 
 // Returns Set of `${networkId}::${target}` keys for fast snapshot filtering.
+// Targets are case-folded so the lookup tolerates servers handing us
+// inconsistently-cased channel/nick names (#289/#319) — a DM closed as `Bob`
+// still matches a `bob` history row. Callers must fold the target on lookup too
+// (see isHiddenClosedBuffer in wsHub). IRC targets are case-insensitive, so
+// folding can't collide two genuinely distinct buffers.
 export function closedKeySetForUser(userId: number): Set<string> {
   const set = new Set<string>();
   const rows = listForUserStmt.all(userId) as Array<{ networkId: number; target: string }>;
   for (const row of rows) {
-    set.add(`${row.networkId}::${row.target}`);
+    set.add(`${row.networkId}::${row.target.toLowerCase()}`);
   }
   return set;
 }
