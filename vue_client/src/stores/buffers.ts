@@ -225,6 +225,27 @@ export const useBuffersStore = defineStore('buffers', {
           ) ?? null
         );
       },
+    // Resolve an already-open buffer for (networkId, target) without creating
+    // one, matching channels and DMs case-insensitively. IRC targets are
+    // case-insensitive and some servers hand us inconsistently-cased names
+    // (#289), so an exact-key lookup alone would miss the open buffer and drop
+    // ephemeral signals (e.g. typing) on the floor. Exact key is tried first as
+    // the common fast path; the folded scan only runs on a case mismatch. The
+    // flat ':'-sentinels (`:server:`, `:friends:`…) are fixed keys — exact only.
+    findByTarget:
+      (state) =>
+      (networkId: number | string, target: string): Buffer | null => {
+        const exact = state.buffers[`${networkId}::${target}`];
+        if (exact) return exact;
+        if (target.startsWith(':')) return null;
+        const nid = Number(networkId);
+        const lower = target.toLowerCase();
+        return (
+          Object.values(state.buffers).find(
+            (b) => b.networkId === nid && b.target.toLowerCase() === lower,
+          ) ?? null
+        );
+      },
   },
   actions: {
     ensure(networkId: number | string, target: string) {
@@ -882,17 +903,14 @@ export const useBuffersStore = defineStore('buffers', {
       // Resolve to an *existing* buffer only — a typing tag (TAGMSG +typing)
       // must never materialize a phantom DM buffer for a peer who never
       // actually messages us; the incoming PRIVMSG is what opens a DM (#292).
-      // DMs resolve case-insensitively via findDm so a typing tag whose nick
-      // case differs from the already-open DM (e.g. /query'd as `bob`, server
-      // reports typing as `Bob`) still lands on it rather than being dropped —
-      // matching how the rest of the store treats DM buffers. Channels and the
-      // flat ':'-sentinels resolve by exact key (findDm deliberately skips
-      // them); an unknown nick has its typing notice dropped until they say
-      // something real.
-      const buf =
-        target.startsWith('#') || target.startsWith(':')
-          ? this.buffers[key(networkId, target)]
-          : this.findDm(networkId, target);
+      // findByTarget matches channels and DMs case-insensitively, so a tag
+      // whose target case differs from the open buffer still lands rather than
+      // being dropped — whether that's a DM /query'd as `bob` vs a server-
+      // reported `Bob`, or a server echoing `#Chan` for a buffer joined as
+      // `#chan` (inconsistent server casing has bitten us before, #289). An
+      // unknown nick/channel simply has its typing notice dropped until there's
+      // a real message.
+      const buf = this.findByTarget(networkId, target);
       // Key all timer bookkeeping off the resolved buffer's actual target, not
       // the event's nick case, so the clear/set/expiry callbacks all line up on
       // the same buffer. Falls back to the raw target when there's no buffer.
