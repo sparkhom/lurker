@@ -346,6 +346,63 @@ describe('tls certificate trust setting', () => {
   });
 });
 
+describe('addPeerWatch live presence seed (#302)', () => {
+  function makeConn(): IrcConnection {
+    return new IrcConnection({
+      network: {
+        id: 1,
+        user_id: 1,
+        name: 'n',
+        host: 'irc.example.test',
+        port: 6697,
+        tls: 1,
+        trusted_certificates: 1,
+        nick: 'nick',
+        username: null,
+        realname: null,
+        server_password: null,
+        autoconnect: 1,
+        sasl_account: null,
+        sasl_password: null,
+        connect_commands: null,
+        position: 0,
+        created_at: new Date().toISOString(),
+      },
+      onEvent: () => {},
+    });
+  }
+
+  // A friend added while connected must get a MONITOR S follow-up: the server
+  // only SHOULD (not MUST) volunteer current state in reply to MONITOR +, so
+  // without the explicit status query a freshly-added offline friend lands with
+  // no state and renders as if online until a reconnect re-seeds.
+  it('follows MONITOR + with MONITOR S when a friend is tracked on a live connection', () => {
+    const conn = makeConn();
+    conn.useMonitor = true;
+    conn.monitorLimit = 100;
+    conn.state = 'connected';
+    const raw = vi.fn<(...args: string[]) => void>();
+    conn.client.raw = raw;
+
+    conn.trackFriend('offlinepal', 42);
+
+    expect(raw).toHaveBeenCalledWith('MONITOR + offlinepal');
+    expect(raw).toHaveBeenCalledWith('MONITOR S');
+  });
+
+  it('issues no MONITOR traffic when the server does not support it', () => {
+    const conn = makeConn();
+    conn.useMonitor = false;
+    conn.state = 'connected';
+    const raw = vi.fn<(...args: string[]) => void>();
+    conn.client.raw = raw;
+
+    conn.trackFriend('offlinepal', 42);
+
+    expect(raw).not.toHaveBeenCalled();
+  });
+});
+
 describe('formatSocketCloseErrorMessage', () => {
   const where = 'irc.example.test:6697';
 

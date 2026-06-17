@@ -1732,6 +1732,15 @@ export class IrcConnection {
     }
     try {
       this.client.raw('MONITOR + ' + nick);
+      // Same belt-and-suspenders as seedMonitorWatch: per IRCv3 the server only
+      // SHOULD (not MUST) volunteer the nick's current state in reply to
+      // MONITOR +, so a freshly-added watch can land with no state. That leaves
+      // the peer at 'unknown' on the client, which the friends list renders
+      // undimmed — i.e. indistinguishable from online — until a reconnect
+      // re-seeds. MONITOR S asks for every monitored nick's state explicitly;
+      // markPeerEvent's idempotency gate eats the duplicate replies for nicks we
+      // already had state for, so it's safe to send on every add. (#302)
+      this.client.raw('MONITOR S');
     } catch (_) {
       /* ignore */
     }

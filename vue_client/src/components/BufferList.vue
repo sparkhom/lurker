@@ -526,8 +526,15 @@ function friendRowClasses(c: Contact): Record<string, boolean> {
   // Reflect the PRIMARY DM's presence — that's the buffer this row opens, so an
   // alt being online elsewhere must not make the row look reachable.
   const state = friends.primaryPresence(c.id);
+  // Mirror rowClasses so an unread/highlighted friend DM colors its name like
+  // any other buffer (DMs are never muted, so no mute gate). An offline/away
+  // friend with unread still dims to gray — the peer-state rule wins on source
+  // order — but the accent-colored unread badge still flags it. (#307)
+  const buf = friendDmBuffer(c);
   return {
     active: isFriendDmActive(c),
+    unread: !!buf && buf.unread > 0,
+    highlighted: !!buf && buf.highlighted > 0,
     'peer-offline': state === 'offline',
     'peer-away': state === 'away',
   };
