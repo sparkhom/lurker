@@ -687,6 +687,19 @@ export const REGISTRY: readonly SettingOption[] = Object.freeze([
       '"and N others". Recent speakers (those tracked for nick completion) ' +
       'are preferred when picking which names to show.',
   },
+  {
+    key: 'chat.show_join_host',
+    label: 'Show user@host on joins',
+    category: 'chat',
+    group: 'consolidate',
+    type: 'bool',
+    default: false,
+    description:
+      'Show the joining user’s user@host next to their nick on JOIN lines ' +
+      '(e.g. "alice (~alice@host.example.net) joined") — useful for channel ops ' +
+      'spotting ban masks. Applies to individual join lines only; bursts that ' +
+      'collapse into the consolidation summary above don’t show host masks.',
+  },
 
   // ─── Composing (outgoing message guardrails) ─────────────────────────
   // irc-framework splits anything past ~350 bytes into multiple PRIVMSGs on

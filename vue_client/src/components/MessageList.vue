@@ -108,7 +108,10 @@
               :network-id="buffer?.networkId ?? null"
             />
             <template v-else-if="row.m?.type === 'join'"
-              ><NickRef :nick="row.m.nick ?? ''" /> joined</template
+              ><NickRef :nick="row.m.nick ?? ''" /><template v-if="joinHost(row.m)">
+                ({{ joinHost(row.m) }})</template
+              >
+              joined</template
             >
             <template v-else-if="row.m?.type === 'part'"
               ><NickRef :nick="row.m.nick ?? ''" /> left<template v-if="row.m.text">
@@ -519,6 +522,8 @@ const consolidateMaxNames = computed(
   () => (settings.effective('chat.consolidate_max_names') as number) || 5,
 );
 
+const showJoinHost = computed(() => !!settings.effective('chat.show_join_host'));
+
 const collapseAuthorsEnabled = computed(
   () => !!settings.effective('look.message.collapse_authors'),
 );
@@ -791,6 +796,20 @@ function prefixText(m: ChatMessage | undefined): string {
     default:
       return '';
   }
+}
+
+// When the "Show user@host on joins" setting is on, return the joining user's
+// user@host — the `ident@host` portion of the stored `nick!ident@host` — for
+// display next to their nick on a JOIN line (#322). Returns null when the
+// setting is off, the userhost is missing (pre-upgrade backlog rows, or a
+// JOIN with no prefix), or it can't be parsed.
+function joinHost(m: ChatMessage | undefined): string | null {
+  if (!showJoinHost.value) return null;
+  const uh = m?.userhost;
+  if (!uh) return null;
+  const bang = uh.indexOf('!');
+  if (bang === -1) return null;
+  return uh.slice(bang + 1) || null;
 }
 
 function prefixClass(m: ChatMessage | undefined) {
