@@ -391,12 +391,31 @@ export function buildOfflineBacklogFrames(
     for (const target of targets) {
       // Server pseudo-buffer is uncloseable; otherwise honor a closed flag.
       // Nothing is joined on an offline network, so there's no autorejoin race
-      // to defend against here (unlike the live loop in sendSnapshot).
-      if (!target.startsWith(':server:') && closed.has(`${net.id}::${target}`)) continue;
+      // to defend against here (unlike the live loop in sendSnapshot). The
+      // closed set is case-folded, so fold the target on lookup too.
+      if (!target.startsWith(':server:') && closed.has(`${net.id}::${target.toLowerCase()}`))
+        continue;
       frames.push(buildBufferBacklog(userId, net.id, target));
     }
   }
   return frames;
+}
+
+// A buffer the user closed and isn't currently joined to is hidden from the
+// sidebar; broadcasting or seeding a frame for it would resurrect it (#319).
+// Centralizes the live-loop carve-out shared by the snapshot and mark-all-read
+// so the two sites can't drift. The closed set is case-folded
+// (closedKeySetForUser), so fold the target here too — servers hand us
+// inconsistently-cased names (#289). A currently-joined channel always beats a
+// stale closed flag (defensive against autorejoin/state races).
+function isHiddenClosedBuffer(
+  closed: Set<string>,
+  joined: { has(name: string): boolean },
+  networkId: number,
+  target: string,
+): boolean {
+  const lower = target.toLowerCase();
+  return closed.has(`${networkId}::${lower}`) && !joined.has(lower);
 }
 
 // Handles a client `open-buffer` request (a clicked channel name). Resolves
@@ -1047,10 +1066,7 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
       for (const target of targets) {
         if (target.startsWith(':server:')) {
           // Server pseudo-buffer is uncloseable — never filter.
-        } else if (
-          closed.has(`${conn.network.id}::${target}`) &&
-          !conn.channels.has(target.toLowerCase())
-        ) {
+        } else if (isHiddenClosedBuffer(closed, conn.channels, conn.network.id, target)) {
           continue;
         }
         // Resume cursor: ship the gap the client missed (id > sinceId), or a
@@ -1445,10 +1461,12 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
         // don't broadcast a no-op read-state to every tab.
         //
         // maxIdByBuffer returns every target with history, including closed
-        // buffers. Skip those (mirroring the snapshot filter): broadcasting a
-        // read-state for a closed buffer would otherwise resurrect it in the
-        // sidebar (#319). A currently-joined channel beats a stale closed flag,
-        // same carve-out as the snapshot.
+        // buffers. "Mark all read" means *all*, so we still clamp the read
+        // pointer for a closed buffer (otherwise reopening it later resurfaces
+        // the stale unread the user just cleared) — but we must NOT broadcast a
+        // read-state for one that's closed-and-not-joined: the client would
+        // re-materialize it and pop it back into the sidebar (#319). So clamp
+        // first, then skip only the broadcast.
         const closed = closedKeySetForUser(userId);
         for (const conn of ircManager.listConnections(userId)) {
           const networkId = conn.network.id;
@@ -1456,11 +1474,10 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
             const target = row.target;
             const maxId = Number(row.maxId);
             if (!target || !Number.isFinite(maxId) || maxId <= 0) continue;
-            if (closed.has(`${networkId}::${target}`) && !conn.channels.has(target.toLowerCase()))
-              continue;
             const before = getReadState(userId, networkId, target);
             if (before >= maxId) continue;
             const after = setReadState(userId, networkId, target, maxId);
+            if (isHiddenClosedBuffer(closed, conn.channels, networkId, target)) continue;
             broadcastReadState(userId, networkId, target, after);
           }
         }

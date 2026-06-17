@@ -68,4 +68,40 @@ describe('applyReadState', () => {
     expect(buf.unread).toBe(0);
     expect(buf.highlighted).toBe(0);
   });
+
+  // Servers hand us inconsistently-cased channel/nick names (#289). A read-state
+  // broadcast whose target case differs from the buffer's stored key must still
+  // resolve to the open buffer (findByTarget), not silently drop the badge or
+  // fork a phantom lowercase entry.
+  it('updates a buffer opened under a different target case', () => {
+    const store = useBuffersStore();
+    store.replaceBacklog(1, '#Chan', [], undefined, undefined, undefined);
+    expect(store.isOpen(1, '#Chan')).toBe(true);
+
+    store.applyReadState(1, '#chan', { lastReadId: 7, unread: 4, highlights: 1 });
+
+    const buf = store.byKey('1::#Chan')!;
+    expect(buf.unread).toBe(4);
+    expect(buf.highlighted).toBe(1);
+    expect(buf.lastReadId).toBe(7);
+    expect(store.isOpen(1, '#chan')).toBe(false); // no phantom lowercase fork
+    expect(store.list).toHaveLength(1);
+  });
+
+  // While a buffer is active its unread divider is pinned (dividerAfterId set on
+  // activate); a late read-state carrying a lower lastReadId must not slide the
+  // divider backward out from under the reader (the Math.max branch).
+  it('does not move lastReadId backwards while the divider is pinned', () => {
+    const store = useBuffersStore();
+    store.replaceBacklog(1, '#pinned', [], undefined, undefined, undefined);
+    const buf = store.byKey('1::#pinned')!;
+    buf.dividerAfterId = 100;
+    buf.lastReadId = 50;
+
+    store.applyReadState(1, '#pinned', { lastReadId: 30, unread: 0, highlights: 0 });
+    expect(buf.lastReadId).toBe(50);
+
+    store.applyReadState(1, '#pinned', { lastReadId: 70, unread: 0, highlights: 0 });
+    expect(buf.lastReadId).toBe(70);
+  });
 });

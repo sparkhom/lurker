@@ -751,13 +751,20 @@ export const useBuffersStore = defineStore('buffers', {
       // is absent from the store (see isOpen), and a stray read-state broadcast
       // for it (e.g. mark-all-read fans out over every target with history, open
       // or not) would otherwise re-create the entry and pop it back into the
-      // sidebar (#319). A buffer that isn't open has no badge to update anyway.
-      // Snapshot callers (replaceBacklog) ensureBuffer before delegating here.
-      const buf = this.buffers[key(networkId, target)];
+      // sidebar (#319). findByTarget resolves case-insensitively and returns null
+      // when nothing is open, so a broadcast whose target case differs from the
+      // open buffer's key (servers hand us inconsistently-cased names, #289)
+      // still lands on the right buffer instead of silently dropping the badge —
+      // the same resolve-don't-materialize the typing path uses. Snapshot callers
+      // (replaceBacklog) ensureBuffer before delegating here.
+      const buf = this.findByTarget(networkId, target);
       if (!buf) return;
       const lastReadId = Number(payload?.lastReadId) || 0;
       const networks = useNetworksStore();
-      const isActive = networks.activeKey === `${networkId}::${target}`;
+      // Compare against the resolved buffer's canonical key, not the (possibly
+      // differently-cased) broadcast target, so badge suppression tracks the
+      // buffer the user is actually sitting in.
+      const isActive = networks.activeKey === `${buf.networkId}::${buf.target}`;
       // Suppress the unread badge for the buffer the user is sitting in.
       // A read-state broadcast can briefly carry a non-zero unread for the
       // active buffer when an IRC event lands before the mark-read echo;

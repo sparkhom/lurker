@@ -108,15 +108,19 @@
               :network-id="buffer?.networkId ?? null"
             />
             <template v-else-if="row.m?.type === 'join'"
-              ><NickRef :nick="row.m.nick ?? ''" /> joined</template
+              ><NickRef :nick="row.m.nick ?? ''" />{{ eventHostSuffix(row.m) }} joined</template
             >
             <template v-else-if="row.m?.type === 'part'"
-              ><NickRef :nick="row.m.nick ?? ''" /> left<template v-if="row.m.text">
+              ><NickRef :nick="row.m.nick ?? ''" />{{ eventHostSuffix(row.m) }} left<template
+                v-if="row.m.text"
+              >
                 (<LinkedText :text="row.m.text" />)</template
               ></template
             >
             <template v-else-if="row.m?.type === 'quit'"
-              ><NickRef :nick="row.m.nick ?? ''" /> quit<template v-if="row.m.text">
+              ><NickRef :nick="row.m.nick ?? ''" />{{ eventHostSuffix(row.m) }} quit<template
+                v-if="row.m.text"
+              >
                 (<LinkedText :text="row.m.text" />)</template
               ></template
             >
@@ -127,8 +131,10 @@
               ></template
             >
             <template v-else-if="row.m?.type === 'nick'"
-              ><NickRef :nick="row.m.nick ?? ''" /> is now <NickRef :nick="row.m.newNick ?? ''"
-            /></template>
+              ><NickRef :nick="row.m.nick ?? ''" /> is now <NickRef :nick="row.m.newNick ?? ''" />{{
+                eventHostSuffix(row.m)
+              }}</template
+            >
             <template v-else-if="row.m?.type === 'mode'"
               >mode by <NickRef :nick="row.m.nick ?? ''" /><template v-if="row.m.text"
                 >: <LinkedText :text="row.m.text" /></template
@@ -519,6 +525,8 @@ const consolidateMaxNames = computed(
   () => (settings.effective('chat.consolidate_max_names') as number) || 5,
 );
 
+const showEventHost = computed(() => !!settings.effective('chat.show_event_host'));
+
 const collapseAuthorsEnabled = computed(
   () => !!settings.effective('look.message.collapse_authors'),
 );
@@ -791,6 +799,25 @@ function prefixText(m: ChatMessage | undefined): string {
     default:
       return '';
   }
+}
+
+// When the "Show user@host on join/part/quit/nick" setting is on, return the
+// affected user's ` (user@host)` suffix (leading space + parens, ready to drop
+// straight after the nick) for a presence event line — join, part, quit, nick
+// (#322). Returns '' when the setting is off, the userhost is missing
+// (pre-upgrade backlog rows, or an event with no prefix), or either half is
+// absent — the server stores an empty ident/host when it lacks one
+// (`nick!@host` / `nick!ident@`), and a half-mask like `(@host)` reads worse
+// than nothing, so we only render when both pieces are present. The full
+// formatting (leading space + parens) lives here so the four presence-line
+// templates share one source of truth and each call it once (only the matching
+// branch renders per row); reuses parseUserHost so parsing matches the ignore
+// flow exactly.
+function eventHostSuffix(m: ChatMessage | undefined): string {
+  if (!showEventHost.value) return '';
+  const { user, host } = parseUserHost(m?.userhost);
+  if (!user || !host) return '';
+  return ` (${user}@${host})`;
 }
 
 function prefixClass(m: ChatMessage | undefined) {
