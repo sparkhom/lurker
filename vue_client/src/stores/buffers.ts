@@ -831,7 +831,7 @@ export const useBuffersStore = defineStore('buffers', {
         // First-load fetch. The buffer shell exists but has no messages —
         // either it's brand new (profile-modal "Send DM" to a nick we've
         // never DM'd before) or it was pre-created by a side channel
-        // (presence/typing/MONITOR events touch ensureBuffer without
+        // (presence/MONITOR events touch ensureBuffer without
         // seeding history) and the initial backlog snapshot only covers
         // buffers that were already open at socket-connect. Push-notification
         // deep-links land here too, since isOpen() is satisfied by any shell
@@ -863,7 +863,14 @@ export const useBuffersStore = defineStore('buffers', {
       userhost: string | null = null,
     ) {
       if (!nick) return;
-      const buf = ensureBuffer(this, networkId, target);
+      // Only reflect typing inside a buffer that already exists. A typing tag
+      // (TAGMSG +typing) must never materialize a phantom DM buffer for a peer
+      // who never actually messages us — the incoming PRIVMSG is what opens the
+      // DM (#292). Channels are unaffected: their buffer already exists once
+      // joined, and an unknown nick simply has its typing notice dropped until
+      // they say something real.
+      const buf = this.buffers[key(networkId, target)];
+      if (!buf) return;
       clearTypingTimer(networkId, target, nick);
 
       if (state === 'done') {
