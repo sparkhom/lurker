@@ -108,18 +108,24 @@
               :network-id="buffer?.networkId ?? null"
             />
             <template v-else-if="row.m?.type === 'join'"
-              ><NickRef :nick="row.m.nick ?? ''" /><template v-if="joinHost(row.m)">
-                ({{ joinHost(row.m) }})</template
+              ><NickRef :nick="row.m.nick ?? ''" /><template v-if="eventHost(row.m)">
+                ({{ eventHost(row.m) }})</template
               >
               joined</template
             >
             <template v-else-if="row.m?.type === 'part'"
-              ><NickRef :nick="row.m.nick ?? ''" /> left<template v-if="row.m.text">
+              ><NickRef :nick="row.m.nick ?? ''" /><template v-if="eventHost(row.m)">
+                ({{ eventHost(row.m) }})</template
+              >
+              left<template v-if="row.m.text">
                 (<LinkedText :text="row.m.text" />)</template
               ></template
             >
             <template v-else-if="row.m?.type === 'quit'"
-              ><NickRef :nick="row.m.nick ?? ''" /> quit<template v-if="row.m.text">
+              ><NickRef :nick="row.m.nick ?? ''" /><template v-if="eventHost(row.m)">
+                ({{ eventHost(row.m) }})</template
+              >
+              quit<template v-if="row.m.text">
                 (<LinkedText :text="row.m.text" />)</template
               ></template
             >
@@ -130,8 +136,11 @@
               ></template
             >
             <template v-else-if="row.m?.type === 'nick'"
-              ><NickRef :nick="row.m.nick ?? ''" /> is now <NickRef :nick="row.m.newNick ?? ''"
-            /></template>
+              ><NickRef :nick="row.m.nick ?? ''" /> is now
+              <NickRef :nick="row.m.newNick ?? ''" /><template v-if="eventHost(row.m)">
+                ({{ eventHost(row.m) }})</template
+              ></template
+            >
             <template v-else-if="row.m?.type === 'mode'"
               >mode by <NickRef :nick="row.m.nick ?? ''" /><template v-if="row.m.text"
                 >: <LinkedText :text="row.m.text" /></template
@@ -522,7 +531,7 @@ const consolidateMaxNames = computed(
   () => (settings.effective('chat.consolidate_max_names') as number) || 5,
 );
 
-const showJoinHost = computed(() => !!settings.effective('chat.show_join_host'));
+const showEventHost = computed(() => !!settings.effective('chat.show_event_host'));
 
 const collapseAuthorsEnabled = computed(
   () => !!settings.effective('look.message.collapse_authors'),
@@ -798,16 +807,16 @@ function prefixText(m: ChatMessage | undefined): string {
   }
 }
 
-// When the "Show user@host on joins" setting is on, return the joining user's
-// `user@host` for display next to their nick on a JOIN line (#322). Returns
-// null when the setting is off, the userhost is missing (pre-upgrade backlog
-// rows, or a JOIN with no prefix), or either half is absent — the server stores
-// an empty ident/host when it lacks one (`nick!@host` / `nick!ident@`), and a
-// half-mask like `(@host)` reads worse than nothing, so we only render when
-// both pieces are present. Reuses parseUserHost so parsing matches the ignore
-// flow exactly.
-function joinHost(m: ChatMessage | undefined): string | null {
-  if (!showJoinHost.value) return null;
+// When the "Show user@host on join/part/quit" setting is on, return the
+// affected user's `user@host` for display next to their nick on a presence
+// event line — join, part, quit, nick (#322). Returns null when the setting is
+// off, the userhost is missing (pre-upgrade backlog rows, or an event with no
+// prefix), or either half is absent — the server stores an empty ident/host
+// when it lacks one (`nick!@host` / `nick!ident@`), and a half-mask like
+// `(@host)` reads worse than nothing, so we only render when both pieces are
+// present. Reuses parseUserHost so parsing matches the ignore flow exactly.
+function eventHost(m: ChatMessage | undefined): string | null {
+  if (!showEventHost.value) return null;
   const { user, host } = parseUserHost(m?.userhost);
   if (!user || !host) return null;
   return `${user}@${host}`;

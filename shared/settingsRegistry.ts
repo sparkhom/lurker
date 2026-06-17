@@ -688,17 +688,18 @@ export const REGISTRY: readonly SettingOption[] = Object.freeze([
       'are preferred when picking which names to show.',
   },
   {
-    key: 'chat.show_join_host',
-    label: 'Show user@host on joins',
+    key: 'chat.show_event_host',
+    label: 'Show user@host on join/part/quit',
     category: 'chat',
     group: 'consolidate',
     type: 'bool',
     default: false,
     description:
-      'Show the joining user’s user@host next to their nick on JOIN lines ' +
-      '(e.g. "alice (~alice@host.example.net) joined") — useful for channel ops ' +
-      'spotting ban masks. Applies to individual join lines only; bursts that ' +
-      'collapse into the consolidation summary above don’t show host masks.',
+      'Show the affected user’s user@host next to their nick on JOIN, PART, ' +
+      'QUIT, and nick-change lines (e.g. "alice (~alice@host.example.net) ' +
+      'joined") — useful for channel ops spotting ban masks. Applies to ' +
+      'individual lines only; events that collapse into the consolidation ' +
+      'summary above stay host-less. Regular chat messages are unaffected.',
   },
 
   // ─── Composing (outgoing message guardrails) ─────────────────────────
