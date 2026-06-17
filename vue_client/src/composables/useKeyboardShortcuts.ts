@@ -26,10 +26,11 @@ function isCmd(e: KeyboardEvent): boolean {
   return e.metaKey || e.ctrlKey;
 }
 
-// Server pseudo-buffers (`:server:<id>`) are skipped by keyboard nav — a
-// network's console is reached by clicking it, not by cycling channels.
-function isServerEntry(target: string): boolean {
-  return target.startsWith(':server:');
+// Entries keyboard nav can land on: real channels and DMs. The per-network
+// server consoles (`:server:<id>`) and the virtual FRIENDS feed header are
+// walked past, not landed on — you reach those by clicking.
+function isNavTarget(entry: { key: string; target: string }): boolean {
+  return !entry.target.startsWith(':server:') && entry.key !== FRIENDS_KEY;
 }
 
 // IRCCloud-style global shortcuts. Wired at the document level so they fire
@@ -91,23 +92,29 @@ export function useKeyboardShortcuts({
   function step(delta: number, scope: 'all' | 'unread'): void {
     // Both Alt+Arrow (all buffers) and Shift+Alt+Arrow (unread only) walk the
     // full sidebar order across every network — neither is scoped to the
-    // current network — and both skip the server buffers.
-    const list = (scope === 'unread' ? unreadOrder() : order()).filter(
-      (e) => !isServerEntry(e.target),
-    );
-    if (list.length === 0) return;
+    // current network. We index against the *full* list (server consoles and
+    // FRIENDS feed header included) so stepping off one of those skip-only
+    // entries flows within its own section in sidebar order rather than jumping
+    // to the top of the list; isNavTarget then walks past them to a real buffer.
+    const list = scope === 'unread' ? unreadOrder() : order();
+    if (!list.some(isNavTarget)) return;
     const activeKey = networks.activeKey;
     let idx = list.findIndex((e) => e.key === activeKey);
     if (idx === -1) {
-      // Active buffer isn't in the filtered list (e.g. unread navigation when
-      // the current buffer has no unread, or the user is sitting on a server
-      // console). Pick the first item in the requested direction so wrap-around
-      // still feels predictable.
+      // Active buffer isn't in the list (e.g. unread nav when the current
+      // buffer has no unread). Start just outside it so the first step lands on
+      // the first/last entry, matching the requested direction.
       idx = delta > 0 ? -1 : list.length;
     }
-    const next = (idx + delta + list.length) % list.length;
-    const target = list[next];
-    if (target) activateEntry(target);
+    // Advance to the next landable buffer in the requested direction, skipping
+    // server consoles and the FRIENDS feed header and wrapping around.
+    for (let i = 0; i < list.length; i++) {
+      idx = (idx + delta + list.length) % list.length;
+      if (isNavTarget(list[idx])) {
+        activateEntry(list[idx]);
+        return;
+      }
+    }
   }
 
   function onKeydown(e: KeyboardEvent): void {
