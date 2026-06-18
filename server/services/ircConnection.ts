@@ -201,7 +201,10 @@ export class IrcConnection {
   // to — a +R/+M channel that needs a registered nick to speak, a +R user, etc.
   // Learned from the first send rejection and used to stop firing typing
   // TAGMSGs that would each bounce back as another rejection (#283). Lowercase
-  // keys. Cleared on (re)login, when speak permission may have changed.
+  // keys. This never blocks the user's actual messages (those always go out and
+  // surface the error); it only gates typing notifications. Cleared when speak
+  // permission may have changed: on RPL_LOGGEDIN, on (re)registration, and when
+  // we (re)join the channel — so a /part + /join or a reconnect resumes typing.
   unsendableTargets: Set<string>;
   // Last time the user sent a real PRIVMSG/NOTICE/ACTION to a target (lowercase
   // key → epoch ms). Lets the send-rejection handler tell an actual failed
@@ -1013,6 +1016,10 @@ export class IrcConnection {
       }
       if (eventNick === c.user.nick) {
         this.publish({ type: 'channel-joined', target: eventChannel });
+        // Re-joining is a clean "try again" gesture: drop any stale
+        // can't-speak-here mark so typing notifications resume. If we still
+        // can't speak, the next attempt re-learns it from the bounce (#283).
+        this.unsendableTargets.delete(eventChannel.toLowerCase());
         systemLog.log({
           userId: this.network.user_id,
           scope: this.logScope(),

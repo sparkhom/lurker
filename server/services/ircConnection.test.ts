@@ -646,6 +646,32 @@ describe('refused-message handler routing (#283)', () => {
     expect(tagmsg).toHaveBeenCalledTimes(2);
   });
 
+  it('resumes typing after a /part + /join of a blocked channel', () => {
+    const conn = makeConn();
+    conn.upsertChannel('#anime');
+    conn.publish = vi.fn<(event: unknown) => void>();
+    conn.client.raw = vi.fn<(...args: string[]) => void>(); // swallow the on-join MODE request
+    conn.client.user.nick = 'me';
+    (conn.client as unknown as { network: { cap: { enabled: string[] } } }).network = {
+      cap: { enabled: ['message-tags'] },
+    };
+    const tagmsg = vi.fn<(target: string, tags?: Record<string, string>) => void>();
+    conn.client.tagmsg = tagmsg;
+
+    // Channel gets marked unsendable; typing is suppressed.
+    conn.client.emit('unknown command', {
+      command: '477',
+      params: ['nick', '#anime', 'You need to be identified to speak'],
+    });
+    conn.sendTyping('#anime', 'active');
+    expect(tagmsg).not.toHaveBeenCalled();
+
+    // Re-joining is a clean "try again" — the mark clears and typing flows.
+    conn.client.emit('join', { channel: '#anime', nick: 'me' });
+    conn.sendTyping('#anime', 'active');
+    expect(tagmsg).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps 477 as a "Couldn’t join" toast when we are not in the channel', () => {
     const conn = makeConn();
     const publish = vi.fn<(event: unknown) => void>();
