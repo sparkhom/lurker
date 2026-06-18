@@ -10,6 +10,21 @@ Lurker is a self-hosted IRC client: an always-on Node server that stays
 connected to IRC and keeps full history, plus a Vue 3 web UI that reattaches
 from any browser. License is **MPL-2.0** throughout.
 
+Please note that while Lurker is an LLM/Agent friendly project, the project is
+under the direction of Brad Root (amiantos), and just because a feature
+can be added, does not mean it will be accepted. Lurker is deliberately lo-fi
+in many ways, despite the feature set being very modern. So, before you
+commit yourself to working on something that excites you in Lurker, be sure to
+have a discussion with amiantos in the #lurker IRC channel on Libera.Chat to 
+make sure it fits the project ethos.
+
+It should also be assumed most GitHub issues are 'assigned' by default to amiantos.
+If you wish to work on an issue, be sure to ask him about it in the channel first,
+to avoid potentially wasted time. Also note that while I have been saying 'you'
+in the last two paragraphs, but you should probably let your operator handle the
+talking, unless they really would want you to sign onto IRC to try to talk to amiantos
+directly. Please let him know you're an agent up-front just to be nice.
+
 ## Repository layout
 
 ```
