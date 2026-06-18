@@ -5,6 +5,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import { isNodeMode } from '../utils/edition.js';
+import { foldBufferCase } from './foldBufferCase.js';
 
 const dbPath = process.env.DATABASE_PATH || path.join(import.meta.dirname, '../../data/lurker.db');
 // Absolute path to the SQLite file, exported so the export worker can open its
@@ -936,132 +937,22 @@ if (schemaVersion < 7) {
 }
 
 if (schemaVersion < 9) {
-  // Issue #268 repair: a server relaying a different case than we joined with
-  // (DALnet's registered #Christian vs the #christian we joined) forked a
-  // second, metadata-less buffer keyed by the stray case. The code now folds
-  // stray-case channel events into the case we joined with; this one-shot merges
-  // any already-forked buffers into their canonical case across every
-  // target-keyed table. Canonical = the case variant carrying the most messages
-  // — i.e. the buffer you actually used, which is the case you joined with. Ties
-  // (equal message counts) break by `target ASC`, purely for determinism — that
-  // tie-break is arbitrary, not meaningful. Channels that never drifted (a
-  // single case) map to themselves and are left untouched, so #idleRPG stays
-  // #idleRPG. DM targets (no '#' prefix) are never touched. Fresh installs match
-  // no rows.
-  const foldChannelCase = db.transaction(() => {
-    db.exec(`
-      CREATE TEMP TABLE _chan_canon AS
-      SELECT network_id, lower(target) AS lkey, target AS canon FROM (
-        SELECT network_id, target,
-               ROW_NUMBER() OVER (
-                 PARTITION BY network_id, lower(target)
-                 ORDER BY COUNT(*) DESC, target ASC
-               ) AS rn
-        FROM messages WHERE target LIKE '#%'
-        GROUP BY network_id, target
-      ) WHERE rn = 1
-    `);
-    // SQL fragments shared across the per-table folds. canonExpr resolves a
-    // row's canonical channel case; needsFold matches only off-case channel rows
-    // (so single-case channels and DMs are skipped). Table names are literals.
-    const canonExpr = (t: string) =>
-      `(SELECT c.canon FROM _chan_canon c
-        WHERE c.network_id = ${t}.network_id AND c.lkey = lower(${t}.target))`;
-    const needsFold = (t: string) =>
-      `${t}.target LIKE '#%' AND EXISTS (SELECT 1 FROM _chan_canon c
-        WHERE c.network_id = ${t}.network_id AND c.lkey = lower(${t}.target)
-          AND c.canon <> ${t}.target)`;
-
-    // id-keyed (target not unique) — straight rewrite. messages_fts only indexes
-    // text, so the AFTER UPDATE trigger reindexes identical text (harmless).
-    for (const t of ['messages', 'input_history']) {
-      db.exec(`UPDATE ${t} SET target = ${canonExpr(t)} WHERE ${needsFold(t)}`);
-    }
-
-    // channels: UNIQUE(network_id, name). Fold to canon (joined if ANY variant
-    // was joined, earliest created_at), then drop the off-case variant.
-    db.exec(`
-      INSERT INTO channels (network_id, name, joined, created_at)
-        SELECT ch.network_id, c.canon, ch.joined, ch.created_at
-        FROM channels ch JOIN _chan_canon c
-          ON c.network_id = ch.network_id AND c.lkey = lower(ch.name)
-        WHERE ch.name LIKE '#%' AND c.canon <> ch.name
-      ON CONFLICT(network_id, name) DO UPDATE SET
-        joined = MAX(channels.joined, excluded.joined),
-        created_at = MIN(channels.created_at, excluded.created_at)
-    `);
-    db.exec(`
-      DELETE FROM channels WHERE name LIKE '#%' AND EXISTS (
-        SELECT 1 FROM _chan_canon c
-        WHERE c.network_id = channels.network_id AND c.lkey = lower(channels.name)
-          AND c.canon <> channels.name)
-    `);
-
-    // buffer_reads: composite PK. Merge keeping the furthest read pointer and any
-    // clear marker, then drop the variant so nothing resurfaces as unread.
-    db.exec(`
-      INSERT INTO buffer_reads
-        (user_id, network_id, target, last_read_message_id, updated_at,
-         cleared_before_message_id, cleared_at)
-        SELECT br.user_id, br.network_id, c.canon, br.last_read_message_id, br.updated_at,
-               br.cleared_before_message_id, br.cleared_at
-        FROM buffer_reads br JOIN _chan_canon c
-          ON c.network_id = br.network_id AND c.lkey = lower(br.target)
-        WHERE br.target LIKE '#%' AND c.canon <> br.target
-      ON CONFLICT(user_id, network_id, target) DO UPDATE SET
-        last_read_message_id =
-          MAX(buffer_reads.last_read_message_id, excluded.last_read_message_id),
-        -- Keep the *furthest* /clear boundary (and its matching cleared_at) so
-        -- folding can't un-clear messages the user cleared in the other variant.
-        -- NULLIF restores NULL when neither row had a marker.
-        cleared_before_message_id = NULLIF(
-          MAX(COALESCE(buffer_reads.cleared_before_message_id, 0),
-              COALESCE(excluded.cleared_before_message_id, 0)), 0),
-        cleared_at = CASE
-          WHEN COALESCE(excluded.cleared_before_message_id, 0)
-               > COALESCE(buffer_reads.cleared_before_message_id, 0)
-          THEN excluded.cleared_at ELSE buffer_reads.cleared_at END,
-        updated_at = MAX(buffer_reads.updated_at, excluded.updated_at)
-    `);
-    db.exec(`DELETE FROM buffer_reads WHERE ${needsFold('buffer_reads')}`);
-
-    // closed_buffers: a stray-cased row was the junk buffer the user closed; the
-    // canonical buffer's own open/closed state wins, so drop the off-case rows.
-    db.exec(`DELETE FROM closed_buffers WHERE ${needsFold('closed_buffers')}`);
-
-    // Remaining per-(user, network, target) state: move to canon, or drop if a
-    // canon row already exists (its state wins).
-    for (const t of [
-      'pinned_buffers',
-      'nicklist_collapsed',
-      'channel_notify_settings',
-      'user_drafts',
-    ]) {
-      db.exec(`UPDATE OR IGNORE ${t} SET target = ${canonExpr(t)} WHERE ${needsFold(t)}`);
-      db.exec(`DELETE FROM ${t} WHERE ${needsFold(t)}`);
-    }
-
-    // Keep pin positions dense per (user, network): a dropped duplicate pin can
-    // leave a gap, and reorderPins assumes 0..n-1 (same fix as schemaVersion 7).
-    db.exec(`
-      WITH renum AS (
-        SELECT user_id, network_id, target,
-               ROW_NUMBER() OVER (
-                 PARTITION BY user_id, network_id ORDER BY position ASC, target ASC
-               ) - 1 AS new_pos
-        FROM pinned_buffers
-      )
-      UPDATE pinned_buffers SET position = (
-        SELECT new_pos FROM renum
-        WHERE renum.user_id = pinned_buffers.user_id
-          AND renum.network_id = pinned_buffers.network_id
-          AND renum.target = pinned_buffers.target
-      )
-    `);
-
-    db.exec(`DROP TABLE _chan_canon`);
-  });
-  foldChannelCase();
+  // Issue #268/#289/#327 repair: a server relaying a different case than we
+  // joined/opened with (DALnet's registered #Christian vs the #christian we
+  // joined; a DM peer presented as `bob` vs the `Bob` we /query'd) forked a
+  // second, metadata-less buffer keyed by the stray case. The live paths now
+  // fold case forward; this one-shot merges any already-forked buffers into
+  // their canonical case across every target-keyed table. Canonical = the case
+  // variant carrying the most messages — i.e. the buffer you actually used. Ties
+  // (equal counts) break by `target ASC`, purely for determinism. A target that
+  // never drifted (a single case) maps to itself and is left untouched, so
+  // #idleRPG stays #idleRPG. The ':'-virtual buffers are never folded; fresh
+  // installs match no rows. scope 'all' covers channels AND DMs (and &/+/!
+  // channels): the DM fork was found later (#289/#327) but the affected DBs are
+  // still pre-9, so folding everything here cleans them on upgrade without a
+  // separate migration. The logic lives in foldBufferCase() so the operator
+  // script (tools/fold-buffer-case.ts) re-runs the exact same merge on demand.
+  foldBufferCase(db, { scope: 'all' });
 }
 
 if (schemaVersion < SCHEMA_VERSION) {

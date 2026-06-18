@@ -1,0 +1,127 @@
+// Copyright (c) 2026 Brad Root
+// SPDX-License-Identifier: Elastic-2.0
+
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import type DatabaseType from 'better-sqlite3';
+
+// Stand up the real schema in a temp DB (the migrate() in index.ts runs on
+// first import), then exercise the extracted fold against it — an integration
+// test over the actual tables, not a hand-rolled subset.
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lurker-test-foldcase-'));
+process.env.DATABASE_PATH = path.join(tmpDir, 'test.db');
+
+let db: DatabaseType.Database;
+let createUser: typeof import('./users.js').createUser;
+let createNetwork: typeof import('./networks.js').createNetwork;
+let insertMessage: typeof import('./messages.js').insertMessage;
+let setReadState: typeof import('./bufferReads.js').setReadState;
+let foldBufferCase: typeof import('./foldBufferCase.js').foldBufferCase;
+let userId: number;
+
+const T = '2026-06-01T00:00:00.000Z';
+
+beforeAll(async () => {
+  db = (await import('./index.js')).default;
+  ({ createUser } = await import('./users.js'));
+  ({ createNetwork } = await import('./networks.js'));
+  ({ insertMessage } = await import('./messages.js'));
+  ({ setReadState } = await import('./bufferReads.js'));
+  ({ foldBufferCase } = await import('./foldBufferCase.js'));
+  userId = createUser('fold-alice').id;
+});
+
+afterAll(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+
+function freshNetwork(): number {
+  return createNetwork(userId, { name: 'libera', host: 'h', port: 6697, tls: true, nick: 'a' })!.id;
+}
+function seed(networkId: number, target: string, count: number) {
+  for (let i = 0; i < count; i++)
+    insertMessage({ networkId, target, time: T, type: 'message', nick: 'x', text: 'hi' });
+}
+function targetCounts(networkId: number): Record<string, number> {
+  const rows = db
+    .prepare(`SELECT target, COUNT(*) AS n FROM messages WHERE network_id = ? GROUP BY target`)
+    .all(networkId) as { target: string; n: number }[];
+  return Object.fromEntries(rows.map((r) => [r.target, r.n]));
+}
+
+describe('foldBufferCase', () => {
+  it('dry run reports forks without mutating', () => {
+    const net = freshNetwork();
+    seed(net, '#CoolChan', 3);
+    seed(net, '#coolchan', 1); // stray case
+    seed(net, 'Bob', 2);
+    seed(net, 'bob', 1); // stray-case DM
+
+    const report = foldBufferCase(db, { scope: 'all', dryRun: true });
+
+    expect(report.applied).toBe(false);
+    expect(report.rowsAffected.messages).toBeGreaterThan(0);
+    // Both forks surface, each folding to the most-messages casing.
+    const chan = report.forks.find((f) => f.networkId === net && f.lkey === '#coolchan');
+    const dm = report.forks.find((f) => f.networkId === net && f.lkey === 'bob');
+    expect(chan?.canonical).toBe('#CoolChan');
+    expect(dm?.canonical).toBe('Bob');
+    // Nothing was written — both casings still present.
+    expect(targetCounts(net)).toEqual({ '#CoolChan': 3, '#coolchan': 1, Bob: 2, bob: 1 });
+  });
+
+  it('folds channel and DM forks to the most-messages casing', () => {
+    const net = freshNetwork();
+    seed(net, '#CoolChan', 3);
+    seed(net, '#coolchan', 1);
+    seed(net, 'Bob', 2);
+    seed(net, 'bob', 1);
+
+    foldBufferCase(db, { scope: 'all' });
+
+    // Channel and DM each collapse onto the majority casing; no stray rows left.
+    expect(targetCounts(net)).toEqual({ '#CoolChan': 4, Bob: 3 });
+  });
+
+  it('channels-only scope leaves DM forks untouched', () => {
+    const net = freshNetwork();
+    seed(net, '#CoolChan', 2);
+    seed(net, '#coolchan', 1);
+    seed(net, 'Bob', 2);
+    seed(net, 'bob', 1);
+
+    foldBufferCase(db, { scope: 'channels' });
+
+    // The channel folds; the DM casings stay split (v9 behavior).
+    expect(targetCounts(net)).toEqual({ '#CoolChan': 3, Bob: 2, bob: 1 });
+  });
+
+  it('merges buffer_reads keeping the furthest read pointer', () => {
+    const net = freshNetwork();
+    seed(net, '#Chan', 2);
+    seed(net, '#chan', 1); // stray, lower message count -> not canonical
+    setReadState(userId, net, '#Chan', 5);
+    setReadState(userId, net, '#chan', 10); // further read pointer on the stray case
+
+    foldBufferCase(db, { scope: 'all' });
+
+    const reads = db
+      .prepare(`SELECT target, last_read_message_id AS lr FROM buffer_reads WHERE network_id = ?`)
+      .all(net) as { target: string; lr: number }[];
+    expect(reads).toHaveLength(1);
+    expect(reads[0].target).toBe('#Chan');
+    expect(reads[0].lr).toBe(10); // MAX of the two merged pointers
+  });
+
+  it('is a no-op on an unforked database (idempotent)', () => {
+    const net = freshNetwork();
+    seed(net, '#solo', 3);
+    seed(net, 'Carol', 2);
+
+    const report = foldBufferCase(db, { scope: 'all' });
+
+    expect(report.forks).toHaveLength(0);
+    expect(report.rowsAffected.messages).toBe(0);
+    expect(targetCounts(net)).toEqual({ '#solo': 3, Carol: 2 });
+  });
+});
