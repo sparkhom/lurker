@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Brad Root
-// SPDX-License-Identifier: Elastic-2.0
+// SPDX-License-Identifier: MPL-2.0
 
 import Database from 'better-sqlite3';
 import path from 'path';
@@ -762,7 +762,7 @@ if (schemaVersion < 2) {
   const backfill = db.transaction(() => {
     const parity = new Map<string, number>();
     for (const row of stripedRows) {
-      const key = `${row.network_id} ${row.target}`;
+      const key = `${row.network_id}\0${row.target}`;
       const next = (parity.get(key) ?? 1) ^ 1;
       parity.set(key, next);
       setAlt.run(next, row.id);

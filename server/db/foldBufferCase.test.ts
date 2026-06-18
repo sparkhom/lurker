@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Brad Root
-// SPDX-License-Identifier: Elastic-2.0
+// SPDX-License-Identifier: MPL-2.0
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fs from 'fs';
