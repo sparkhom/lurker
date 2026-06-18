@@ -70,6 +70,14 @@ export function unregisterIdent(id: number | null): void {
 // be the server the connection actually goes to closes both. `addrMiss` flags the
 // diagnostic case where the ports matched a live connection but the address did
 // not.
+//
+// The cost of that strictness, accepted deliberately: a network whose ident
+// callback originates from a different IP than its IRC listener (a
+// multi-homed/load-balanced ircd, or one behind its own NAT) won't match, so its
+// users go unverified. There is no fallback that ignores the address without
+// reopening the enumeration hole. Mainstream ircds (solanum/charybdis/InspIRCd)
+// call back from the accepting socket's IP, so this is rare — and noteAddrMiss()
+// escalates loudly when it does happen, rather than failing silently.
 function lookupIdent(
   lport: number,
   rport: number,
@@ -108,22 +116,34 @@ export function isPrivateAddress(address: string): boolean {
 }
 
 // A query whose ports match a live connection but whose source address doesn't is
-// usually harmless — a :113 scan the address check correctly refuses. But when
-// that source is a PRIVATE address while our connections go to public servers,
-// the container almost certainly isn't seeing real inbound source IPs (e.g.
-// Docker routing :113 through its userland proxy, so every callback appears to
-// come from the bridge gateway). In that state EVERY ident verification fails, so
-// we escalate from the per-query warn to a one-time, actionable error rather than
-// letting an operator rediscover the cause from scratch during a rebuild.
+// usually harmless — a :113 scan the address check correctly refuses. But the same
+// signal also marks the two wholesale failures that are hardest to diagnose from
+// scattered warns, so on the FIRST such miss we escalate once with a message
+// tailored to the likely cause:
+//   - a PRIVATE/loopback source means the container isn't seeing real inbound IPs
+//     (e.g. Docker routing :113 through its userland proxy, so every callback
+//     looks like it came from the bridge gateway);
+//   - a PUBLIC source that still doesn't match points at the network's ident
+//     callback originating from a different IP than the server we connected to (a
+//     multi-homed/load-balanced ircd; see lookupIdent) — those users can't be
+//     verified, and there's no fallback that wouldn't reopen :113 enumeration.
+// Escalating on any miss (not just the private one) is what surfaces the public
+// case, which is the wholesale failure with no otherwise-obvious cause; the
+// once-per-process gate keeps a stray scan hit from becoming log spam.
 let wholesaleFailureWarned = false;
 function noteAddrMiss(lport: number, rport: number, queryRemoteAddress: string): void {
   console.warn(
     `[identd] ${lport},${rport} matched a live connection but query address ${queryRemoteAddress} did not — answering NO-USER`,
   );
-  if (!wholesaleFailureWarned && isPrivateAddress(queryRemoteAddress)) {
-    wholesaleFailureWarned = true;
+  if (wholesaleFailureWarned) return;
+  wholesaleFailureWarned = true;
+  if (isPrivateAddress(queryRemoteAddress)) {
     console.error(
-      `[identd] idents are failing for ALL connections: the :113 callback came from ${queryRemoteAddress}, a private address — this container is not seeing IRC servers' real source IPs. Docker is most likely routing :113 through its userland proxy instead of preserving the source. Fix: run the cell with network_mode: host (see deploy/CELL_REBUILD.md).`,
+      `[identd] idents are failing wholesale: a :113 callback came from ${queryRemoteAddress}, a private address — this container is not seeing IRC servers' real source IPs. Docker is most likely routing :113 through its userland proxy instead of preserving the source. Fix: run the cell with network_mode: host.`,
+    );
+  } else {
+    console.error(
+      `[identd] a :113 callback from ${queryRemoteAddress} did not match the server it was issued for. If a whole network's users show as unverified, that network's ident daemon likely originates from a different IP than its IRC listener (multi-homed/load-balanced); the enumeration-safe 4-tuple match cannot answer those.`,
     );
   }
 }
