@@ -622,6 +622,24 @@ function onPickReset() {
   closeColorPicker();
 }
 
+// Soft-wrapped composer treated as a paragraph editor — see the Home/End block
+// in onKeydown (issue #234). Pure string math: the logical line is the run of
+// text between newlines surrounding `pos`.
+function logicalLineStart(value: string, pos: number): number {
+  // lastIndexOf with fromIndex -1 (pos === 0) returns -1, so this lands on 0.
+  return value.lastIndexOf('\n', pos - 1) + 1;
+}
+function logicalLineEnd(value: string, pos: number): number {
+  const nl = value.indexOf('\n', pos);
+  return nl === -1 ? value.length : nl;
+}
+
+// Detection mirrors KeyboardHelpModal.vue — used to gate the Cmd+←/→ caret keys
+// to macOS so we don't hijack Super/Win+Arrow on other platforms.
+const isMac =
+  typeof navigator !== 'undefined' &&
+  /mac|iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent || '');
+
 function onKeydown(e: KeyboardEvent): void {
   // Formatting shortcuts (Cmd/Ctrl + B/I/U). preventDefault stops the browser
   // from owning Cmd+B for "bookmarks bar"; stopPropagation keeps the global
@@ -788,6 +806,56 @@ function onKeydown(e: KeyboardEvent): void {
     // Down = at last logical line (no \n after caret).
     if (!atHistoryEdge(e.key)) return;
     handleHistoryNav(e);
+    return;
+  }
+  // Home / End — and the macOS Cmd+←/→ equivalents — jump the caret to the
+  // logical-line edge (text between newlines), not the visual wrap row the
+  // browser picks by default. A chat message is the unit of thought, so landing
+  // at the start/end of *your line* beats landing at an incidental soft-wrap
+  // (issue #234). The two only differ when one logical line wraps; short
+  // messages are unaffected. Shift extends from the existing anchor. Mac-gated
+  // for the Cmd variant so we don't grab Super/Win+Arrow; Home/End are
+  // universal. Cmd+↑/↓ (whole draft) and Option/Ctrl+arrows (word / emacs) stay
+  // native. Skipped mid-IME so the keys keep driving the candidate window.
+  if (
+    !e.isComposing &&
+    (e.key === 'Home' ||
+      e.key === 'End' ||
+      (isMac &&
+        e.metaKey &&
+        !e.altKey &&
+        !e.ctrlKey &&
+        (e.key === 'ArrowLeft' || e.key === 'ArrowRight')))
+  ) {
+    const el = inputEl.value;
+    if (el) {
+      e.preventDefault();
+      // Caret moved — drop any in-progress Tab-completion cycle.
+      if (completion) resetCompletion();
+      const toStart = e.key === 'Home' || e.key === 'ArrowLeft';
+      const value = el.value;
+      const dir = el.selectionDirection;
+      const selStart = el.selectionStart ?? 0;
+      const selEnd = el.selectionEnd ?? 0;
+      // The edge that moves is the active one; for a collapsed caret both ends
+      // coincide. selectionDirection is 'backward' only after a leftward grow.
+      const activeEdge = dir === 'backward' ? selStart : selEnd;
+      const target = toStart
+        ? logicalLineStart(value, activeEdge)
+        : logicalLineEnd(value, activeEdge);
+      if (e.shiftKey) {
+        // Extend: pin the non-active anchor, move the active edge to target —
+        // flipping direction if the active edge crosses the anchor.
+        const anchor = dir === 'backward' ? selEnd : selStart;
+        el.setSelectionRange(
+          Math.min(anchor, target),
+          Math.max(anchor, target),
+          target < anchor ? 'backward' : 'forward',
+        );
+      } else {
+        el.setSelectionRange(target, target);
+      }
+    }
     return;
   }
   if (e.key !== 'Tab') {
