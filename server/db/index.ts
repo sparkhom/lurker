@@ -952,7 +952,9 @@ if (schemaVersion < 9) {
   // still pre-9, so folding everything here cleans them on upgrade without a
   // separate migration. The logic lives in foldBufferCase() so the operator
   // script (tools/fold-buffer-case.ts) re-runs the exact same merge on demand.
-  foldBufferCase(db, { scope: 'all' });
+  // report:false skips the human-facing fork summary (two extra `messages`
+  // scans) the migration would only discard.
+  foldBufferCase(db, { scope: 'all', report: false });
 }
 
 if (schemaVersion < SCHEMA_VERSION) {

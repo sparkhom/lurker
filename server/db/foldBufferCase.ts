@@ -59,7 +59,8 @@ export interface FoldReport {
   scope: FoldScope;
   applied: boolean;
   // Per-table count of rows that were (or, in dryRun, would be) rewritten or
-  // dropped — the authoritative "what changes". Keyed by table name.
+  // dropped — the authoritative "what changes". Keyed by table name. Empty when
+  // the caller passed report:false (the migration), which skips its computation.
   rowsAffected: Record<string, number>;
   // Human-facing fork summary derived from message counts: each lkey that has
   // more than one message-cased variant, with the chosen canonical. A fork whose
@@ -84,10 +85,15 @@ const TARGET_TABLES = [
 
 export function foldBufferCase(
   db: Database.Database,
-  opts: { scope?: FoldScope; dryRun?: boolean } = {},
+  opts: { scope?: FoldScope; dryRun?: boolean; report?: boolean } = {},
 ): FoldReport {
   const scope: FoldScope = opts.scope ?? 'channels';
   const dryRun = opts.dryRun ?? false;
+  // The migration discards the return, so it opts out (report:false) to skip the
+  // two extra full `messages` scans the report costs — the per-table COUNTs and
+  // the variant GROUP BY. The operator script keeps it (default true); it prints
+  // the report in both dry-run and apply. The apply path needs only _buf_canon.
+  const wantReport = opts.report ?? true;
 
   // Which targets the fold considers. 'channels' restricts to #-prefixed
   // channels; 'all' covers every real buffer — every channel prefix (#, &, +, !)
@@ -122,59 +128,64 @@ export function foldBufferCase(
       ) WHERE rn = 1
     `);
 
-    // ---- Report (computed pre-apply so counts reflect what will change) ----
+    // ---- Report (computed pre-apply so counts reflect what will change).
+    // Skipped entirely when the caller doesn't want it (the migration), since
+    // these queries scan `messages` twice more on top of _buf_canon. ----
     const rowsAffected: Record<string, number> = {};
-    for (const t of TARGET_TABLES) {
-      rowsAffected[t] = (
-        db.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE ${needsFold(t)}`).get() as { n: number }
-      ).n;
-    }
-    rowsAffected['channels'] = (
-      db
-        .prepare(
-          `SELECT COUNT(*) AS n FROM channels
-             WHERE ${pred('name')} AND EXISTS (
-               SELECT 1 FROM _buf_canon c
-               WHERE c.network_id = channels.network_id AND c.lkey = lower(channels.name)
-                 AND c.canon <> channels.name)`,
-        )
-        .get() as { n: number }
-    ).n;
-
-    const variantRows = db
-      .prepare(
-        `SELECT m.network_id AS networkId, lower(m.target) AS lkey, m.target AS target,
-                COUNT(*) AS messages
-           FROM messages m WHERE ${pred('m.target')}
-           GROUP BY m.network_id, m.target`,
-      )
-      .all() as { networkId: number; lkey: string; target: string; messages: number }[];
-    const canonByKey = new Map<string, string>();
-    for (const r of db
-      .prepare(`SELECT network_id AS networkId, lkey, canon FROM _buf_canon`)
-      .all() as {
-      networkId: number;
-      lkey: string;
-      canon: string;
-    }[]) {
-      canonByKey.set(`${r.networkId}::${r.lkey}`, r.canon);
-    }
-    const grouped = new Map<string, FoldGroup>();
-    for (const r of variantRows) {
-      const k = `${r.networkId}::${r.lkey}`;
-      let g = grouped.get(k);
-      if (!g) {
-        g = {
-          networkId: r.networkId,
-          lkey: r.lkey,
-          canonical: canonByKey.get(k) ?? r.target,
-          variants: [],
-        };
-        grouped.set(k, g);
+    let forks: FoldGroup[] = [];
+    if (wantReport) {
+      for (const t of TARGET_TABLES) {
+        rowsAffected[t] = (
+          db.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE ${needsFold(t)}`).get() as { n: number }
+        ).n;
       }
-      g.variants.push({ target: r.target, messages: r.messages });
+      rowsAffected['channels'] = (
+        db
+          .prepare(
+            `SELECT COUNT(*) AS n FROM channels
+               WHERE ${pred('name')} AND EXISTS (
+                 SELECT 1 FROM _buf_canon c
+                 WHERE c.network_id = channels.network_id AND c.lkey = lower(channels.name)
+                   AND c.canon <> channels.name)`,
+          )
+          .get() as { n: number }
+      ).n;
+
+      const variantRows = db
+        .prepare(
+          `SELECT m.network_id AS networkId, lower(m.target) AS lkey, m.target AS target,
+                  COUNT(*) AS messages
+             FROM messages m WHERE ${pred('m.target')}
+             GROUP BY m.network_id, m.target`,
+        )
+        .all() as { networkId: number; lkey: string; target: string; messages: number }[];
+      const canonByKey = new Map<string, string>();
+      for (const r of db
+        .prepare(`SELECT network_id AS networkId, lkey, canon FROM _buf_canon`)
+        .all() as {
+        networkId: number;
+        lkey: string;
+        canon: string;
+      }[]) {
+        canonByKey.set(`${r.networkId}::${r.lkey}`, r.canon);
+      }
+      const grouped = new Map<string, FoldGroup>();
+      for (const r of variantRows) {
+        const k = `${r.networkId}::${r.lkey}`;
+        let g = grouped.get(k);
+        if (!g) {
+          g = {
+            networkId: r.networkId,
+            lkey: r.lkey,
+            canonical: canonByKey.get(k) ?? r.target,
+            variants: [],
+          };
+          grouped.set(k, g);
+        }
+        g.variants.push({ target: r.target, messages: r.messages });
+      }
+      forks = [...grouped.values()].filter((g) => g.variants.length > 1);
     }
-    const forks = [...grouped.values()].filter((g) => g.variants.length > 1);
 
     if (!dryRun) {
       // id-keyed (target not unique) — straight rewrite. messages_fts only indexes

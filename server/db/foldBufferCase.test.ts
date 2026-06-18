@@ -113,6 +113,21 @@ describe('foldBufferCase', () => {
     expect(reads[0].lr).toBe(10); // MAX of the two merged pointers
   });
 
+  it('still folds with report:false (the migration path), returning an empty report', () => {
+    const net = freshNetwork();
+    seed(net, '#CoolChan', 3);
+    seed(net, '#coolchan', 1);
+    seed(net, 'Bob', 2);
+    seed(net, 'bob', 1);
+
+    const report = foldBufferCase(db, { scope: 'all', report: false });
+
+    // The merge still happens; only the human-facing summary is skipped.
+    expect(targetCounts(net)).toEqual({ '#CoolChan': 4, Bob: 3 });
+    expect(report.forks).toEqual([]);
+    expect(report.rowsAffected).toEqual({});
+  });
+
   it('is a no-op on an unforked database (idempotent)', () => {
     const net = freshNetwork();
     seed(net, '#solo', 3);
