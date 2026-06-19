@@ -212,6 +212,11 @@ export class IrcConnection {
   // message (surface it inline) from an automated TAGMSG/typing bounce (stay
   // silent) — the rejection numeric doesn't say which command it refused (#283).
   lastUserSendAt: Map<string, number>;
+  // Channels we auto-issued a WHO for on join (lowercase). The auto-WHO learns
+  // away/ident state and would flood the server buffer if echoed per-member, so
+  // the 'wholist' handler consumes these silently. Any wholist NOT in this set
+  // is a user-typed /who and gets rendered to the server buffer (#342).
+  autoWhoTargets: Set<string>;
 
   constructor({ network, onEvent }: { network: Network; onEvent: (event: EnrichedEvent) => void }) {
     this.network = network;
@@ -265,6 +270,7 @@ export class IrcConnection {
     this.identdId = null;
     this.unsendableTargets = new Set();
     this.lastUserSendAt = new Map();
+    this.autoWhoTargets = new Set();
     this.bind();
   }
 
@@ -433,13 +439,15 @@ export class IrcConnection {
   bind(): void {
     const c = this.client;
 
-    // Surface server numerics (welcome banner, lusers, SASL confirmation,
-    // umode, hostmask) into the server buffer. irc-framework consumes these
-    // for internal state and emits structured events ('registered', 'server
-    // options', …) without re-emitting the original text, so the raw stream
-    // is the only place the wire text is still visible. See
-    // formatServerNumeric() for the per-command rendering and the deliberate
-    // exclusions (005/ISUPPORT, etc.).
+    // The server buffer is the authentic log of everything the server sends:
+    // we default to surfacing every numeric here (welcome banner, lusers, SASL
+    // confirmation, /who, /whois, /oper, /time, …) and only suppress a small
+    // denylist (see isServerBufferDeniedNumeric). This is the single place that
+    // sees every numeric — the 'raw' event fires for each wire line regardless
+    // of whether irc-framework modeled it, so nothing vanishes the way it did
+    // under the old curated allowlist (#342). Pretty surfaces (nicklist, topic
+    // bar, whois modal) are rendered additively by their structured handlers;
+    // they never replace the raw line here.
     c.on('raw', (event: { from_server: boolean; line: string }) => {
       if (!event?.from_server || typeof event.line !== 'string') return;
       let msg;
@@ -448,17 +456,19 @@ export class IrcConnection {
       } catch (_) {
         return;
       }
-      const text = formatServerNumeric(msg);
+      if (isServerBufferDeniedNumeric((msg?.command || '').toString())) return;
+      // formatUnknownNumeric only renders 3-digit numerics (it strips the
+      // leading recipient-nick param), so PRIVMSG/JOIN/NOTICE/etc. naturally
+      // fall through and never pollute the server buffer.
+      const text = formatUnknownNumeric(msg);
       if (!text) return;
       this.publish({ type: 'motd', target: this.serverTarget(), text });
     });
 
-    // Catch-all for inbound server numerics/commands irc-framework has no
-    // handler for (391 RPL_TIME, 351 RPL_VERSION, 477 ERR_NEEDREGGEDNICK, plus
-    // any server-specific numeric). Without this they surface only as the
-    // 'unknown command' event — which nothing listened to — and were dropped on
-    // the floor (#262). The 'raw' handler above renders only the curated
-    // allowlist in formatServerNumeric, so everything else vanished silently.
+    // Special-case routing for two overloaded rejection numerics. The generic
+    // display of unmodeled numerics now happens on the 'raw' handler above
+    // (#342) — this handler only intercepts cases that belong on a channel/DM
+    // surface instead of (or in addition to) the server buffer.
     c.on('unknown command', (cmd: { command?: string; params?: string[] }) => {
       const command = (cmd?.command || '').toString();
       const params = Array.isArray(cmd?.params) ? (cmd.params as string[]) : [];
@@ -480,7 +490,8 @@ export class IrcConnection {
       // here too. Route them to the channel as an ephemeral toast so the failure
       // surfaces where the user tried to join, not buried in the server buffer
       // (#260). The client never opened the buffer (it waits for channel-joined),
-      // so this is toast-only.
+      // so this is toast-only — the raw line is still logged to the server buffer
+      // by the 'raw' handler, which is the additive authentic record.
       const joinMsg = joinRejectionMessage(command);
       if (joinMsg && channel) {
         this.publishEphemeral({
@@ -491,15 +502,6 @@ export class IrcConnection {
         });
         return;
       }
-      // Dedup guard: if formatServerNumeric already renders this numeric, the
-      // 'raw' handler above produced the line — don't double-render. Only
-      // genuinely unclaimed numerics fall through to the catch-all. Pass the
-      // sanitized {command, params} (not the raw cmd) so a malformed params
-      // value can't throw inside the formatters and crash the connection.
-      if (formatServerNumeric({ command, params })) return;
-      const text = formatUnknownNumeric({ command, params });
-      if (!text) return;
-      this.publish({ type: 'motd', target: this.serverTarget(), text });
     });
 
     // RPL_LOGGEDIN (900): the user identified to services mid-session (NickServ
@@ -622,6 +624,7 @@ export class IrcConnection {
       unregisterIdent(this.identdId);
       this.identdId = null;
       this.userModes.clear();
+      this.autoWhoTargets.clear();
       this.stopLagPinger();
       this.cancelPendingConnectCommands();
       this.lagMs = null;
@@ -1381,9 +1384,14 @@ export class IrcConnection {
         members: Array.from(ch.members.values()).map(memberSnapshot),
       });
       // Issue a WHO so we learn the current away state for everyone in the
-      // channel. away-notify keeps it live after this initial sync.
+      // channel. away-notify keeps it live after this initial sync. Mark it so
+      // the 'wholist' handler consumes the reply silently instead of echoing
+      // every member to the server buffer (#342).
       try {
         c.who(eventChannel);
+        // Mark only after a successful send: if c.who() throws, a stale flag
+        // would silently suppress a later user-typed /who for this channel.
+        this.autoWhoTargets.add(eventChannel.toLowerCase());
       } catch (_) {
         /* ignore */
       }
@@ -1391,10 +1399,33 @@ export class IrcConnection {
 
     c.on('wholist', (event: Record<string, unknown>) => {
       const eventTarget = event.target as string | undefined;
-      const ch = this.channels.get(eventTarget?.toLowerCase() ?? '');
+      const targetKey = eventTarget?.toLowerCase() ?? '';
+      const users = (event.users as Record<string, unknown>[]) || [];
+
+      // Render a user-typed /who to the server buffer. The auto-WHO we fire on
+      // join is flagged in autoWhoTargets and consumed silently (echoing one
+      // line per member would flood the buffer); anything else is the user
+      // asking, so surface it like any other server response (#342). This runs
+      // before the channel lookup below so /who <nick> and /who <unjoined-chan>
+      // — where we have no tracked channel — still render.
+      if (this.autoWhoTargets.has(targetKey)) {
+        this.autoWhoTargets.delete(targetKey);
+      } else {
+        for (const u of users) {
+          const text = formatWhoReplyLine(u);
+          if (text) this.publish({ type: 'motd', target: this.serverTarget(), text });
+        }
+        this.publish({
+          type: 'motd',
+          target: this.serverTarget(),
+          text: `End of /WHO list${eventTarget ? ` for ${eventTarget}` : ''}.`,
+        });
+      }
+
+      const ch = this.channels.get(targetKey);
       if (!ch) return;
       let changed = false;
-      for (const u of (event.users as Record<string, unknown>[]) || []) {
+      for (const u of users) {
         if (!u || !u.nick) continue;
         const m = ch.members.get((u.nick as string).toLowerCase());
         if (!m) continue;
@@ -1452,10 +1483,10 @@ export class IrcConnection {
     // (irc-framework synthesizes a whois event with that shape on
     // ERR_NOSUCHNICK) so the modal can flip to its empty state.
     //
-    // The server buffer gets the *raw* whois lines instead — rendered straight
-    // off the wire by formatServerNumeric on the 'raw' path (#281), not the
-    // parsed JSON this event carries — so nothing whois-related is published
-    // here beyond the modal payload.
+    // The server buffer gets the *raw* whois lines instead — every numeric is
+    // rendered straight off the wire by the default-show 'raw' handler (#281,
+    // #342), not the parsed JSON this event carries — so nothing whois-related
+    // is published here beyond the modal payload.
     c.on('whois', (event: Record<string, unknown>) => {
       if (!event || !event.nick) return;
       this.publishEphemeral({ type: 'whois_result', whois: event });
@@ -2301,124 +2332,65 @@ export function formatSocketCloseErrorMessage(
   return `Connection failed (${where}): ${codePrefix}${message}`;
 }
 
-// Convert a server-sourced numeric reply (parsed IrcMessage) into a single
-// line of human-readable text for the server buffer. Returns null for any
-// numeric we deliberately don't surface (e.g. 005 ISUPPORT, which spans many
-// lines and is consumed for internal state) and for non-numerics.
-//
-// irc-framework's command handlers consume these numerics into structured
-// state (network.options, network.server, network.ircd, …) and emit
-// higher-level events like 'registered', but the original wire text is not
-// re-emitted — so without this pass the server buffer jumps straight from
-// the pre-registration NOTICE * Auth lines to the MOTD, hiding the welcome
-// banner, lusers info, SASL confirmation, umode and hostmask.
-//
-// The first param on every server numeric is the target nick; the rest is
-// what we want to render. Most replies put the human-readable form in the
-// trailing param (last element), so a default of "use the last param" gets
-// us most of the way; the exceptions (004 MYINFO, 221 UMODEIS, 252-254
-// LUSER counts, 396 HOSTCLOAKING) have explicit branches.
-export function formatServerNumeric(
-  msg: { command?: string; params?: string[] } | null | undefined,
-): string | null {
-  if (!msg) return null;
-  const cmd = (msg.command || '').toUpperCase();
-  const p: string[] = msg.params || [];
-  switch (cmd) {
-    case '001': // RPL_WELCOME — "Welcome to the X Network nick"
-    case '002': // RPL_YOURHOST — "Your host is X, running version Y"
-    case '003': // RPL_CREATED — "This server was created X"
-    case '250': // RPL_STATSCONN — "Highest connection count: …"
-    case '251': // RPL_LUSERCLIENT — "There are N users…"
-    case '255': // RPL_LUSERME — "I have N clients…"
-    case '265': // RPL_LOCALUSERS — "Current local users N, max M"
-    case '266': // RPL_GLOBALUSERS — "Current global users N, max M"
-    case '900': // RPL_LOGGEDIN — "You are now logged in as X"
-    case '903': // RPL_SASLLOGGEDIN — "SASL authentication successful"
-      return p[p.length - 1] || null;
-    case '004': {
-      // RPL_MYINFO — [nick, server, ircd, umodes, chmodes, paramch]
-      const [, server, ircd, umodes, chmodes, paramch] = p;
-      const parts = [];
-      if (server) parts.push(`Host: ${server}`);
-      if (ircd) parts.push(`IRCd: ${ircd}`);
-      if (umodes) parts.push(`user modes: ${umodes}`);
-      if (chmodes) parts.push(`channel modes: ${chmodes}`);
-      if (paramch) parts.push(`parametric channel modes: ${paramch}`);
-      return parts.length ? parts.join(', ') : null;
-    }
-    case '221': // RPL_UMODEIS — [nick, "+iw"]
-      return p[1] ? `Your user mode: ${p[1]}` : null;
-    case '252': // RPL_LUSEROP — [nick, count, "IRC Operators online"]
-    case '253': // RPL_LUSERUNKNOWN — [nick, count, "unknown connection(s)"]
-    case '254': // RPL_LUSERCHANNELS — [nick, count, "channels formed"]
-      if (!p[1] && !p[2]) return null;
-      return `${p[1] || ''} ${p[2] || ''}`.trim();
-    case '396': // RPL_HOSTCLOAKING — [nick, hostmask, "is now your displayed host"]
-      return p[1] ? `Your hostmask: ${p[1]}` : null;
-    case '364': {
-      // RPL_LINKS — [nick, server, access_via, "<hops> <server info>"] — one
-      // line per server on the network, used to spot netsplits (#312). Note
-      // irc-framework *claims* 364/365 (it caches them and emits a 'server
-      // links' event), so they never reach the 'unknown command' catch-all that
-      // surfaces other unmodelled numerics (#262). We render them here on the
-      // 'raw' path instead — which fires for every line regardless of whether
-      // irc-framework has a handler — so /links output isn't silently dropped.
-      const parts = [p[1], p[2], p[3]].filter((s): s is string => !!s);
-      return parts.length ? parts.join(' ') : null;
-    }
-    case '365': // RPL_ENDOFLINKS — [nick, mask, ":End of /LINKS list."]
-    case '371': // RPL_INFO — [nick, ":<info text>"]
-    case '374': // RPL_ENDOFINFO — [nick, ":End of /INFO list."]
-    case '704': // RPL_HELPSTART — [nick, subject, ":<help text>"]
-    case '705': // RPL_HELPTXT — [nick, subject, ":<help text>"]
-    case '706': // RPL_ENDOFHELP — [nick, subject, ":End of /HELP."]
-      // Trailing-text replies for /links (terminator), /info and /help. Like
-      // LINKS (364) above, irc-framework claims all of these (it emits 'server
-      // links' / 'info' / 'help' events that nothing subscribes to), so they
-      // skip the 'unknown command' catch-all and have to be rendered here on
-      // the 'raw' path (#312). The length guard stops a bare "<numeric> nick"
-      // with no trailing param from echoing the nick back as content.
-      return p.length > 1 ? p[p.length - 1] || null : null;
-    case '276': // RPL_WHOISCERTFP
-    case '307': // RPL_WHOISREGNICK
-    case '310': // RPL_WHOISHELPOP
-    case '311': // RPL_WHOISUSER
-    case '312': // RPL_WHOISSERVER
-    case '313': // RPL_WHOISOPERATOR
-    case '317': // RPL_WHOISIDLE
-    case '318': // RPL_ENDOFWHOIS
-    case '319': // RPL_WHOISCHANNELS
-    case '320': // RPL_WHOISSPECIAL
-    case '330': // RPL_WHOISACCOUNT
-    case '335': // RPL_WHOISBOT
-    case '338': // RPL_WHOISACTUALLY
-    case '344': // RPL_WHOISCOUNTRY
-    case '378': // RPL_WHOISHOST
-    case '379': // RPL_WHOISMODES
-    case '569': // RPL_WHOISASN
-    case '671': // RPL_WHOISSECURE
-    case '314': // RPL_WHOWASUSER  — [nick, was-nick, ident, host, *, ":real name"]
-    case '369': // RPL_ENDOFWHOWAS — [nick, was-nick, ":End of WHOWAS"]
-    case '406': // ERR_WASNOSUCHNICK — [nick, was-nick, ":There was no such nickname"]
-      // WHOIS/WHOWAS family. irc-framework consumes all of these into its
-      // aggregated 'whois'/'whowas' events (the 'whois' one drives the profile
-      // modal, #92) without re-emitting the wire text — so /whois and /whowas
-      // showed nothing in the server buffer, and #281's first pass dumped our
-      // parsed-JSON payload there instead. Render the server's own line here,
-      // stripping the routing nick exactly like the catch-all does for
-      // unmodelled numerics (#281). WHOWAS reuses the WHOIS server (312) and
-      // account (330) numerics, so rendering both families on this one raw path
-      // is what keeps /whowas from double-printing them. Server-specific whois
-      // numerics irc-framework doesn't model already surface via the 'unknown
-      // command' catch-all, so this list only needs the modeled ones. 301
-      // RPL_AWAY is deliberately excluded — it's dual-use (a bare away reply
-      // when you message an away user) and is already handled as the 'away'
-      // presence event.
-      return formatUnknownNumeric({ command: cmd, params: p });
-    default:
-      return null;
-  }
+// Numerics we suppress from the server buffer. Everything else is rendered
+// verbatim by the 'raw' handler — default-show, so a numeric never silently
+// vanishes the way it did under the old curated allowlist (#342). This set is
+// only (a) numerics another handler already writes to the *same* server buffer
+// (echoing the raw line would duplicate it) and (b) high-volume or
+// Lurker-initiated floods. It grows only when we add a new server-buffer
+// renderer (a deliberate act), and a miss shows a benign duplicate line, never
+// a silent drop. Note: 005 ISUPPORT is intentionally NOT here — the connect
+// burst is part of the authentic server log.
+const SERVER_BUFFER_DENIED_NUMERICS = new Set<string>([
+  // RPL_LISTSTART/RPL_LIST/RPL_LISTEND — /LIST can be thousands of rows; cached
+  // off-wire for the chanlist search (see the 'channel list' handlers).
+  '321',
+  '323',
+  '322',
+  // RPL_WHOREPLY/RPL_ENDOFWHO/RPL_WHOSPCRPL — Lurker auto-issues WHO on every
+  // join; user-typed /who is rendered from the aggregated 'wholist' event.
+  '352',
+  '315',
+  '354',
+  // RPL_MON* — MONITOR presence, surfaced by the presence rail, not the buffer.
+  '730',
+  '731',
+  '732',
+  '733',
+  // RPL_MOTDSTART/RPL_MOTD/RPL_ENDOFMOTD/ERR_NOMOTD — shown as a single block by
+  // the 'motd' handler.
+  '375',
+  '372',
+  '376',
+  '422',
+  // ERR_ERRONEUSNICKNAME/ERR_NICKNAMEINUSE — driven by the fallback ladder and
+  // surfaced by the 'nick in use' handler.
+  '432',
+  '433',
+]);
+
+// True for numerics another handler already surfaces (or that would flood), so
+// the 'raw' handler skips them. See SERVER_BUFFER_DENIED_NUMERICS.
+export function isServerBufferDeniedNumeric(command: string): boolean {
+  return SERVER_BUFFER_DENIED_NUMERICS.has(command);
+}
+
+// Format one user from a parsed 'wholist' event into a /who line for the server
+// buffer. The event carries parsed fields, not the raw 352 wire line (which we
+// denylist to avoid the auto-WHO flood), so we reconstruct a readable line
+// here. Returns null for a malformed entry.
+export function formatWhoReplyLine(u: Record<string, unknown> | null | undefined): string | null {
+  if (!u || !u.nick) return null;
+  const nick = String(u.nick);
+  const ident = u.ident ? String(u.ident) : '';
+  const host = u.hostname ? String(u.hostname) : '';
+  const mask =
+    ident && host ? ` (${ident}@${host})` : host ? ` (${host})` : ident ? ` (${ident})` : '';
+  const server = u.server ? ` ${String(u.server)}` : '';
+  const flags = u.away ? ' away' : '';
+  const real = u.real_name ? ` — ${String(u.real_name)}` : '';
+  const chan = u.channel ? `${String(u.channel)} ` : '';
+  return `${chan}${nick}${mask}${server}${flags}${real}`.trim();
 }
 
 // Friendly, user-facing messages for channel-join rejections, keyed by the raw

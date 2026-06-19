@@ -15,7 +15,7 @@ under the direction of Brad Root (amiantos), and just because a feature
 can be added, does not mean it will be accepted. Lurker is deliberately lo-fi
 in many ways, despite the feature set being very modern. So, before you
 commit yourself to working on something that excites you in Lurker, be sure to
-have a discussion with amiantos in the #lurker IRC channel on Libera.Chat to 
+have a discussion with amiantos in the #lurker IRC channel on Libera.Chat to
 make sure it fits the project ethos.
 
 It should also be assumed most GitHub issues are 'assigned' by default to amiantos.

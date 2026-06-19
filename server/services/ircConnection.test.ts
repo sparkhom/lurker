@@ -10,9 +10,10 @@ import {
   canonicalChannelTarget,
   computeFallbackNick,
   formatSocketCloseErrorMessage,
-  formatServerNumeric,
   formatUnknownNumeric,
+  formatWhoReplyLine,
   isOverloadedSpeakRejection,
+  isServerBufferDeniedNumeric,
   joinRejectionMessage,
   joinRejectionMessageByTag,
   sendRejectionTargetKind,
@@ -48,170 +49,92 @@ describe('computeFallbackNick', () => {
   });
 });
 
-const fmt = (line: string) => formatServerNumeric(ircLineParser(line));
-
-describe('formatServerNumeric', () => {
-  it('renders RPL_WELCOME (001) trailing text', () => {
-    expect(
-      fmt(
-        ':tungsten.libera.chat 001 amiantos :Welcome to the Libera.Chat Internet Relay Chat Network amiantos',
-      ),
-    ).toBe('Welcome to the Libera.Chat Internet Relay Chat Network amiantos');
+describe('isServerBufferDeniedNumeric (#342)', () => {
+  it('denies numerics another handler already renders or that would flood', () => {
+    // MOTD block, /LIST (cached off-wire), auto-WHO replies, MONITOR presence,
+    // and nick-collision errors are surfaced elsewhere — the raw handler skips
+    // them so they aren't duplicated in the server buffer.
+    for (const n of [
+      '372',
+      '375',
+      '376',
+      '422', // MOTD
+      '321',
+      '322',
+      '323', // /LIST
+      '352',
+      '315',
+      '354', // WHO
+      '730',
+      '731',
+      '732',
+      '733', // MONITOR
+      '432',
+      '433', // nick collision
+    ]) {
+      expect(isServerBufferDeniedNumeric(n)).toBe(true);
+    }
   });
 
-  it('renders RPL_YOURHOST (002) trailing text', () => {
-    expect(
-      fmt(':srv 002 nick :Your host is tungsten.libera.chat, running version solanum-1.0-dev'),
-    ).toBe('Your host is tungsten.libera.chat, running version solanum-1.0-dev');
-  });
-
-  it('renders RPL_CREATED (003) trailing text', () => {
-    expect(fmt(':srv 003 nick :This server was created Tue Feb 17 2026 at 18:43:04 UTC')).toBe(
-      'This server was created Tue Feb 17 2026 at 18:43:04 UTC',
-    );
-  });
-
-  it('formats RPL_MYINFO (004) into a Host/IRCd/modes line', () => {
-    expect(
-      fmt(
-        ':srv 004 nick tungsten.libera.chat solanum-1.0-dev DGIMQRSZaghilopsuwz CFILMPQRSTbcefgijklmnopqrstuvz bkloveqjfI',
-      ),
-    ).toBe(
-      'Host: tungsten.libera.chat, IRCd: solanum-1.0-dev, user modes: DGIMQRSZaghilopsuwz, channel modes: CFILMPQRSTbcefgijklmnopqrstuvz, parametric channel modes: bkloveqjfI',
-    );
-  });
-
-  it('formats RPL_UMODEIS (221) with the mode string', () => {
-    expect(fmt(':srv 221 nick +Ziw')).toBe('Your user mode: +Ziw');
-  });
-
-  it('renders RPL_STATSCONN (250) trailing text', () => {
-    expect(
-      fmt(
-        ':srv 250 nick :Highest connection count: 2419 (2418 clients) (135662 connections received)',
-      ),
-    ).toBe('Highest connection count: 2419 (2418 clients) (135662 connections received)');
-  });
-
-  it('renders RPL_LUSERCLIENT (251) trailing text', () => {
-    expect(fmt(':srv 251 nick :There are 61 users and 30637 invisible on 29 servers')).toBe(
-      'There are 61 users and 30637 invisible on 29 servers',
-    );
-  });
-
-  it('joins count+label for LUSEROP/UNKNOWN/CHANNELS (252/253/254)', () => {
-    expect(fmt(':srv 252 nick 37 :IRC Operators online')).toBe('37 IRC Operators online');
-    expect(fmt(':srv 253 nick 35 :unknown connection(s)')).toBe('35 unknown connection(s)');
-    expect(fmt(':srv 254 nick 22099 :channels formed')).toBe('22099 channels formed');
-  });
-
-  it('renders RPL_LUSERME (255) trailing text', () => {
-    expect(fmt(':srv 255 nick :I have 1818 clients and 1 servers')).toBe(
-      'I have 1818 clients and 1 servers',
-    );
-  });
-
-  it('renders RPL_LOCAL/GLOBALUSERS (265/266) trailing text', () => {
-    expect(fmt(':srv 265 nick 1818 2418 :Current local users 1818, max 2418')).toBe(
-      'Current local users 1818, max 2418',
-    );
-    expect(fmt(':srv 266 nick 30698 35475 :Current global users 30698, max 35475')).toBe(
-      'Current global users 30698, max 35475',
-    );
-  });
-
-  it('formats RPL_HOSTCLOAKING (396)', () => {
-    expect(fmt(':srv 396 nick uid752922@user/amiantos :is now your displayed host')).toBe(
-      'Your hostmask: uid752922@user/amiantos',
-    );
-  });
-
-  it('renders RPL_LOGGEDIN (900) and RPL_SASLLOGGEDIN (903) trailing text', () => {
-    expect(fmt(':srv 900 nick nick!user@host amiantos :You are now logged in as amiantos')).toBe(
-      'You are now logged in as amiantos',
-    );
-    expect(fmt(':srv 903 nick :SASL authentication successful')).toBe(
-      'SASL authentication successful',
-    );
-  });
-
-  it('renders RPL_LINKS (364) as "server access_via hops info" per line (#312)', () => {
-    expect(fmt(':irc.tzirc.com 364 nick rock.tzirc.com irc.tzirc.com :1 #tZ IRC Network')).toBe(
-      'rock.tzirc.com irc.tzirc.com 1 #tZ IRC Network',
-    );
-    // The hub server reports itself with hop count 0.
-    expect(fmt(':irc.tzirc.com 364 nick irc.tzirc.com irc.tzirc.com/ :0 #tZ IRC Network')).toBe(
-      'irc.tzirc.com irc.tzirc.com/ 0 #tZ IRC Network',
-    );
-  });
-
-  it('renders RPL_ENDOFLINKS (365) terminator, dropping the mask param (#312)', () => {
-    expect(fmt(':irc.tzirc.com 365 nick * :End of /LINKS list.')).toBe('End of /LINKS list.');
-    // A bare 365 with no mask must not echo the nick back.
-    expect(fmt(':irc.tzirc.com 365 nick')).toBeNull();
-  });
-
-  it('renders RPL_INFO (371) and RPL_ENDOFINFO (374) trailing text (#312)', () => {
-    expect(fmt(':srv 371 nick :solanum-1.0-dev(20240101)')).toBe('solanum-1.0-dev(20240101)');
-    expect(fmt(':srv 374 nick :End of /INFO list.')).toBe('End of /INFO list.');
-    // A bare terminator must not echo the nick back.
-    expect(fmt(':srv 374 nick')).toBeNull();
-  });
-
-  it('renders RPL_HELP* (704/705/706) trailing text, ignoring the subject param (#312)', () => {
-    expect(fmt(':srv 704 nick index :Help topics available to users:')).toBe(
-      'Help topics available to users:',
-    );
-    expect(fmt(':srv 705 nick index :ACCEPT    ADMIN    AWAY')).toBe('ACCEPT    ADMIN    AWAY');
-    expect(fmt(':srv 706 nick index :End of /HELP.')).toBe('End of /HELP.');
-  });
-
-  it('renders WHOIS numerics as raw server lines, stripping the routing nick (#281)', () => {
-    // The leading "you" (the requester nick / numeric routing target) is
-    // dropped; everything the server sent after it is preserved verbatim.
-    expect(fmt(':srv 311 you alice ~alice user/alice * :Alice Example')).toBe(
-      'alice ~alice user/alice * Alice Example',
-    );
-    expect(fmt(':srv 319 you alice :#libera #lurker +#ops')).toBe('alice #libera #lurker +#ops');
-    expect(fmt(':srv 312 you alice tungsten.libera.chat :Helsinki, FI')).toBe(
-      'alice tungsten.libera.chat Helsinki, FI',
-    );
-    expect(fmt(':srv 671 you alice :is using a secure connection [TLSv1.3]')).toBe(
-      'alice is using a secure connection [TLSv1.3]',
-    );
-    expect(fmt(':srv 330 you alice aliceacct :is logged in as')).toBe(
-      'alice aliceacct is logged in as',
-    );
-    expect(fmt(':srv 317 you alice 234 1718500000 :seconds idle, signon time')).toBe(
-      'alice 234 1718500000 seconds idle, signon time',
-    );
-    expect(fmt(':srv 318 you alice :End of /WHOIS list.')).toBe('alice End of /WHOIS list.');
-  });
-
-  it('renders WHOWAS numerics raw too, so /whowas reuses the same path (#281)', () => {
-    expect(fmt(':srv 314 you Ghost ~ghost old.example.net * :A Spooky User')).toBe(
-      'Ghost ~ghost old.example.net * A Spooky User',
-    );
-    expect(fmt(':srv 369 you Ghost :End of WHOWAS')).toBe('Ghost End of WHOWAS');
-    expect(fmt(':srv 406 you Nobody :There was no such nickname')).toBe(
-      'Nobody There was no such nickname',
-    );
-  });
-
-  it('returns null for the deliberately-skipped 005/ISUPPORT', () => {
-    expect(fmt(':srv 005 nick CHANTYPES=# EXCEPTS INVEX :are supported by this server')).toBeNull();
-  });
-
-  it('returns null for non-numerics and bad input', () => {
-    expect(fmt(':alice!u@h PRIVMSG #chan :hi')).toBeNull();
-    expect(fmt(':srv 372 nick :- MOTD line')).toBeNull(); // motd already handled separately
-    expect(formatServerNumeric(null)).toBeNull();
-    expect(formatServerNumeric({ command: '', params: [] })).toBeNull();
+  it('shows everything else by default — there is no curated allowlist', () => {
+    // The whole point of #342: greeting, whois, oper, time, names, topic and
+    // even ISUPPORT all fall through to the raw renderer instead of vanishing.
+    for (const n of [
+      '001',
+      '002',
+      '004',
+      '005',
+      '251',
+      '255',
+      '265',
+      '311',
+      '319',
+      '381',
+      '391',
+      '353',
+      '332',
+      '364',
+    ]) {
+      expect(isServerBufferDeniedNumeric(n)).toBe(false);
+    }
   });
 });
 
-// The catch-all that surfaces server numerics irc-framework doesn't model (#262):
-// drop the leading recipient-nick param, join the rest.
+describe('formatWhoReplyLine (#342)', () => {
+  it('reconstructs a readable /who line from a wholist user', () => {
+    expect(
+      formatWhoReplyLine({
+        nick: 'alice',
+        ident: '~alice',
+        hostname: 'user/alice',
+        server: 'tungsten.libera.chat',
+        real_name: 'Alice Example',
+        channel: '#lurker',
+        away: false,
+      }),
+    ).toBe('#lurker alice (~alice@user/alice) tungsten.libera.chat — Alice Example');
+  });
+
+  it('marks away users', () => {
+    expect(formatWhoReplyLine({ nick: 'bob', ident: 'bob', hostname: 'h', away: true })).toBe(
+      'bob (bob@h) away',
+    );
+  });
+
+  it('tolerates a sparse entry and rejects a malformed one', () => {
+    expect(formatWhoReplyLine({ nick: 'carol' })).toBe('carol');
+    expect(formatWhoReplyLine({})).toBeNull();
+    expect(formatWhoReplyLine(null)).toBeNull();
+  });
+
+  it('never emits a dangling @ when only ident or only host is present', () => {
+    expect(formatWhoReplyLine({ nick: 'dave', hostname: 'h' })).toBe('dave (h)');
+    expect(formatWhoReplyLine({ nick: 'erin', ident: 'erin' })).toBe('erin (erin)');
+  });
+});
+
+// The universal server-buffer renderer (#342): drop the leading recipient-nick
+// param, join the rest. The 'raw' handler runs this on every non-denied numeric.
 const fmtUnknown = (line: string) => formatUnknownNumeric(ircLineParser(line));
 
 describe('formatUnknownNumeric', () => {
@@ -227,12 +150,28 @@ describe('formatUnknownNumeric', () => {
     );
   });
 
-  it('renders an allowlisted numeric too — the listener dedups via formatServerNumeric', () => {
-    // formatUnknownNumeric is intentionally numeric-agnostic; the double-render
-    // guard lives in the listener (skip when formatServerNumeric already claims
-    // it). This documents why that guard is necessary.
+  it('renders the welcome banner (001) — formerly an allowlist-only numeric', () => {
+    // No more curated allowlist: greeting numerics flow through this one path.
     expect(fmtUnknown(':srv 001 nick :Welcome to the network nick')).toBe(
       'Welcome to the network nick',
+    );
+  });
+
+  it('renders WHOIS/WHOWAS family lines, stripping the routing nick (#281, #342)', () => {
+    // irc-framework consumes these into the 'whois'/'whowas' events (which drive
+    // the profile modal); the raw handler still logs the wire line here.
+    expect(fmtUnknown(':srv 311 you alice ~alice user/alice * :Alice Example')).toBe(
+      'alice ~alice user/alice * Alice Example',
+    );
+    expect(fmtUnknown(':srv 318 you alice :End of /WHOIS list.')).toBe('alice End of /WHOIS list.');
+    expect(fmtUnknown(':srv 314 you Ghost ~ghost old.example.net * :A Spooky User')).toBe(
+      'Ghost ~ghost old.example.net * A Spooky User',
+    );
+  });
+
+  it('renders /oper success (381) — was silently dropped before #342', () => {
+    expect(fmtUnknown(':srv 381 nick :You are now an IRC operator')).toBe(
+      'You are now an IRC operator',
     );
   });
 
