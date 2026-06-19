@@ -4,7 +4,7 @@
 // The two per-message stamps decided at insert time, factored out of
 // ircConnection so they can be unit-tested without standing up a live IRC
 // connection: the highlight match (matched_rule_id) and the ignore verdict
-// (from_ignored, plus NOHILIGHT's suppression of the highlight).
+// (from_ignored, plus NOHIGHLIGHT's suppression of the highlight).
 
 import { matchEvent, type CompiledRule } from './highlightEngine.js';
 import { evaluateIgnores, type compileIgnoreRules } from './ignoreMatch.js';
@@ -20,8 +20,8 @@ export interface StampEvent {
   self?: boolean;
 }
 
-// Returns the matched_rule_id (null when no highlight, or when a NOHILIGHT rule
-// suppresses it) and from_ignored (true when a hide rule matches). A NOHILIGHT
+// Returns the matched_rule_id (null when no highlight, or when a NOHIGHLIGHT rule
+// suppresses it) and from_ignored (true when a hide rule matches). A NOHIGHLIGHT
 // rule deliberately leaves from_ignored false — the message stays visible and
 // counted, it just never highlights.
 export function decideStamp(

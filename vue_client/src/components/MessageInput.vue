@@ -1658,8 +1658,9 @@ function localInfo(networkId: number, target: string, lineText: string): void {
 }
 
 // One indexed line for the /ignore listing: "  2. *zzz*  NICKS  #chan  [except]".
-function formatIgnoreEntry(entry: IgnoreEntry, idx: number): string {
-  const parts: string[] = [`${idx}.`, entry.mask ?? '*'];
+// "*zzz*  NICKS  #chan  [except]" — the rule's dimensions, no index.
+function summarizeIgnoreEntry(entry: IgnoreEntry): string {
+  const parts: string[] = [entry.mask ?? '*'];
   if (entry.levels?.length) parts.push(entry.levels.join(','));
   if (entry.channels?.length) parts.push(entry.channels.join(','));
   if (entry.pattern) {
@@ -1667,7 +1668,12 @@ function formatIgnoreEntry(entry: IgnoreEntry, idx: number): string {
   }
   if (entry.isExcept) parts.push('[except]');
   if (entry.expiresAt) parts.push(`(expires ${entry.expiresAt})`);
-  return '  ' + parts.join('  ');
+  return parts.join('  ');
+}
+
+// One indexed line for the /ignore listing: "  2. *zzz*  NICKS  #chan".
+function formatIgnoreEntry(entry: IgnoreEntry, idx: number): string {
+  return `  ${idx}. ${summarizeIgnoreEntry(entry)}`;
 }
 
 const COMMANDS_LINES = [
@@ -1701,8 +1707,8 @@ const COMMANDS_LINES = [
   '  /jitsi                 — start a video call (alias: /talk)',
   '  /ignore [opts] [mask|#chan] [LEVELS] — list, or add an ignore rule',
   '      opts: -regexp -full -pattern <text> -except -time <dur>',
-  '      LEVELS: ALL PUBLIC MSGS NOTICES ACTIONS JOINS PARTS QUITS NICKS NOHILIGHT',
-  '      e.g. /ignore bob NOHILIGHT   ·   /ignore -regexp -pattern (foo|bar) #chan',
+  '      LEVELS: ALL PUBLIC MSGS NOTICES ACTIONS JOINS PARTS QUITS NICKS NOHIGHLIGHT',
+  '      e.g. /ignore bob NOHIGHLIGHT   ·   /ignore -regexp -pattern (foo|bar) #chan',
   '  /unignore <index|mask> — remove an ignore (index from /ignore list)',
   '  /raw <line>            — send a raw IRC line (alias: /quote)',
   '  /commands              — this list',
@@ -2008,9 +2014,25 @@ function handleCommand(line: string, networkId: number, target: string): boolean
           return true;
         }
         ignores.removeRule(networkId, { id: entry.id });
+        localInfo(networkId, target, `removed ignore #${arg}: ${summarizeIgnoreEntry(entry)}`);
+        return true;
+      }
+      // Remove-by-mask matches the stored mask exactly (case-insensitive), the
+      // same rule the server applies — count local matches so we can confirm or
+      // report nothing-removed instead of failing silently.
+      const matches = ignores
+        .masksFor(networkId)
+        .filter((e) => (e.mask ?? '').toLowerCase() === arg.toLowerCase());
+      if (!matches.length) {
+        localInfo(networkId, target, `/unignore: no ignore with mask "${arg}" (see /ignore)`);
         return true;
       }
       ignores.removeRule(networkId, { mask: arg });
+      localInfo(
+        networkId,
+        target,
+        `removed ${matches.length} ignore${matches.length > 1 ? 's' : ''} matching "${arg}".`,
+      );
       return true;
     }
     case 'jitsi':

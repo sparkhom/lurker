@@ -73,7 +73,7 @@ export const useIgnoresStore = defineStore('ignores', {
     // "Is this sender broadly ignored?" — a non-except, no-pattern, ALL-level
     // rule that hides them regardless of content (no channel scope, so applies
     // everywhere). For nick-only callers (autocomplete, search/highlight result
-    // filtering, status bar, the toast notifier). A NOHILIGHT, content-pattern,
+    // filtering, status bar, the toast notifier). A NOHIGHLIGHT, content-pattern,
     // single-level, or channel-scoped rule deliberately does NOT count here —
     // those need full event context (use evaluate/isHidden).
     isIgnored:

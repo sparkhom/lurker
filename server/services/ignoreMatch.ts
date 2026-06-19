@@ -6,7 +6,7 @@
 //            globs the hostmask)
 //   where  — channels (NULL = all buffers; else any channel glob matches target)
 //   what   — pattern (NULL = any text; substring/full-word/regex on the body)
-//   which  — levels (event-type tokens, plus the special NOHILIGHT)
+//   which  — levels (event-type tokens, plus the special NOHIGHLIGHT)
 // is_except inverts a rule into a whitelist entry resolved by longest-mask-wins.
 //
 // This file is mirrored by vue_client/src/utils/ignoreMatch.ts — the client runs
@@ -74,7 +74,7 @@ interface CompiledIgnoreRule {
   maskLen: number;
   expiresAt: number | null;
   hides: boolean; // has a real hide level (incl. ALL)
-  nohilight: boolean; // carries NOHILIGHT
+  nohilight: boolean; // carries NOHIGHLIGHT
   matchesNick: (nick: string | null, userhost: string | null) => boolean;
   matchesChannel: (target: string) => boolean;
   matchesText: (text: string) => boolean;
@@ -90,8 +90,8 @@ function patternKindToTextKind(kind: string): TextKind {
 export function compileIgnoreRules(rules: IgnoreRuleRow[]): CompiledIgnoreRule[] {
   const out: CompiledIgnoreRule[] = [];
   for (const rule of rules) {
-    const hasNohilight = rule.levels.includes('NOHILIGHT');
-    const hideLevels = rule.levels.filter((l) => l !== 'NOHILIGHT');
+    const hasNohilight = rule.levels.includes('NOHIGHLIGHT');
+    const hideLevels = rule.levels.filter((l) => l !== 'NOHIGHLIGHT');
     const hasAll = hideLevels.includes('ALL');
     const hides = hideLevels.length > 0;
 

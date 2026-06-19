@@ -362,7 +362,7 @@ function migrate() {
     -- a nick!user@host form globs the hostmask), channels (NULL = all buffers;
     -- else CSV of channel globs), pattern (NULL = any text; matched per
     -- pattern_kind 'substr'|'full'|'regex'), and levels (CSV of event-type
-    -- tokens, e.g. 'ALL' or 'JOINS,PARTS,QUITS' or 'PUBLIC,NOHILIGHT'). is_except
+    -- tokens, e.g. 'ALL' or 'JOINS,PARTS,QUITS' or 'PUBLIC,NOHIGHLIGHT'). is_except
     -- makes a longest-mask-wins whitelist rule; expires_at auto-removes it.
     -- mask collates NOCASE so /ignore Bozo and /ignore bozo fold together. No
     -- UNIQUE constraint: the same mask may carry different levels/channels.

@@ -327,7 +327,7 @@ export class IrcConnection {
     if (this.shouldPersist(event)) {
       // Decide both per-message stamps before persisting, off cached compiled
       // rule sets (no per-message DB scan): the highlight match (matched_rule_id)
-      // and the ignore verdict. A NOHILIGHT ignore nulls the highlight while
+      // and the ignore verdict. A NOHIGHLIGHT ignore nulls the highlight while
       // leaving the message visible; a hide-level ignore sets from_ignored so
       // unread/highlight/search counts skip it. decideStamp gates on self/nick
       // and runs the level test first, so high-churn JOIN/PART/QUIT with no

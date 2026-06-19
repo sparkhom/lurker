@@ -168,7 +168,7 @@ const sorted = computed(() => {
   // matching the user's own nick (or a hostmask the server-side nick
   // happens to fall into) which would otherwise vanish them from their
   // own nicklist. Only whole-identity ALL rules drop a member here — a
-  // content/level/NOHILIGHT rule leaves them in the nicklist (#301).
+  // content/level/NOHIGHLIGHT rule leaves them in the nicklist (#301).
   const filtered = networkId
     ? list.filter((m) => {
         if (isSelf(m)) return true;

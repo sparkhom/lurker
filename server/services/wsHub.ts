@@ -714,7 +714,7 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
   }
 
   // True when the user's ignore rules would hide this event (a hide-level match,
-  // not a NOHILIGHT-only one). Shared by the push gate and the closed-DM reopen
+  // not a NOHIGHLIGHT-only one). Shared by the push gate and the closed-DM reopen
   // guard. Runs off the cached compiled rule set — no DB scan per event.
   function senderHidden(userId: number, decorated: DecoratedEvent): boolean {
     if (!decorated.nick) return false;
@@ -738,7 +738,7 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
     // one piece of the ignore feature that has to live server-side: push fires
     // while no client is open, so a client-side filter can't intercept. The
     // unread badge and render filter stay reactive client-side, so /unignore
-    // still reveals; only push delivery is frozen here. A NOHILIGHT rule does
+    // still reveals; only push delivery is frozen here. A NOHIGHLIGHT rule does
     // NOT freeze push — the message is still visible, it just doesn't highlight.
     if (senderHidden(userId, decorated)) return;
     // Signal kind in priority order: DM beats matched beats always_notify.

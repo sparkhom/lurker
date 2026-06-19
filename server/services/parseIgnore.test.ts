@@ -12,8 +12,12 @@ describe('parseIgnoreArgs — masks & levels', () => {
     expect(p('bob')).toMatchObject({ mask: 'bob', levels: ['ALL'], channels: null, pattern: null });
   });
 
-  it('NOHILIGHT level (must-have #1)', () => {
-    expect(p('bob NOHILIGHT')).toMatchObject({ mask: 'bob', levels: ['NOHILIGHT'] });
+  it('NOHIGHLIGHT level (must-have #1), Lurker spelling + irssi aliases', () => {
+    // Lurker's native term (and its plural) plus irssi's NOHILIGHT all resolve
+    // to the canonical NOHIGHLIGHT.
+    expect(p('bob NOHIGHLIGHT')).toMatchObject({ mask: 'bob', levels: ['NOHIGHLIGHT'] });
+    expect(p('bob NOHIGHLIGHTS').levels).toEqual(['NOHIGHLIGHT']);
+    expect(p('bob NOHILIGHT').levels).toEqual(['NOHIGHLIGHT']);
   });
 
   it('* mask normalizes to null (anyone)', () => {

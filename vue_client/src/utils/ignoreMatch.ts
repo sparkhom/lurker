@@ -142,8 +142,8 @@ function patternKindToTextKind(kind: string): TextKind {
 export function compileIgnoreRules(rules: IgnoreRule[]): CompiledIgnoreRule[] {
   const out: CompiledIgnoreRule[] = [];
   for (const rule of rules) {
-    const hasNohilight = rule.levels.includes('NOHILIGHT');
-    const hideLevels = rule.levels.filter((l) => l !== 'NOHILIGHT');
+    const hasNohilight = rule.levels.includes('NOHIGHLIGHT');
+    const hideLevels = rule.levels.filter((l) => l !== 'NOHIGHLIGHT');
     const hasAll = hideLevels.includes('ALL');
     const hides = hideLevels.length > 0;
 
@@ -261,7 +261,7 @@ export function evaluateIgnores(
 // A nicklist row carries only a nick/userhost — no message text or type. Hide a
 // member only when a rule would erase their whole presence regardless of
 // content: a non-except, no-pattern, ALL-level rule scoped to all buffers or the
-// open channel. Pattern / single-level / NOHILIGHT rules must NOT drop someone
+// open channel. Pattern / single-level / NOHIGHLIGHT rules must NOT drop someone
 // from the nicklist (they're still present and talking).
 export function isMemberHidden(
   compiled: CompiledIgnoreRule[],

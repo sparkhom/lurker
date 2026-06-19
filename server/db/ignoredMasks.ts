@@ -7,7 +7,7 @@ export type IgnorePatternKind = 'substr' | 'full' | 'regex';
 
 // A single ignore rule (issue #301), irssi-style. Every dimension is optional
 // and AND-ed by the matcher: mask (who), channels (where), pattern (what text),
-// levels (which event types, incl. the special NOHILIGHT). is_except inverts it
+// levels (which event types, incl. the special NOHIGHLIGHT). is_except inverts it
 // into a whitelist entry; expires_at auto-removes it.
 export interface IgnoreRuleRow {
   id: number;

@@ -267,7 +267,7 @@ interface RenderRow {
   // Display-collapsing tags (mutated by collapseDisplay)
   continuationAuthor?: boolean;
   continuationTime?: boolean;
-  // A NOHILIGHT ignore rule matched — suppress the highlight tint (#301).
+  // A NOHIGHLIGHT ignore rule matched — suppress the highlight tint (#301).
   nohilight?: boolean;
 }
 
@@ -673,7 +673,7 @@ const renderRows = computed((): RenderRow[] => {
 
     // Render-time ignore filter (issue #301). Self-authored events are never
     // hidden. The matcher gets full event context so level/channel/pattern
-    // rules apply. A NOHILIGHT rule doesn't hide — it suppresses the row's
+    // rules apply. A NOHIGHLIGHT rule doesn't hide — it suppresses the row's
     // highlight tint (rowNohilight → rowClass), which also retro-applies to
     // backlog rows the server stamped before the rule existed. Removing a rule
     // re-runs this computed and hidden rows reappear without a backlog reload.

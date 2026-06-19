@@ -37,9 +37,9 @@ function evalRules(rules: IgnoreRuleRow[], inp: Partial<IgnoreInput>) {
   return evaluateIgnores(compileIgnoreRules(rules), input(inp));
 }
 
-describe('must-have #1 — NOHILIGHT', () => {
+describe('must-have #1 — NOHIGHLIGHT', () => {
   it('keeps the message visible but suppresses the highlight', () => {
-    const rules = [r({ mask: 'bob', levels: ['NOHILIGHT'] })];
+    const rules = [r({ mask: 'bob', levels: ['NOHIGHLIGHT'] })];
     expect(evalRules(rules, { nick: 'bob', type: 'message' })).toEqual({
       hide: false,
       nohilight: true,
@@ -47,7 +47,7 @@ describe('must-have #1 — NOHILIGHT', () => {
   });
 
   it('does not affect a different sender', () => {
-    const rules = [r({ mask: 'bob', levels: ['NOHILIGHT'] })];
+    const rules = [r({ mask: 'bob', levels: ['NOHIGHLIGHT'] })];
     expect(evalRules(rules, { nick: 'alice', type: 'message' })).toEqual({
       hide: false,
       nohilight: false,
@@ -55,7 +55,7 @@ describe('must-have #1 — NOHILIGHT', () => {
   });
 
   it('only applies to highlightable types (message/action), not joins', () => {
-    const rules = [r({ mask: 'bob', levels: ['NOHILIGHT'] })];
+    const rules = [r({ mask: 'bob', levels: ['NOHIGHLIGHT'] })];
     expect(evalRules(rules, { type: 'action', text: 'waves' }).nohilight).toBe(true);
     expect(evalRules(rules, { type: 'join', text: '' }).nohilight).toBe(false);
   });
@@ -191,6 +191,6 @@ describe('canonicalizeLevels', () => {
   it('normalizes aliases and drops unknown tokens, in canonical order', () => {
     expect(canonicalizeLevels(['publics', 'join'])).toEqual(['PUBLIC', 'JOINS']);
     expect(canonicalizeLevels(['bogus', 'ALL'])).toEqual(['ALL']);
-    expect(canonicalizeLevels(['nohilite'])).toEqual(['NOHILIGHT']);
+    expect(canonicalizeLevels(['nohilite'])).toEqual(['NOHIGHLIGHT']);
   });
 });

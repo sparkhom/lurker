@@ -51,7 +51,7 @@ describe('addRule / listRules', () => {
         channels: ['#chan', '#other'],
         pattern: '(word1|word2)',
         patternKind: 'regex',
-        levels: ['PUBLIC', 'NOHILIGHT'],
+        levels: ['PUBLIC', 'NOHIGHLIGHT'],
         isExcept: true,
         expiresAt: '2099-01-01T00:00:00.000Z',
       }),
@@ -64,7 +64,7 @@ describe('addRule / listRules', () => {
       channels: ['#chan', '#other'],
       pattern: '(word1|word2)',
       patternKind: 'regex',
-      levels: ['PUBLIC', 'NOHILIGHT'],
+      levels: ['PUBLIC', 'NOHIGHLIGHT'],
       isExcept: true,
       expiresAt: '2099-01-01T00:00:00.000Z',
     });
@@ -95,7 +95,7 @@ describe('addRule / listRules', () => {
     const b = mod.addRule({
       userId: user.id,
       networkId: net2!.id,
-      rule: rule({ mask: 'coex', levels: ['NOHILIGHT'] }),
+      rule: rule({ mask: 'coex', levels: ['NOHIGHLIGHT'] }),
     });
     expect(a.created && b.created).toBe(true);
     expect(a.id).not.toBe(b.id);

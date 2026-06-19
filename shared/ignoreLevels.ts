@@ -6,7 +6,7 @@
 // which level tokens exist, their aliases, or how they map to event types.
 
 // Each level token maps to the persisted event `type`s it covers. PUBLIC vs MSGS
-// split a 'message' by channel-vs-DM (`dm`). ALL and NOHILIGHT are special
+// split a 'message' by channel-vs-DM (`dm`). ALL and NOHIGHLIGHT are special
 // (handled by the matcher); CTCPS is accepted but maps to nothing — Lurker never
 // surfaces CTCP as a persisted type, a documented no-op.
 export const LEVEL_DEFS: Record<string, { types: string[]; dm?: boolean }> = {
@@ -68,8 +68,12 @@ export const LEVEL_ALIASES: Record<string, string> = {
   CTCP: 'CTCPS',
   CTCPS: 'CTCPS',
   ALL: 'ALL',
-  NOHILIGHT: 'NOHILIGHT',
-  NOHILITE: 'NOHILIGHT',
+  // Lurker calls them "highlights", so NOHIGHLIGHT(S) is the canonical token;
+  // irssi's NOHILIGHT/NOHILITE spellings are accepted as aliases.
+  NOHIGHLIGHT: 'NOHIGHLIGHT',
+  NOHIGHLIGHTS: 'NOHIGHLIGHT',
+  NOHILIGHT: 'NOHIGHLIGHT',
+  NOHILITE: 'NOHIGHLIGHT',
 };
 
 // Deterministic order so the stored levels CSV is stable (the DB dedupe compares
@@ -88,7 +92,7 @@ export const CANONICAL_ORDER = [
   'MODES',
   'TOPICS',
   'CTCPS',
-  'NOHILIGHT',
+  'NOHIGHLIGHT',
 ];
 
 export const KNOWN_LEVELS = new Set(Object.keys(LEVEL_ALIASES));

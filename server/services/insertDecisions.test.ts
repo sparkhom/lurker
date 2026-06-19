@@ -89,9 +89,9 @@ function insert(
   });
 }
 
-describe('NOHILIGHT', () => {
+describe('NOHIGHLIGHT', () => {
   it('keeps the message visible and counted but suppresses the highlight', () => {
-    expect(addRule('bob', ['NOHILIGHT']).ok).toBe(true);
+    expect(addRule('bob', ['NOHIGHLIGHT']).ok).toBe(true);
     const decided = stamp({ type: 'message', nick: 'bob', target: '#nh', text: 'hello there' });
     expect(decided.matchedRuleId).toBeNull();
     expect(decided.fromIgnored).toBe(false);
