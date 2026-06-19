@@ -126,6 +126,11 @@ describe('formatWhoReplyLine (#342)', () => {
     expect(formatWhoReplyLine({})).toBeNull();
     expect(formatWhoReplyLine(null)).toBeNull();
   });
+
+  it('never emits a dangling @ when only ident or only host is present', () => {
+    expect(formatWhoReplyLine({ nick: 'dave', hostname: 'h' })).toBe('dave (h)');
+    expect(formatWhoReplyLine({ nick: 'erin', ident: 'erin' })).toBe('erin (erin)');
+  });
 });
 
 // The universal server-buffer renderer (#342): drop the leading recipient-nick

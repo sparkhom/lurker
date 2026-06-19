@@ -1388,8 +1388,10 @@ export class IrcConnection {
       // the 'wholist' handler consumes the reply silently instead of echoing
       // every member to the server buffer (#342).
       try {
-        this.autoWhoTargets.add(eventChannel.toLowerCase());
         c.who(eventChannel);
+        // Mark only after a successful send: if c.who() throws, a stale flag
+        // would silently suppress a later user-typed /who for this channel.
+        this.autoWhoTargets.add(eventChannel.toLowerCase());
       } catch (_) {
         /* ignore */
       }
@@ -2382,7 +2384,8 @@ export function formatWhoReplyLine(u: Record<string, unknown> | null | undefined
   const nick = String(u.nick);
   const ident = u.ident ? String(u.ident) : '';
   const host = u.hostname ? String(u.hostname) : '';
-  const mask = ident || host ? ` (${ident}@${host})` : '';
+  const mask =
+    ident && host ? ` (${ident}@${host})` : host ? ` (${host})` : ident ? ` (${ident})` : '';
   const server = u.server ? ` ${String(u.server)}` : '';
   const flags = u.away ? ' away' : '';
   const real = u.real_name ? ` — ${String(u.real_name)}` : '';
