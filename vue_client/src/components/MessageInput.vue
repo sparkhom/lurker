@@ -1707,7 +1707,7 @@ const COMMANDS_LINES = [
   '  /jitsi                 — start a video call (alias: /talk)',
   '  /ignore [opts] [mask|#chan] [LEVELS] — list, or add an ignore rule',
   '      opts: -regexp -full -pattern <text> -except -time <dur>',
-  '      LEVELS: ALL PUBLIC MSGS NOTICES ACTIONS JOINS PARTS QUITS NICKS NOHIGHLIGHT',
+  '      LEVELS: ALL PUBLIC MSGS NOTICES ACTIONS JOINS PARTS QUITS NICKS KICKS MODES TOPICS NOHIGHLIGHT',
   '      e.g. /ignore bob NOHIGHLIGHT   ·   /ignore -regexp -pattern (foo|bar) #chan',
   '  /unignore <index|mask> — remove an ignore (index from /ignore list)',
   '  /raw <line>            — send a raw IRC line (alias: /quote)',

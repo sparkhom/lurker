@@ -7,9 +7,9 @@
 // (from_ignored, plus NOHIGHLIGHT's suppression of the highlight).
 
 import { matchEvent, type CompiledRule } from './highlightEngine.js';
-import { evaluateIgnores, type compileIgnoreRules } from './ignoreMatch.js';
+import { evaluateIgnores, type CompiledIgnoreRule } from './ignoreMatch.js';
 
-type CompiledIgnore = ReturnType<typeof compileIgnoreRules>;
+type CompiledIgnore = CompiledIgnoreRule[];
 
 export interface StampEvent {
   type: string;

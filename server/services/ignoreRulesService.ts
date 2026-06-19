@@ -54,10 +54,19 @@ class IgnoreRulesService {
     if (levels.length === 0) {
       return { ok: false, error: 'at least one valid level is required' };
     }
+    // expiresAt arrives from an untrusted WS payload. Reject anything Date.parse
+    // can't read (a NaN would make the rule never expire and never sweep), and
+    // canonicalize to ISO so the DB stores one consistent format.
+    let expiresAt = input.expiresAt;
+    if (expiresAt != null) {
+      const t = Date.parse(expiresAt);
+      if (Number.isNaN(t)) return { ok: false, error: 'invalid expiry timestamp' };
+      expiresAt = new Date(t).toISOString();
+    }
     // A rule with no who/where/what AND only ALL would hide the whole network —
     // allow it (irssi does), but a fully-empty rule (no mask, no channels, no
     // pattern) with no real effect is still stored; the matcher makes it inert.
-    const { id, created } = addRule({ userId, networkId, rule: { ...input, levels } });
+    const { id, created } = addRule({ userId, networkId, rule: { ...input, levels, expiresAt } });
     this.invalidate(userId, networkId);
     return { ok: true, id, created };
   }

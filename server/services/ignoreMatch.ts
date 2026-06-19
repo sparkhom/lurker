@@ -69,7 +69,7 @@ export interface IgnoreVerdict {
   nohilight: boolean;
 }
 
-interface CompiledIgnoreRule {
+export interface CompiledIgnoreRule {
   isExcept: boolean;
   maskLen: number;
   expiresAt: number | null;

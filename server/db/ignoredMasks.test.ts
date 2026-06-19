@@ -146,19 +146,52 @@ describe('listAllRulesForUser', () => {
   });
 });
 
+describe('addRule expiry refresh', () => {
+  it('re-adding an otherwise-identical rule refreshes its expiry in place', () => {
+    const first = mod.addRule({
+      userId: user.id,
+      networkId: net1!.id,
+      rule: rule({ mask: 'timed', expiresAt: '2099-01-01T00:00:00.000Z' }),
+    });
+    expect(first.created).toBe(true);
+    const second = mod.addRule({
+      userId: user.id,
+      networkId: net1!.id,
+      rule: rule({ mask: 'timed', expiresAt: '2100-06-01T00:00:00.000Z' }),
+    });
+    expect(second).toEqual({ id: first.id, created: false });
+    const got = mod
+      .listRules({ userId: user.id, networkId: net1!.id })
+      .find((r) => r.id === first.id)!;
+    expect(got.expiresAt).toBe('2100-06-01T00:00:00.000Z');
+  });
+});
+
 describe('sweepExpired', () => {
-  it('deletes lapsed rules and reports the affected (user, network) pairs', () => {
+  it('sweeps an ISO expiry that has just passed (same-day format), keeps future + unexpiring', () => {
     const u = createUser('ig-carol');
     const n = createNetwork(u.id, { name: 'a', host: 'h', port: 6697, tls: true, nick: 'c' })!;
+    // A few seconds ago, today, in ISO form — this is the case the old
+    // lexicographic `expires_at <= datetime('now')` compare got wrong.
+    const justExpired = new Date(Date.now() - 60_000).toISOString();
+    const future = new Date(Date.now() + 3_600_000).toISOString();
     mod.addRule({
       userId: u.id,
       networkId: n.id,
-      rule: rule({ mask: 'gone', expiresAt: '2000-01-01T00:00:00.000Z' }),
+      rule: rule({ mask: 'gone', expiresAt: justExpired }),
+    });
+    mod.addRule({
+      userId: u.id,
+      networkId: n.id,
+      rule: rule({ mask: 'timed', expiresAt: future }),
     });
     mod.addRule({ userId: u.id, networkId: n.id, rule: rule({ mask: 'stays' }) });
     const affected = mod.sweepExpired();
     expect(affected).toContainEqual({ userId: u.id, networkId: n.id });
-    const remaining = mod.listRules({ userId: u.id, networkId: n.id }).map((r) => r.mask);
-    expect(remaining).toEqual(['stays']);
+    const remaining = mod
+      .listRules({ userId: u.id, networkId: n.id })
+      .map((r) => r.mask)
+      .toSorted();
+    expect(remaining).toEqual(['stays', 'timed']);
   });
 });

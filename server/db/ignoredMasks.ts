@@ -43,11 +43,13 @@ const addStmt = db.prepare(`
     (@userId, @networkId, @mask, @channels, @pattern, @patternKind, @levels, @isExcept, @expiresAt)
 `);
 
-// Dedupe lookup: an identical rule (every dimension equal) already exists.
-// mask folds NOCASE like the column; levels compare as exact CSV, so the
-// service must canonicalize level order before calling.
+// Dedupe lookup: an identical rule (every dimension EXCEPT expiry) already
+// exists. mask folds NOCASE like the column; levels compare as exact CSV, so the
+// service must canonicalize level order before calling. Expiry is excluded on
+// purpose — a re-add with a new -time should refresh the lifetime of the same
+// logical rule, not spawn a near-duplicate row (every timed add differs by ms).
 const findIdenticalStmt = db.prepare(`
-  SELECT id FROM ignored_masks
+  SELECT id, expires_at AS expiresAt FROM ignored_masks
   WHERE user_id = @userId AND network_id = @networkId
     AND IFNULL(mask, '') = IFNULL(@mask, '') COLLATE NOCASE
     AND IFNULL(channels, '') = IFNULL(@channels, '')
@@ -56,6 +58,10 @@ const findIdenticalStmt = db.prepare(`
     AND levels = @levels
     AND is_except = @isExcept
   LIMIT 1
+`);
+
+const updateExpiryStmt = db.prepare(`
+  UPDATE ignored_masks SET expires_at = @expiresAt WHERE id = @id
 `);
 
 const removeByIdStmt = db.prepare(`
@@ -85,15 +91,18 @@ const listAllStmt = db.prepare(`
   ORDER BY network_id ASC, id ASC
 `);
 
+// expires_at is stored as an ISO-8601 string (`...THH:MM:SS.sssZ`), which won't
+// compare lexicographically against datetime('now') (`YYYY-MM-DD HH:MM:SS`).
+// datetime() normalizes both sides to the same UTC format for a correct compare.
 const listExpiredStmt = db.prepare(`
   SELECT DISTINCT user_id AS userId, network_id AS networkId
   FROM ignored_masks
-  WHERE expires_at IS NOT NULL AND expires_at <= datetime('now')
+  WHERE expires_at IS NOT NULL AND datetime(expires_at) <= datetime('now')
 `);
 
 const deleteExpiredStmt = db.prepare(`
   DELETE FROM ignored_masks
-  WHERE expires_at IS NOT NULL AND expires_at <= datetime('now')
+  WHERE expires_at IS NOT NULL AND datetime(expires_at) <= datetime('now')
 `);
 
 interface RawRuleRow {
@@ -147,7 +156,10 @@ function toParams(userId: number, networkId: number, rule: IgnoreRuleInput) {
   };
 }
 
-/** Insert a rule, or no-op and return the existing id if an identical one exists. */
+// Insert a rule, or — if an identical one (ignoring expiry) exists — refresh its
+// expiry to the new value and return its id with created:false. Refreshing means
+// a re-add with a different -time extends/clears the lifetime in place rather
+// than leaving a stale expiry or duplicating the rule.
 export function addRule({
   userId,
   networkId,
@@ -158,8 +170,15 @@ export function addRule({
   rule: IgnoreRuleInput;
 }): { id: number; created: boolean } {
   const params = toParams(userId, networkId, rule);
-  const existing = findIdenticalStmt.get(params) as { id: number } | undefined;
-  if (existing) return { id: existing.id, created: false };
+  const existing = findIdenticalStmt.get(params) as
+    | { id: number; expiresAt: string | null }
+    | undefined;
+  if (existing) {
+    if (existing.expiresAt !== params.expiresAt) {
+      updateExpiryStmt.run({ id: existing.id, expiresAt: params.expiresAt });
+    }
+    return { id: existing.id, created: false };
+  }
   const result = addStmt.run(params);
   return { id: Number(result.lastInsertRowid), created: true };
 }
