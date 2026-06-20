@@ -12,8 +12,10 @@
       @scroll="scheduleRecompute"
     >
       <!-- LURKER: the system buffer (#355) as a real top-of-list row. The status
-           light tracks the Lurker connection; settings + options affordances
-           mirror the network header's channel-list + kebab. -->
+           light tracks the Lurker connection; the collapse control sits in the
+           corner — always visible (not hover-gated), but yielding the corner to
+           the unread/highlight badge when there is one. (Settings lives in the
+           sidebar footer.) -->
       <div class="net system-net">
         <div
           class="net-head"
@@ -38,22 +40,12 @@
             <button
               type="button"
               class="net-action"
-              title="Settings"
-              aria-label="Settings"
-              @click.stop="openSettings"
+              title="Hide channel list"
+              aria-label="Hide channel list"
+              @click.stop="collapseSidebar"
               @contextmenu.stop.prevent
             >
-              <i class="fa-solid fa-gear"></i>
-            </button>
-            <button
-              type="button"
-              class="net-action"
-              title="Lurker options"
-              aria-label="Lurker options"
-              @click.stop="openSystemMenu($event)"
-              @contextmenu.stop.prevent
-            >
-              <i class="fa-solid fa-ellipsis-vertical"></i>
+              <i class="fa-solid fa-angles-left"></i>
             </button>
           </div>
         </div>
@@ -300,7 +292,6 @@ import { useBuffersStore, type Buffer } from '../stores/buffers.js';
 import { useFriendsStore, primaryTargetOf, type Contact } from '../stores/friends.js';
 import { FRIENDS_KEY, SYSTEM_KEY } from '../lib/virtualBuffers.js';
 import { connected as lurkerConnected } from '../composables/useSocket.js';
-import { useRouter } from 'vue-router';
 import { useDraftStore } from '../stores/drafts.js';
 import { usePinsStore } from '../stores/pins.js';
 import { useChannelNotifyStore } from '../stores/channelNotify.js';
@@ -323,8 +314,6 @@ const settings = useSettingsStore();
 const bufferActions = useBufferActions();
 const networkActions = useNetworkActions();
 const friendMenu = useContextMenu();
-const systemMenu = useContextMenu();
-const router = useRouter();
 
 function isNetworkConnected(net: Network): boolean {
   return networks.states[net.id]?.state === 'connected';
@@ -342,20 +331,11 @@ const systemHighlights = computed(() => systemBuf.value?.highlighted || 0);
 function selectSystem(): void {
   buffers.activate(null, SYSTEM_KEY);
 }
-function openSettings(): void {
-  router.push('/settings');
-}
-// The kebab's menu is the home for Lurker-wide actions (just Settings today;
-// more later). The cog beside it is the one-click shortcut to the same place.
-function openSystemMenu(e: MouseEvent): void {
-  const btn = e.currentTarget as Element;
-  const rect = btn.getBoundingClientRect();
-  systemMenu.open(
-    [{ label: 'Settings…', icon: 'fa-solid fa-gear', onClick: () => router.push('/settings') }],
-    rect.left,
-    rect.bottom + 2,
-    btn,
-  );
+// The LURKER header's corner control collapses the channel list. (Settings
+// moved to the sidebar footer; the expand control returns to the top of the
+// collapsed rail — see DesktopChat.)
+function collapseSidebar(): void {
+  settings.setValue('look.layout.show_channel_list', false);
 }
 
 // Buffer-list display settings — feed both the row CSS (bold gate) and the
@@ -982,9 +962,9 @@ onBeforeUnmount(() => {
 }
 .net-action {
   padding: 0 var(--space-2);
-  background: var(--bg-soft);
+  background: none;
   border: none;
-  color: var(--fg-muted);
+  color: var(--accent);
   cursor: pointer;
   font: inherit;
   line-height: 1;
@@ -1010,6 +990,20 @@ onBeforeUnmount(() => {
   .net-actions {
     display: none;
   }
+}
+
+/* LURKER row (#355): the settings cog is always visible, not hover-gated like
+   the other network rows. When an unread/highlight badge is present it takes
+   the corner and the cog steps aside — the badge is the more important signal,
+   and the cog returns the moment the buffer is read. */
+.system-net .net-actions {
+  opacity: 1;
+  /* Flat (no chip): the cog is always visible here, so unlike the other rows'
+     hover-revealed actions there's no row content to mask behind it. */
+  background: none;
+}
+.system-net .net-head:has(.badge) .net-actions {
+  display: none;
 }
 
 .name {
@@ -1158,7 +1152,7 @@ onBeforeUnmount(() => {
   padding: 0 var(--space-2);
   background: var(--bg-soft);
   border: none;
-  color: var(--fg-muted);
+  color: var(--accent);
   cursor: pointer;
   font: inherit;
   line-height: 1;

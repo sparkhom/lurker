@@ -241,7 +241,7 @@ onBeforeUnmount(() => {
 .btn {
   background: transparent;
   border: 1px solid var(--border);
-  color: var(--fg);
+  color: var(--accent);
   font: inherit;
   padding: var(--space-2) var(--space-5);
   cursor: pointer;
@@ -249,10 +249,11 @@ onBeforeUnmount(() => {
 }
 .btn:hover:not(:disabled) {
   border-color: var(--accent);
-  background: var(--bg-soft);
+  color: var(--fg);
 }
 .btn:disabled {
   opacity: 0.6;
+  color: var(--fg-muted);
   cursor: default;
 }
 .meta {

@@ -239,21 +239,26 @@ a {
   border-radius: 2px;
 }
 
+/* Button language (#355): accent = actionable, gray = disabled. Buttons carry
+   the accent color, brighten to --fg on hover (no gray fill), and drop to the
+   muted gray on :disabled — so "gray" unambiguously means "you can't click
+   this." */
 button {
   font: inherit;
   background: transparent;
-  color: var(--fg);
+  color: var(--accent);
   border: 1px solid var(--border);
   border-radius: 0;
   padding: 4px 10px;
   cursor: pointer;
 }
 button:hover:not(:disabled) {
-  background: var(--bg-soft);
   border-color: var(--accent);
+  color: var(--fg);
 }
 button:disabled {
   opacity: 0.5;
+  color: var(--fg-muted);
   cursor: not-allowed;
 }
 
@@ -271,16 +276,18 @@ button:disabled {
   gap: var(--space-3);
   background: none;
   border: 1px solid var(--border);
-  color: var(--fg);
+  color: var(--accent);
   padding: var(--space-3) var(--space-6);
   cursor: pointer;
 }
 .btn-secondary:hover:not(:disabled) {
-  background: var(--bg-soft);
+  border-color: var(--accent);
+  color: var(--fg);
 }
 .btn-primary {
+  /* Same accent text as secondary; the always-on accent border is what marks
+     it as the primary/emphasized action. */
   border-color: var(--accent);
-  color: var(--accent);
 }
 .btn-primary:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 15%, transparent);

@@ -125,3 +125,65 @@ describe('countNotableNewer (unread classification, #355)', () => {
     expect(systemMessages.countNotableNewer(u.id, 0)).toBe(before + 1);
   });
 });
+
+describe('keyset access (unified buffer delivery, #355)', () => {
+  it('listSystemMessages: latest is newest-N oldest-first; before/afterId page by id', () => {
+    const u = createUser('sys-keyset');
+    const ids = Array.from({ length: 5 }, (_, i) => line({ userId: u.id, text: `k${i}` }).id);
+
+    // latest (no cursor): oldest-first within the limit window.
+    const latest3 = systemMessages.listSystemMessages(u.id, { limit: 3 });
+    expect(latest3.map((r) => r.id)).toEqual(ids.slice(2)); // the 3 newest, ascending
+
+    // before: older page, oldest-first. The shared DB has older global lines
+    // too (visible to every user), so assert the tail — our two own rows just
+    // below the cursor — rather than the whole page.
+    const older = systemMessages.listSystemMessages(u.id, { before: ids[2], limit: 10 });
+    expect(older.map((r) => r.id).slice(-2)).toEqual(ids.slice(0, 2));
+
+    // afterId: newer page, ascending.
+    const newer = systemMessages.listSystemMessages(u.id, { afterId: ids[2], limit: 10 });
+    expect(newer.map((r) => r.id)).toEqual(ids.slice(3));
+  });
+
+  it('listSystemMessages mixes the user own + global lines, hides other users', () => {
+    const u = createUser('sys-keyset-vis');
+    const other = createUser('sys-keyset-other');
+    const mine = line({ userId: u.id, text: 'mine' }).id;
+    const glob = line({ text: 'global' }).id; // userId null
+    const theirs = line({ userId: other.id, text: 'theirs' }).id;
+
+    const visible = systemMessages.listSystemMessages(u.id, { limit: 100 }).map((r) => r.id);
+    expect(visible).toContain(mine);
+    expect(visible).toContain(glob);
+    expect(visible).not.toContain(theirs);
+  });
+
+  it('hasOlderSystem / hasNewerSystem probe the visible edges', () => {
+    const u = createUser('sys-edges');
+    const a = line({ userId: u.id }).id;
+    const b = line({ userId: u.id }).id; // b newer than a
+    // Relative edges hold regardless of other rows already in the shared DB.
+    expect(systemMessages.hasNewerSystem(u.id, a)).toBe(true); // b is newer than a
+    expect(systemMessages.hasOlderSystem(u.id, b)).toBe(true); // a is older than b
+    // Nothing is newer than the current newest visible line.
+    const newest = systemMessages.listSystemMessages(u.id, { limit: 1 }).at(-1)!.id;
+    expect(systemMessages.hasNewerSystem(u.id, newest)).toBe(false);
+  });
+
+  it('listSystemMessagesAround centers an anchor and reports both edges', () => {
+    const u = createUser('sys-around');
+    const ids = Array.from({ length: 5 }, () => line({ userId: u.id }).id);
+    const slice = systemMessages.listSystemMessagesAround(u.id, ids[2], 1);
+    if ('anchorMissing' in slice) throw new Error('anchor should exist');
+    expect(slice.events.map((r) => r.id)).toEqual([ids[1], ids[2], ids[3]]);
+    expect(slice.hasMoreOlder).toBe(true);
+    expect(slice.hasMoreNewer).toBe(true);
+
+    // A missing/foreign anchor reports anchorMissing rather than leaking rows.
+    const other = createUser('sys-around-other');
+    const theirs = line({ userId: other.id }).id;
+    const miss = systemMessages.listSystemMessagesAround(u.id, theirs, 1);
+    expect('anchorMissing' in miss && miss.anchorMissing).toBe(true);
+  });
+});

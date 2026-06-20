@@ -265,7 +265,7 @@ function nickClass(t: ContactTarget): Record<string, boolean> {
 .icon-btn {
   background: none;
   border: none;
-  color: var(--fg-muted);
+  color: var(--accent);
   cursor: pointer;
   font: inherit;
   padding: 0 var(--space-1);
@@ -275,6 +275,7 @@ function nickClass(t: ContactTarget): Record<string, boolean> {
 }
 .icon-btn:disabled {
   opacity: 0.35;
+  color: var(--fg-muted);
   cursor: default;
 }
 </style>

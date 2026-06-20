@@ -4,7 +4,7 @@
 import type { Ref } from 'vue';
 import { ref, onMounted, onBeforeUnmount } from 'vue';
 import { useNetworksStore } from '../stores/networks.js';
-import { useBuffersStore, type BufferMessage } from '../stores/buffers.js';
+import { useBuffersStore } from '../stores/buffers.js';
 import { useAuthStore } from '../stores/auth.js';
 import { useSettingsStore } from '../stores/settings.js';
 import { useHighlightRulesStore } from '../stores/highlightRules.js';
@@ -23,37 +23,10 @@ import { useBookmarksStore } from '../stores/bookmarks.js';
 import { useDataExportStore } from '../stores/dataExport.js';
 import { useToastsStore } from '../stores/toasts.js';
 import { notifyForEvent, playSound } from './useHighlightNotifier.js';
-import { SYSTEM_KEY } from '../lib/virtualBuffers.js';
 
 export interface AckResult {
   ok: boolean;
   error?: string;
-}
-
-// Map a server system-log line (issue #355) into a BufferMessage for the
-// app-scoped system buffer. type 'motd' renders as a plain info line — the same
-// shape client command output uses (localInfo) — so the lifecycle log and
-// command output share one look in the buffer. level/scope/source ride along on
-// the message for any future per-line styling.
-function systemLogToMessage(line: {
-  id: number;
-  ts: string;
-  level: string;
-  scope: string;
-  source: string;
-  text: string;
-}): BufferMessage {
-  return {
-    id: line.id,
-    networkId: null,
-    target: SYSTEM_KEY,
-    type: 'motd',
-    text: line.text,
-    time: line.ts,
-    level: line.level,
-    scope: line.scope,
-    source: line.source,
-  };
 }
 
 export interface SocketAPI {
@@ -289,6 +262,13 @@ function applyEvent(event: any): void {
       }
       break;
     }
+    case 'system': {
+      // App-scoped system-buffer line. It now arrives as a normal buffer event
+      // (the system buffer rides the unified backlog/irc/history path, #355), so
+      // it just appends like any other — keyed to :system: by its null networkId.
+      buffers.pushMessage(event);
+      break;
+    }
     case 'motd':
     case 'error': {
       const decorated = { ...event, target: event.target || `:server:${event.networkId}` };
@@ -406,7 +386,10 @@ function handleMessage(raw: string): void {
     return;
   }
   if (payload.kind === 'backlog') {
-    if (Array.isArray(payload.events)) {
+    // The `?since` resume cursor tracks the `messages` id space only. The system
+    // buffer (networkId null) has its own id sequence, so its ids must NOT feed
+    // the cursor — it's delivered fresh every connect instead (#355).
+    if (payload.networkId != null && Array.isArray(payload.events)) {
       for (const e of payload.events) trackSeenId(e?.id);
     }
     applyBacklog(payload);
@@ -448,7 +431,10 @@ function handleMessage(raw: string): void {
     return;
   }
   if (payload.kind === 'irc') {
-    trackSeenId(payload.id);
+    // System-buffer lines (networkId null) ride the same 'irc' frame now but
+    // carry system-table ids — keep them out of the `messages`-space resume
+    // cursor (#355).
+    if (payload.networkId != null) trackSeenId(payload.id);
     applyEvent(payload);
     return;
   }
@@ -604,16 +590,6 @@ function handleMessage(raw: string): void {
   if (payload.kind === 'send-result') {
     const resolver = pendingAcks.get(payload.clientId);
     if (resolver) resolver({ ok: !!payload.ok, error: payload.error });
-    return;
-  }
-  if (payload.kind === 'system-log-snapshot') {
-    // Seed/merge the system buffer (issue #355) from the on-(re)connect
-    // snapshot. applySystemLog dedupes by id, so a re-snapshot on resync is safe.
-    useBuffersStore().applySystemLog((payload.lines || []).map(systemLogToMessage));
-    return;
-  }
-  if (payload.kind === 'system-log') {
-    if (payload.line) useBuffersStore().applySystemLog([systemLogToMessage(payload.line)]);
     return;
   }
   if (payload.kind === 'export') {

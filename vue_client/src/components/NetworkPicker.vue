@@ -207,7 +207,6 @@ const filtered = computed<BuiltinNetwork[]>(() => {
 }
 .tag-chip:hover {
   color: var(--fg);
-  background: var(--bg-soft);
 }
 .tag-chip.on {
   background: var(--accent);

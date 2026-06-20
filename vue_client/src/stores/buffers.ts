@@ -206,6 +206,9 @@ function makeBuffer(networkId: number | string | null, target: string): Buffer {
     // upward pager; hasMoreNewer is only meaningful while detached or while
     // the user has paged past the live tail (not currently possible
     // outside detach mode, but the field is here for future symmetry).
+    // Provisional; the buffer's `backlog` frame sets the real value on connect.
+    // The system buffer gets a backlog frame too now (#355), so it's no longer
+    // special-cased here.
     hasMoreOlder: true,
     hasMoreNewer: false,
     loadingHistory: false,
@@ -329,11 +332,12 @@ export const useBuffersStore = defineStore('buffers', {
       if (buf.messages.length > MAX_PER_BUFFER)
         buf.messages.splice(0, buf.messages.length - MAX_PER_BUFFER);
       if (buf.oldestId == null && event.id != null) buf.oldestId = event.id;
-      // Server read-state mechanics (active-divider tracking + mark-read) only
-      // apply to network buffers. The app-scoped system buffer has no network to
-      // round-trip to and no server-owned read pointer, so it just accumulates
-      // lines.
-      if (event.id != null && buf.networkId != null) {
+      // Active-divider tracking + live mark-read. Applies to the system buffer
+      // too (#355): it's now a normal buffer with a server-owned read pointer
+      // (buffer_reads, null networkId), so a live line marks read the same way —
+      // key() folds the null networkId to the bare :system: key, and the
+      // mark-read below rides through with networkId null.
+      if (event.id != null) {
         const networks = useNetworksStore();
         // Compare against the resolved buffer's canonical key, not the event's
         // (possibly divergently-cased) target — otherwise a live DM arriving as
@@ -375,39 +379,6 @@ export const useBuffersStore = defineStore('buffers', {
         delete buf.typing[speakerKey];
       }
       return true;
-    },
-    // Apply system-log lines (issue #355) to the app-scoped system buffer.
-    // Handles both the on-(re)connect snapshot and incremental live lines: each
-    // line carries a durable server id, so we dedupe against ids already present
-    // and append only the genuinely-new ones in id order. We can't lean on
-    // pushMessage's replay guard here — it only compares against the *last*
-    // message's id, and id-less client command output (localInfo) interleaves in
-    // this buffer, which would let a re-sent snapshot line slip past and
-    // duplicate. The dedupe set is the robust path.
-    applySystemLog(messages: BufferMessage[]) {
-      const buf = this.buffers[SYSTEM_KEY];
-      if (!buf || !Array.isArray(messages)) return;
-      const seen = new Set<number>();
-      for (const m of buf.messages) if (typeof m.id === 'number') seen.add(m.id);
-      const fresh = messages
-        .filter((m) => typeof m.id === 'number' && !seen.has(m.id))
-        .toSorted((a, b) => (a.id as number) - (b.id as number));
-      if (!fresh.length) return;
-      buf.messages.push(...fresh);
-      if (buf.messages.length > MAX_PER_BUFFER)
-        buf.messages.splice(0, buf.messages.length - MAX_PER_BUFFER);
-      // If the user is sitting in the system buffer, keep it marked read live
-      // (mirrors pushMessage for network buffers) so the server's read pointer —
-      // and thus the LURKER badge on other tabs/devices — advances past lines
-      // they've now seen. applyReadState suppresses the badge here meanwhile.
-      const networks = useNetworksStore();
-      if (networks.activeKey === SYSTEM_KEY) {
-        const lastId = fresh[fresh.length - 1].id as number;
-        if (lastId > buf.lastReadId) {
-          buf.lastReadId = lastId;
-          socketSend({ type: 'mark-read', networkId: null, target: SYSTEM_KEY, messageId: lastId });
-        }
-      }
     },
     replaceBacklog(
       networkId: number | string,
@@ -680,7 +651,7 @@ export const useBuffersStore = defineStore('buffers', {
         buf.pendingRefetch = true;
       }
     },
-    setLoadingHistory(networkId: number | string, target: string, loading: boolean) {
+    setLoadingHistory(networkId: number | string | null, target: string, loading: boolean) {
       const buf = ensureBuffer(this, networkId, target);
       buf.loadingHistory = loading;
     },
@@ -1000,8 +971,9 @@ export const useBuffersStore = defineStore('buffers', {
       // Fire a fresh latest fetch so the user lands on live tail content
       // instead of an empty buffer. The applyLatestReplace response will
       // do its own mark-read against the new tail.
-      // History fetches are network-only — the app-scoped system buffer has no
-      // server history endpoint (its content is the system-log snapshot).
+      // Network-buffer only: the system buffer is seeded by its connect backlog
+      // and never detaches (its lines aren't searchable/jumpable), so it doesn't
+      // need the activate-refetch; the guard also excludes the FRIENDS overview.
       if (networkId != null && buf.pendingRefetch) {
         buf.pendingRefetch = false;
         this.reattachToLive(networkId, canonTarget);

@@ -388,13 +388,33 @@ export class IrcConnection {
   }
 
   setState(state: string, extra: Record<string, unknown> = {}): void {
+    const changed = this.state !== state;
     this.state = state;
     this.publish({ type: 'state', state, ...extra });
-    this.logState(state, extra);
+    // Only log on a real transition. A disconnect fires both 'socket close' and
+    // 'close', each calling setState('disconnected'); without this guard the
+    // system buffer gets two "Disconnected" lines per network (#355). The state
+    // publish stays unconditional — re-asserting the same dot is harmless and
+    // keeps a late-attaching client in sync.
+    if (changed) this.logState(state, extra);
   }
 
   logScope(): string {
     return `net:${this.network.name}`;
+  }
+
+  // System-buffer log line tied to this network. The human-readable scope keeps
+  // the network's *current* name for the raw log, but `fields.networkId` carries
+  // the stable id so the client can resolve the live name at render time — the
+  // scope string is frozen at write time and goes stale after a rename (#355).
+  logNet(text: string, level?: string): void {
+    systemLog.log({
+      userId: this.network.user_id,
+      scope: this.logScope(),
+      fields: { networkId: this.network.id },
+      level,
+      text,
+    });
   }
 
   logState(state: string, extra: Record<string, unknown>): void {
@@ -415,12 +435,7 @@ export class IrcConnection {
       default:
         text = `State: ${state}`;
     }
-    systemLog.log({
-      userId: this.network.user_id,
-      scope: this.logScope(),
-      level: state === 'disconnected' ? 'warn' : 'info',
-      text,
-    });
+    this.logNet(text, state === 'disconnected' ? 'warn' : 'info');
   }
 
   bind(): void {
@@ -690,11 +705,7 @@ export class IrcConnection {
       if (limit === 0 || this.useMonitor) return;
       this.useMonitor = true;
       this.monitorLimit = limit;
-      systemLog.log({
-        userId: this.network.user_id,
-        scope: this.logScope(),
-        text: `MONITOR (IRCv3 presence) supported, watch limit ${limit}`,
-      });
+      this.logNet(`MONITOR (IRCv3 presence) supported, watch limit ${limit}`);
       if (this.pendingRegainSetup && this.regainNick) {
         this.pendingRegainSetup = false;
         try {
@@ -707,11 +718,9 @@ export class IrcConnection {
         this.pendingMonitorSeed = false;
         const seedCount = this.monitoredNicks().length;
         if (seedCount > 0) {
-          systemLog.log({
-            userId: this.network.user_id,
-            scope: this.logScope(),
-            text: `Seeding MONITOR with ${seedCount} nick${seedCount === 1 ? '' : 's'} (DM peers + friends)`,
-          });
+          this.logNet(
+            `Seeding MONITOR with ${seedCount} nick${seedCount === 1 ? '' : 's'} (DM peers + friends)`,
+          );
           this.seedMonitorWatch();
         }
       }
@@ -725,11 +734,7 @@ export class IrcConnection {
     c.on('users online', (event: Record<string, unknown>) => {
       const nicks: string[] = Array.isArray(event?.nicks) ? (event.nicks as string[]) : [];
       if (nicks.length > 0) {
-        systemLog.log({
-          userId: this.network.user_id,
-          scope: this.logScope(),
-          text: `Presence: ${nicks.join(', ')} online`,
-        });
+        this.logNet(`Presence: ${nicks.join(', ')} online`);
       }
       for (const nick of nicks) {
         if (typeof nick === 'string') this.markPeerEvent(nick, 'online');
@@ -747,11 +752,7 @@ export class IrcConnection {
     c.on('users offline', (event: Record<string, unknown>) => {
       const nicks: string[] = Array.isArray(event?.nicks) ? (event.nicks as string[]) : [];
       if (nicks.length > 0) {
-        systemLog.log({
-          userId: this.network.user_id,
-          scope: this.logScope(),
-          text: `Presence: ${nicks.join(', ')} offline`,
-        });
+        this.logNet(`Presence: ${nicks.join(', ')} offline`);
       }
       if (this.regainNick) {
         const target = this.regainNick.toLowerCase();
@@ -800,12 +801,7 @@ export class IrcConnection {
           target: this.serverTarget(),
           text,
         });
-        systemLog.log({
-          userId: this.network.user_id,
-          scope: this.logScope(),
-          level: 'error',
-          text,
-        });
+        this.logNet(text, 'error');
       }
     });
     c.on('reconnecting', (event: Record<string, unknown>) => {
@@ -1031,11 +1027,8 @@ export class IrcConnection {
         // can't-speak-here mark so typing notifications resume. If we still
         // can't speak, the next attempt re-learns it from the bounce (#283).
         this.unsendableTargets.delete(eventChannel.toLowerCase());
-        systemLog.log({
-          userId: this.network.user_id,
-          scope: this.logScope(),
-          text: `Joined ${eventChannel}`,
-        });
+        // No system-buffer "Joined #x" line — the channel buffer already shows
+        // the join event, so logging it here too is just noise (#355).
         // Most servers volunteer 324 on join, but a few don't. Request it so
         // the channel's mode flags reach the status bar consistently.
         try {
@@ -1066,13 +1059,8 @@ export class IrcConnection {
       if (eventNick === c.user.nick) {
         this.channels.delete(eventChannel.toLowerCase());
         this.publish({ type: 'channel-parted', target: channel });
-        systemLog.log({
-          userId: this.network.user_id,
-          scope: this.logScope(),
-          text: event.message
-            ? `Parted ${channel}: ${event.message as string}`
-            : `Parted ${channel}`,
-        });
+        // No system-buffer "Parted #x" line — symmetric with the join above; the
+        // part already shows in the channel buffer (#355).
       }
     });
 

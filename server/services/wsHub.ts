@@ -42,7 +42,13 @@ import {
   getClearedState,
   setClearedState,
 } from '../db/bufferReads.js';
-import { countNotableNewer } from '../db/systemMessages.js';
+import {
+  countNotableNewer,
+  listSystemMessages,
+  listSystemMessagesAround,
+  hasOlderSystem,
+  hasNewerSystem,
+} from '../db/systemMessages.js';
 import {
   addEntry as addInputHistory,
   listRecent as listRecentInputHistory,
@@ -396,6 +402,69 @@ export function buildResumeSlice(
     // reset there is harmless but needlessly noisy.
     reset: sinceId > 0,
     hasMoreOlder: oldestId > 0 && hasOlderRow(networkId, target, oldestId),
+  };
+}
+
+// Map a system line (LogLine or persisted row — same shape) to the MessageEvent
+// wire shape network lines use, so the system buffer rides the unified backlog/
+// irc/history frames instead of the old system-log path (#355). This is the
+// former client `systemLogToMessage`, relocated server-side so the wire is
+// identical; type 'system' + originNetworkId drive the prefix-column rendering.
+function systemLineToEvent(line: {
+  id: number;
+  ts: string;
+  level: string;
+  scope: string;
+  source: string;
+  text: string;
+  fields: Record<string, unknown> | null;
+}): WsPayload {
+  const fields = line.fields;
+  const originNetworkId = fields && typeof fields.networkId === 'number' ? fields.networkId : null;
+  return {
+    id: line.id,
+    networkId: null,
+    originNetworkId,
+    target: SYSTEM_TARGET,
+    type: 'system',
+    nick: null,
+    text: line.text,
+    time: line.ts,
+    level: line.level,
+    scope: line.scope,
+    source: line.source,
+  };
+}
+
+// The system buffer's 'backlog' frame. Deliberately ignores the socket's
+// `?since` cursor: system_messages has its OWN id sequence, independent of the
+// `messages` table the cursor tracks, so a network sinceId is meaningless here.
+// Instead it always ships the latest slice and lets the client's per-buffer
+// gap-fill (replaceBacklog dedupes against the system buffer's own max id)
+// reconcile on reconnect — exactly what the old system-log snapshot did. No
+// speakers / input history; read & cleared state are null-keyed already (#355).
+function buildSystemBacklog(userId: number): WsPayload {
+  const rows = listSystemMessages(userId, { limit: RESUME_LATEST_LIMIT });
+  const oldestId = rows.length ? rows[0].id : 0;
+  const lastRead = getReadState(userId, null, SYSTEM_TARGET);
+  const counts = computeUnreadFor(userId, null, SYSTEM_TARGET, lastRead);
+  const cleared = getClearedState(userId, null, SYSTEM_TARGET);
+  return {
+    kind: 'backlog',
+    networkId: null,
+    target: SYSTEM_TARGET,
+    events: rows.map(systemLineToEvent),
+    speakers: [],
+    joined: true,
+    lastReadId: counts.lastReadId,
+    unread: counts.unread,
+    highlights: counts.highlights,
+    highlightsCapped: counts.highlightsCapped,
+    clearedBeforeId: cleared.clearedBeforeId,
+    clearedAt: cleared.clearedAt,
+    inputHistory: [],
+    reset: false,
+    hasMoreOlder: oldestId > 0 && hasOlderSystem(userId, oldestId),
   };
 }
 
@@ -943,8 +1012,9 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
     // Global lines reach every connected user; per-user lines just that user.
     const recipients = line.userId == null ? [...socketsByUser.keys()] : [line.userId];
     const notable = systemLineNotifies(line);
+    const event = systemLineToEvent(line);
     for (const userId of recipients) {
-      fanOut(userId, { kind: 'system-log', line });
+      fanOut(userId, { kind: 'irc', ...event });
       // Notable lines (admin/error) bump the system buffer's unread, so refresh
       // its badge live. Routine lifecycle lines skip this — they don't count
       // toward unread, so re-broadcasting would just be a no-op frame.
@@ -1097,27 +1167,13 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
     // snapshot exists solely so the message context menu can flip its label
     // ("Save" ↔ "Remove bookmark") without a network round-trip.
     send(ws, { kind: 'bookmark-ids-snapshot', ids: listBookmarkIdsForUser(userId) });
-    // System console seed: ring contents up to the current moment. Live
-    // lines after this point arrive via the `system-log` fan-out. The
-    // client store dedupes by id, so a redundant re-snapshot on visibility-
-    // return resync is harmless.
-    send(ws, { kind: 'system-log-snapshot', lines: systemLog.getRecent(userId) });
-    // Seed the system buffer's unread badge so the LURKER row is correct on load
-    // (#355). Same read-state frame normal buffers use; the client resolves it to
-    // the :system: buffer.
-    {
-      const sysReadId = getReadState(userId, null, SYSTEM_TARGET);
-      const counts = computeUnreadFor(userId, null, SYSTEM_TARGET, sysReadId);
-      send(ws, {
-        kind: 'read-state',
-        networkId: null,
-        target: SYSTEM_TARGET,
-        lastReadId: counts.lastReadId,
-        unread: counts.unread,
-        highlights: counts.highlights,
-        highlightsCapped: counts.highlightsCapped,
-      });
-    }
+    // System buffer seed: the app-scoped system log rides the same 'backlog'
+    // frame network buffers use (events + read-state + hasMoreOlder), so the
+    // client treats it like any other buffer — no bespoke system-log path (#355).
+    // Always the latest slice (the system id space is independent of the
+    // `?since` cursor); the client dedupes/gap-fills by id, so a re-snapshot on
+    // resync is safe. See buildSystemBacklog.
+    send(ws, buildSystemBacklog(userId));
     // Friends/contacts seed: the user's full contact list (display name, notify
     // flag, per-network watch targets). User-level, so one message rather than a
     // per-network field. Drives the FRIENDS overview/sidebar + the came-online
@@ -1783,6 +1839,89 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
       case 'history': {
         const histNetworkId = msg.networkId as number;
         const histTarget = msg.target as string;
+
+        // System buffer: app-scoped, no IRC connection — dispatch to the
+        // system_messages keyset access. Reply shapes match the network path
+        // below exactly, so the client's history handlers are identical (#355).
+        if (msg.networkId == null && histTarget === SYSTEM_TARGET) {
+          const sysLimit = Math.min(Math.max(Number(msg.limit) || 100, 1), 500);
+          const sysMode = typeof msg.mode === 'string' ? msg.mode : 'before';
+          const sysBase = {
+            kind: 'history',
+            networkId: null,
+            target: SYSTEM_TARGET,
+            mode: sysMode,
+            token: msg.token ?? null,
+            speakers: [],
+          };
+          if (sysMode === 'around') {
+            const anchorId = Number(msg.anchorId);
+            if (!Number.isInteger(anchorId) || anchorId <= 0) {
+              send(ws, { kind: 'error', text: 'invalid anchorId' });
+              break;
+            }
+            const slice = listSystemMessagesAround(userId, anchorId, sysLimit);
+            send(ws, {
+              ...sysBase,
+              anchorId,
+              events: slice.events.map(systemLineToEvent),
+              hasMoreOlder: slice.hasMoreOlder,
+              hasMoreNewer: slice.hasMoreNewer,
+              anchorMissing: 'anchorMissing' in slice ? !!slice.anchorMissing : false,
+              hasMore: slice.hasMoreOlder,
+              before: null,
+            });
+            break;
+          }
+          if (sysMode === 'after') {
+            const afterId = Number(msg.afterId);
+            if (!Number.isInteger(afterId) || afterId < 0) {
+              send(ws, { kind: 'error', text: 'invalid afterId' });
+              break;
+            }
+            const rows = listSystemMessages(userId, { afterId, limit: sysLimit });
+            const newestId = rows.length ? rows[rows.length - 1].id : afterId;
+            send(ws, {
+              ...sysBase,
+              afterId,
+              events: rows.map(systemLineToEvent),
+              hasMoreNewer: hasNewerSystem(userId, newestId),
+              hasMoreOlder: true,
+              hasMore: true,
+              before: null,
+            });
+            break;
+          }
+          if (sysMode === 'latest') {
+            const rows = listSystemMessages(userId, { limit: sysLimit });
+            const oldestId = rows.length ? rows[0].id : 0;
+            const more = oldestId > 0 && hasOlderSystem(userId, oldestId);
+            send(ws, {
+              ...sysBase,
+              events: rows.map(systemLineToEvent),
+              hasMoreOlder: more,
+              hasMoreNewer: false,
+              hasMore: more,
+              before: null,
+            });
+            break;
+          }
+          // 'before' (default): page older.
+          const before = msg.before ? Number(msg.before) : undefined;
+          const rows = listSystemMessages(userId, { before, limit: sysLimit });
+          const oldestId = rows.length ? rows[0].id : 0;
+          const more = oldestId > 0 && hasOlderSystem(userId, oldestId);
+          send(ws, {
+            ...sysBase,
+            before: msg.before || null,
+            events: rows.map(systemLineToEvent),
+            hasMoreOlder: more,
+            hasMoreNewer: false,
+            hasMore: more,
+          });
+          break;
+        }
+
         const conn = ircManager.getConnection(userId, histNetworkId);
         if (!conn) {
           send(ws, { kind: 'error', text: 'network not connected' });

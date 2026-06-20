@@ -14,17 +14,16 @@
     @click="onChatClick"
   >
     <aside class="sidebar" :class="{ collapsed: !showChannels }">
-      <!-- The "lurker" header + connection dot moved into BufferList's LURKER
-           row (#355); the collapse toggle moved here to the footer (where the
-           settings cog used to be — the cog now lives on the LURKER row). -->
+      <!-- The "lurker" header + connection dot live in BufferList's LURKER row
+           (#355); the collapse control lives there too. When collapsed the list
+           is unmounted, so the expand control returns to the top of the rail. -->
       <BufferList v-if="showChannels" />
+      <button v-else class="link rail-toggle" title="Show channel list" @click="toggleChannels">
+        <i class="fa-solid fa-angles-right"></i>
+      </button>
       <div ref="footEl" class="sidebar-foot" :class="{ 'foot-wrapped': footWrapped }">
-        <button
-          class="link toggle"
-          :title="showChannels ? 'Hide channel list' : 'Show channel list'"
-          @click="toggleChannels"
-        >
-          <i :class="showChannels ? 'fa-solid fa-angles-left' : 'fa-solid fa-angles-right'"></i>
+        <button class="link" @click="openSettings" title="Settings">
+          <i class="fa-solid fa-gear"></i>
         </button>
         <button class="link" @click="showSearch = true" title="Search messages">
           <i class="fa-solid fa-magnifying-glass"></i>
@@ -211,8 +210,10 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import type { Network } from '../stores/networks.js';
-import type { Buffer } from '../stores/buffers.js';
+import { useBuffersStore, type Buffer } from '../stores/buffers.js';
+import { SYSTEM_KEY } from '../lib/virtualBuffers.js';
 import { useSocket } from '../composables/useSocket.js';
 import { useNetworksStore } from '../stores/networks.js';
 import { useChatBootstrap } from '../composables/useChatBootstrap.js';
@@ -251,11 +252,21 @@ import { useNetworkEditor } from '../composables/useNetworkEditor.js';
 import { useJumpToMessage } from '../composables/useJumpToMessage.js';
 
 const networks = useNetworksStore();
+const buffers = useBuffersStore();
 // Registers the WebSocket connect lifecycle (onMounted) for the desktop shell —
 // must be called even though we don't read `connected` here (the LURKER row's
 // status light reads the exported `connected` ref directly). Without this call
 // the socket never opens: red status light + no buffers (#355 regression).
 useSocket();
+
+// Land on the system buffer instead of a blank "No messages yet." pane when
+// nothing else is active on load (#355). The last-active buffer isn't persisted,
+// so activeKey is null on every fresh load; the system buffer always exists in
+// the store, so this is always a valid target. Guarded on null so a deep-link /
+// push-jump that set a buffer first still wins.
+onMounted(() => {
+  if (networks.activeKey == null) buffers.activate(null, SYSTEM_KEY);
+});
 const {
   active,
   activeBuf,
@@ -475,6 +486,14 @@ function onChatClick(e: MouseEvent) {
 
 const onJumpToMessage = useJumpToMessage({ pendingScrollId });
 
+const router = useRouter();
+// Collapsed-only footer affordance: the settings cog normally lives on the
+// LURKER sidebar row, but that whole list is unmounted when the sidebar is
+// collapsed (BufferList v-if), so the rail offers the cog here instead (#355).
+function openSettings() {
+  router.push('/settings');
+}
+
 function openAddNetwork() {
   networkEditor.open();
 }
@@ -625,8 +644,8 @@ useChatBootstrap({ onJump: onJumpToMessage });
   justify-items: center;
 }
 /* Collapsed rail: swap the foot to a vertical stack and center everything in
-   the 36px column. The collapse/expand toggle lives in the foot now (where the
-   cog used to be), so the rail is just the stacked foot icons. */
+   the 36px column. The expand toggle sits at the top of the rail (.rail-toggle);
+   the foot holds the stacked tool icons + settings cog. */
 .sidebar.collapsed .sidebar-foot {
   flex-direction: column;
   padding: var(--space-4) 0;
@@ -646,11 +665,17 @@ useChatBootstrap({ onJump: onJumpToMessage });
 .link:hover {
   color: var(--fg);
 }
-.link.toggle {
-  color: var(--fg-muted);
-}
-.link.toggle:hover {
-  color: var(--fg);
+/* Expand control at the top of the collapsed rail — the in-list collapse
+   button is unmounted with the channel list, so this brings it back up top.
+   Mirrors the LURKER header it stands in for so its bottom rule lines up with
+   the topic divider: full-rail width, the same var(--space-4) block padding,
+   and the icon in a normal line box (not flex — that sized to the glyph, ~1em,
+   leaving the rule too high; text-align keeps the headers' line-height box). */
+.rail-toggle {
+  align-self: stretch;
+  text-align: center;
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--border);
 }
 
 .topic {

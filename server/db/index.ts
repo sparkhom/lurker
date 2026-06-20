@@ -7,6 +7,18 @@ import fs from 'fs';
 import { isNodeMode } from '../utils/edition.js';
 import { foldBufferCase } from './foldBufferCase.js';
 
+// Guardrail: under vitest, refuse to fall back to the real database. A test
+// that forgets to isolate DATABASE_PATH would otherwise open data/lurker.db and
+// write into it — exactly how ircConnection.test.ts leaked "Joined #anime" rows
+// into the operator's prod DB. Fail loud instead of silently polluting.
+// (server/test-utils/isolateDb.ts is the fix for static-import test files.)
+if (process.env.VITEST && !process.env.DATABASE_PATH) {
+  throw new Error(
+    'db/index.ts: refusing to open the production database (data/lurker.db) under test. ' +
+      'Set DATABASE_PATH to an isolated path — import server/test-utils/isolateDb.ts first, ' +
+      'or use the set-env-then-dynamic-import pattern.',
+  );
+}
 const dbPath = process.env.DATABASE_PATH || path.join(import.meta.dirname, '../../data/lurker.db');
 // Absolute path to the SQLite file, exported so the export worker can open its
 // own readonly connection to the exact same database (and so exportJobs can

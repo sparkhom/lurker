@@ -2507,7 +2507,7 @@ function handleCommand(line: string, networkId: number | null, target: string): 
 .send-btn {
   background: none;
   border: none;
-  color: var(--fg-muted);
+  color: var(--accent);
   cursor: pointer;
   padding: 0 var(--space-1);
   font-size: inherit;
@@ -2517,10 +2517,11 @@ function handleCommand(line: string, networkId: number | null, target: string): 
   align-self: flex-end;
 }
 .send-btn:hover:not(:disabled) {
-  color: var(--accent);
+  color: var(--fg);
 }
 .send-btn:disabled {
   opacity: 0.4;
+  color: var(--fg-muted);
   cursor: default;
 }
 .file-hidden {
