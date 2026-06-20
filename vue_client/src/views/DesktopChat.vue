@@ -581,6 +581,12 @@ useChatBootstrap({ onJump: onJumpToMessage });
 .chat.system-active {
   --members-w: 0px;
 }
+/* The status bar carries the separator border above the input, but it's hidden
+   in the system buffer (no network state to show). Give the input its own top
+   border there so it stays visually divided from the message list. */
+.chat.system-active .input {
+  border-top: 1px solid var(--border);
+}
 /* min-height/min-width 0 lets flex/scrolling children stay inside their row. */
 .chat > * {
   min-width: 0;

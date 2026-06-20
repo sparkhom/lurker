@@ -104,7 +104,11 @@
       <FriendsOverview v-if="renderMode === 'overview'" @view-activity="onViewActivity" />
       <MessageList v-else :pending-scroll-id="pendingScrollId" />
       <StatusBar compact />
-      <div v-if="hasInput" class="composer-host" :class="{ 'keyboard-open': keyboardOpen }">
+      <div
+        v-if="hasInput"
+        class="composer-host"
+        :class="{ 'keyboard-open': keyboardOpen, 'system-input': isSystemBuffer }"
+      >
         <MessageInput ref="messageInputRef" />
       </div>
     </section>
@@ -571,6 +575,11 @@ useChatBootstrap({ onJump: onJumpToMessage });
 }
 .composer-host :deep(.input) {
   flex: 0 0 auto;
+}
+/* The compact status bar carries the separator border above the input, but it's
+   hidden in the system buffer — give the input its own top border there. */
+.composer-host.system-input :deep(.input) {
+  border-top: 1px solid var(--border);
 }
 
 /* Member list takes the rest of the height on its own screen. */
