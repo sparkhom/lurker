@@ -5,9 +5,11 @@
 // network. They use a flat sentinel key (no `::`) so the usual
 // `${networkId}::${target}` parsers ignore them. Today there are two:
 //
-//   :system:  — the per-user server-lifecycle log. renderMode 'console': its
-//               own store (systemLog) + the SystemConsole component, no nicklist
-//               or input.
+//   :system:  — the system buffer (issue #355). renderMode 'buffer': a real,
+//               app-scoped Buffer in the buffers store (networkId null),
+//               rendered by MessageList with a slash-command input and no
+//               nicklist. It's the home for the server lifecycle log plus
+//               command output / errors that have no other buffer.
 //   :friends: — the cross-network Friends buffer. renderMode 'overview': a
 //               bespoke FriendsOverview component (a management pane, not a
 //               message feed), no nicklist or input.
@@ -21,10 +23,9 @@
 export const SYSTEM_KEY = ':system:';
 export const FRIENDS_KEY = ':friends:';
 
-// 'console' — own store + monospace component (system log).
 // 'buffer'  — a real Buffer in the buffers store, rendered by MessageList.
 // 'overview'— a bespoke component in the message-pane slot (Friends overview).
-export type VirtualRenderMode = 'console' | 'buffer' | 'overview';
+export type VirtualRenderMode = 'buffer' | 'overview';
 
 export interface VirtualBufferConfig {
   key: string;
@@ -37,10 +38,10 @@ export interface VirtualBufferConfig {
 export const VIRTUAL_BUFFERS: Readonly<Record<string, VirtualBufferConfig>> = Object.freeze({
   [SYSTEM_KEY]: {
     key: SYSTEM_KEY,
-    label: 'System console',
-    renderMode: 'console',
+    label: 'Lurker',
+    renderMode: 'buffer',
     hasNicklist: false,
-    hasInput: false,
+    hasInput: true,
   },
   [FRIENDS_KEY]: {
     key: FRIENDS_KEY,

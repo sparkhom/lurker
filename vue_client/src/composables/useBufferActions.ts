@@ -11,7 +11,9 @@ import { useContextMenu } from './useContextMenu.js';
 import { socketSend } from './useSocket.js';
 
 export interface BufferLike {
-  networkId: number;
+  // null for the app-scoped system buffer (issue #355); buildItems bails on it
+  // since every menu action is network-scoped.
+  networkId: number | null;
   target: string;
 }
 
@@ -34,25 +36,30 @@ export function useBufferActions(): BufferActionsAPI {
   const menu = useContextMenu();
 
   function buildItems(buf: BufferLike | null | undefined): ContextMenuItem[] {
-    if (!buf || buf.target.startsWith(':server:')) return [];
+    // Capture networkId as a const after the null guard so the narrowing to
+    // `number` survives inside the onClick closures below (a captured parameter
+    // would widen back to number|null). Every menu action is network-scoped, so
+    // the app-scoped system buffer (networkId null) yields no menu.
+    const networkId = buf?.networkId;
+    if (!buf || networkId == null || buf.target.startsWith(':server:')) return [];
     const isChannel = buf.target.startsWith('#');
     const kind = isChannel ? 'Channel' : 'DM';
-    const pinned = pins.isPinned(buf.networkId, buf.target);
+    const pinned = pins.isPinned(networkId, buf.target);
     const items: ContextMenuItem[] = [
       pinned
         ? {
             label: `Unpin ${kind}`,
             icon: 'fa-solid fa-thumbtack-slash',
-            onClick: () => pins.unpin(buf.networkId, buf.target),
+            onClick: () => pins.unpin(networkId, buf.target),
           }
         : {
             label: `Pin ${kind}`,
             icon: 'fa-solid fa-thumbtack',
-            onClick: () => pins.pin(buf.networkId, buf.target),
+            onClick: () => pins.pin(networkId, buf.target),
           },
     ];
     if (isChannel) {
-      const isAlwaysNotify = channelNotify.notifyAlways(buf.networkId, buf.target);
+      const isAlwaysNotify = channelNotify.notifyAlways(networkId, buf.target);
       items.push(
         // Icon reflects current state (solid = always-notifying, regular = not)
         // to match the topic-bar toggle; the label states the action.
@@ -60,30 +67,30 @@ export function useBufferActions(): BufferActionsAPI {
           ? {
               label: 'Stop Always Notifying',
               icon: 'fa-solid fa-bell',
-              onClick: () => channelNotify.setNotifyAlways(buf.networkId, buf.target, false),
+              onClick: () => channelNotify.setNotifyAlways(networkId, buf.target, false),
             }
           : {
               label: 'Always Notify',
               icon: 'fa-regular fa-bell',
-              onClick: () => channelNotify.setNotifyAlways(buf.networkId, buf.target, true),
+              onClick: () => channelNotify.setNotifyAlways(networkId, buf.target, true),
             },
       );
       // Mute hides the unread count + row color for ordinary traffic, leaving
       // highlights (and notifications) intact — for busy rooms you want to stay
       // in but not have nagging at you. Icon mirrors the always-notify pattern:
       // solid bell-slash = muted, regular bell-slash = not.
-      const isMuted = channelNotify.muted(buf.networkId, buf.target);
+      const isMuted = channelNotify.muted(networkId, buf.target);
       items.push(
         isMuted
           ? {
               label: 'Unmute Channel',
               icon: 'fa-solid fa-bell-slash',
-              onClick: () => channelNotify.setMuted(buf.networkId, buf.target, false),
+              onClick: () => channelNotify.setMuted(networkId, buf.target, false),
             }
           : {
               label: 'Mute Channel',
               icon: 'fa-regular fa-bell-slash',
-              onClick: () => channelNotify.setMuted(buf.networkId, buf.target, true),
+              onClick: () => channelNotify.setMuted(networkId, buf.target, true),
             },
       );
     } else {
@@ -91,22 +98,22 @@ export function useBufferActions(): BufferActionsAPI {
       // Channels can't carry a per-nick action from this menu (which nick?),
       // so these are DM-only; in-channel equivalents flow through the member
       // list menu.
-      const hasNote = nickNotes.hasNote(buf.networkId, buf.target);
-      const isFriend = !!friends.contactForTarget(buf.networkId, buf.target);
+      const hasNote = nickNotes.hasNote(networkId, buf.target);
+      const isFriend = !!friends.contactForTarget(networkId, buf.target);
       items.push({
         label: 'View Profile…',
         icon: 'fa-solid fa-id-card',
-        onClick: () => whois.openViewer(buf.networkId, buf.target),
+        onClick: () => whois.openViewer(networkId, buf.target),
       });
       items.push({
         label: hasNote ? 'Edit Note…' : 'Add Note…',
         icon: 'fa-solid fa-note-sticky',
-        onClick: () => nickNotes.openEditor(buf.networkId, buf.target),
+        onClick: () => nickNotes.openEditor(networkId, buf.target),
       });
       items.push({
         label: isFriend ? 'Edit Friend…' : 'Add Friend…',
         icon: 'fa-solid fa-user-group',
-        onClick: () => friends.openEditorForNick(buf.networkId, buf.target),
+        onClick: () => friends.openEditorForNick(networkId, buf.target),
       });
     }
     // Close drops the buffer entirely — for a channel that also PARTs it, for
@@ -118,8 +125,7 @@ export function useBufferActions(): BufferActionsAPI {
       {
         label: `Close ${kind}`,
         icon: 'fa-solid fa-xmark',
-        onClick: () =>
-          socketSend({ type: 'close-buffer', networkId: buf.networkId, target: buf.target }),
+        onClick: () => socketSend({ type: 'close-buffer', networkId, target: buf.target }),
       },
     );
     return items;

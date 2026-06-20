@@ -426,6 +426,13 @@ export const EXPORT_TABLES = Object.freeze({
       'per-user export job + artifact bookkeeping (status/progress/file path/TTL); ' +
       'instance-local operational state, not portable user data',
   },
+
+  system_messages: {
+    mode: 'skip',
+    reason:
+      'system-buffer log (server lifecycle events + global notices); ' +
+      'transient operational state rebuilt by the live instance, not portable user data',
+  },
 });
 
 // Insertion order on import. Each table must come after every table it

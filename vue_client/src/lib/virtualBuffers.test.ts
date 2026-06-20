@@ -11,12 +11,14 @@ import {
 } from './virtualBuffers.js';
 
 describe('virtualBuffers', () => {
-  it('registers system + friends with their render modes and no input/nicklist', () => {
+  it('registers the system buffer as a real input buffer, friends as an overview', () => {
+    // #355: system is a first-class buffer (renderMode 'buffer') with a
+    // slash-command input and no nicklist.
     expect(VIRTUAL_BUFFERS[SYSTEM_KEY]).toMatchObject({
       key: SYSTEM_KEY,
-      renderMode: 'console',
+      renderMode: 'buffer',
       hasNicklist: false,
-      hasInput: false,
+      hasInput: true,
     });
     expect(VIRTUAL_BUFFERS[FRIENDS_KEY]).toMatchObject({
       key: FRIENDS_KEY,

@@ -8,7 +8,7 @@
     <!-- Screen: channel list -->
     <section v-if="screen === 'list'" class="screen list">
       <header class="bar">
-        <button type="button" class="logo" title="Open system console" @click="openSystemConsole">
+        <button type="button" class="logo" title="Open system buffer" @click="openSystemConsole">
           lurker
         </button>
         <span v-if="!connected" class="status off" title="Disconnected">●</span>
@@ -101,8 +101,7 @@
           <i class="fa-solid fa-ellipsis-vertical"></i>
         </button>
       </header>
-      <SystemConsole v-if="renderMode === 'console'" />
-      <FriendsOverview v-else-if="renderMode === 'overview'" @view-activity="onViewActivity" />
+      <FriendsOverview v-if="renderMode === 'overview'" @view-activity="onViewActivity" />
       <MessageList v-else :pending-scroll-id="pendingScrollId" />
       <StatusBar compact />
       <div v-if="hasInput" class="composer-host" :class="{ 'keyboard-open': keyboardOpen }">
@@ -186,7 +185,6 @@ import { useContextMenu } from '../composables/useContextMenu.js';
 import type { ContextMenuItem } from '../composables/useContextMenu.js';
 import BufferList from '../components/BufferList.vue';
 import MessageList from '../components/MessageList.vue';
-import SystemConsole from '../components/SystemConsole.vue';
 import FriendsOverview from '../components/FriendsOverview.vue';
 import MessageInput from '../components/MessageInput.vue';
 import MemberList from '../components/MemberList.vue';
@@ -223,7 +221,7 @@ const {
   isServerBuffer,
   bufferLabel,
   topic,
-  isSystemConsole,
+  isSystemBuffer,
   isVirtual,
   isFriendsBuffer,
   renderMode,
@@ -272,7 +270,7 @@ const bufferCogBtn = ref<HTMLElement | null>(null);
 // channel/nick in that case.
 const bufferScope = computed<string | null>(() => {
   const a = active.value;
-  if (!a || isServerBuffer.value || isSystemConsole.value || !a.target) return null;
+  if (!a || isServerBuffer.value || isSystemBuffer.value || !a.target) return null;
   const netName = (a.network as { name?: string } | null)?.name;
   const onTok = netName && !/\s/.test(netName) ? ` on:${netName}` : '';
   return `in:${a.target}${onTok}`;

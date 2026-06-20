@@ -5,6 +5,7 @@ import { defineStore } from 'pinia';
 import { useNetworksStore } from './networks.js';
 import { useToastsStore } from './toasts.js';
 import { socketSend } from '../composables/useSocket.js';
+import { SYSTEM_KEY } from '../lib/virtualBuffers.js';
 
 const MAX_PER_BUFFER = 500;
 const MAX_SPEAKERS = 128;
@@ -33,8 +34,14 @@ function nextHistoryToken() {
   return historyTokenCounter;
 }
 
-function key(networkId: number | string, target: string) {
-  return `${networkId}::${target}`;
+// App-scoped buffers (the system buffer, issue #355) have no network: they're
+// keyed by their bare `:sentinel:` target (e.g. `:system:`) so the
+// `${networkId}::${target}` parsers — and every network-scoped consumer
+// (forNetwork, the sidebar) — skip them. Network buffers keep the
+// `${networkId}::${target}` form. networkId == null is what makes a buffer
+// app-scoped; there is no magic network value.
+function key(networkId: number | string | null, target: string) {
+  return networkId == null ? target : `${networkId}::${target}`;
 }
 
 // Resolve the storage key of an already-open buffer for (networkId, target),
@@ -46,7 +53,7 @@ function key(networkId: number | string, target: string) {
 // (`:server:`, `:friends:`…) are fixed keys — exact only, never folded.
 function resolveExistingKey(
   buffers: Record<string, Buffer>,
-  networkId: number | string,
+  networkId: number | string | null,
   target: string,
 ): string | null {
   const exact = key(networkId, target);
@@ -60,11 +67,11 @@ function resolveExistingKey(
   return null;
 }
 
-function typingKey(networkId: number | string, target: string, nick: string) {
+function typingKey(networkId: number | string | null, target: string, nick: string) {
   return `${networkId}::${target}::${nick.toLowerCase()}`;
 }
 
-function clearTypingTimer(networkId: number | string, target: string, nick: string) {
+function clearTypingTimer(networkId: number | string | null, target: string, nick: string) {
   const k = typingKey(networkId, target, nick);
   const id = typingTimers.get(k);
   if (id) {
@@ -101,7 +108,9 @@ export interface SpeakerEntry {
 
 export interface BufferMessage {
   id?: number | null;
-  networkId: number;
+  // null for the app-scoped system buffer (issue #355), which carries no
+  // network; a real id for every IRC buffer.
+  networkId: number | null;
   target: string;
   type: string;
   nick?: string;
@@ -110,8 +119,24 @@ export interface BufferMessage {
   [key: string]: unknown;
 }
 
+// What a buffer *is*, so capabilities (sendable, input, nicklist, server
+// round-trips) dispatch off an explicit discriminant instead of sniffing the
+// target string. 'system' is the app-scoped buffer with no network.
+export type BufferKind = 'channel' | 'dm' | 'server' | 'system';
+
+// Classify a buffer from its identity. App-scoped buffers (networkId == null)
+// are the system buffer today; network buffers split by target shape.
+function deriveKind(networkId: number | null, target: string): BufferKind {
+  if (networkId == null) return 'system';
+  if (target.startsWith('#')) return 'channel';
+  if (target.startsWith(':server:')) return 'server';
+  return 'dm';
+}
+
 export interface Buffer {
-  networkId: number;
+  // null == app-scoped (the system buffer); a real id for every IRC buffer.
+  networkId: number | null;
+  kind: BufferKind;
   target: string;
   messages: BufferMessage[];
   members: BufferMember[];
@@ -143,9 +168,11 @@ export interface Buffer {
   modes?: string;
 }
 
-function makeBuffer(networkId: number | string, target: string): Buffer {
+function makeBuffer(networkId: number | string | null, target: string): Buffer {
+  const nid = networkId == null ? null : Number(networkId);
   return {
-    networkId: Number(networkId),
+    networkId: nid,
+    kind: deriveKind(nid, target),
     target,
     messages: [],
     members: [],
@@ -204,7 +231,7 @@ function makeBuffer(networkId: number | string, target: string): Buffer {
 
 function ensureBuffer(
   state: { buffers: Record<string, Buffer> },
-  networkId: number | string,
+  networkId: number | string | null,
   target: string,
 ): Buffer {
   // Resolve case-insensitively before creating: a DM/channel already open under
@@ -220,7 +247,11 @@ function ensureBuffer(
 
 export const useBuffersStore = defineStore('buffers', {
   state: () => ({
-    buffers: {} as Record<string, Buffer>,
+    // The system buffer (issue #355) is app-scoped (no network) and always
+    // present, so the "Lurker" sidebar header always has a real buffer to open
+    // and command output / lifecycle log lines have somewhere to land before
+    // any network exists. $reset re-seeds it.
+    buffers: { [SYSTEM_KEY]: makeBuffer(null, SYSTEM_KEY) } as Record<string, Buffer>,
   }),
   getters: {
     list: (state) => Object.values(state.buffers),
@@ -298,7 +329,11 @@ export const useBuffersStore = defineStore('buffers', {
       if (buf.messages.length > MAX_PER_BUFFER)
         buf.messages.splice(0, buf.messages.length - MAX_PER_BUFFER);
       if (buf.oldestId == null && event.id != null) buf.oldestId = event.id;
-      if (event.id != null) {
+      // Server read-state mechanics (active-divider tracking + mark-read) only
+      // apply to network buffers. The app-scoped system buffer has no network to
+      // round-trip to and no server-owned read pointer, so it just accumulates
+      // lines.
+      if (event.id != null && buf.networkId != null) {
         const networks = useNetworksStore();
         // Compare against the resolved buffer's canonical key, not the event's
         // (possibly divergently-cased) target — otherwise a live DM arriving as
@@ -340,6 +375,27 @@ export const useBuffersStore = defineStore('buffers', {
         delete buf.typing[speakerKey];
       }
       return true;
+    },
+    // Apply system-log lines (issue #355) to the app-scoped system buffer.
+    // Handles both the on-(re)connect snapshot and incremental live lines: each
+    // line carries a durable server id, so we dedupe against ids already present
+    // and append only the genuinely-new ones in id order. We can't lean on
+    // pushMessage's replay guard here — it only compares against the *last*
+    // message's id, and id-less client command output (localInfo) interleaves in
+    // this buffer, which would let a re-sent snapshot line slip past and
+    // duplicate. The dedupe set is the robust path.
+    applySystemLog(messages: BufferMessage[]) {
+      const buf = this.buffers[SYSTEM_KEY];
+      if (!buf || !Array.isArray(messages)) return;
+      const seen = new Set<number>();
+      for (const m of buf.messages) if (typeof m.id === 'number') seen.add(m.id);
+      const fresh = messages
+        .filter((m) => typeof m.id === 'number' && !seen.has(m.id))
+        .toSorted((a, b) => (a.id as number) - (b.id as number));
+      if (!fresh.length) return;
+      buf.messages.push(...fresh);
+      if (buf.messages.length > MAX_PER_BUFFER)
+        buf.messages.splice(0, buf.messages.length - MAX_PER_BUFFER);
     },
     replaceBacklog(
       networkId: number | string,
@@ -588,7 +644,11 @@ export const useBuffersStore = defineStore('buffers', {
     // from snapshot) and on WS reconnect (the resume snapshot will reseed
     // cleanly, but only if we let replaceBacklog through — which means
     // detached has to be cleared first).
-    clearDetached(networkId: number | string, target: string, { wipeMessages = false } = {}) {
+    clearDetached(
+      networkId: number | string | null,
+      target: string,
+      { wipeMessages = false } = {},
+    ) {
       const buf = this.buffers[key(networkId, target)];
       if (!buf || !buf.detached) return;
       buf.detached = false;

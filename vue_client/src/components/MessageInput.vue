@@ -32,7 +32,7 @@
       v-model="text"
       rows="1"
       :placeholder="placeholder"
-      :disabled="!active || isPaused"
+      :disabled="(!active && !isSystemBuffer) || isPaused"
       :spellcheck="systemFeatures.spellcheck"
       :autocorrect="systemFeatures.autocorrect"
       :autocapitalize="systemFeatures.autocapitalize"
@@ -43,7 +43,7 @@
     <button
       type="button"
       class="send-btn"
-      :disabled="!sendable"
+      :disabled="!canCompose"
       title="send message"
       @mousedown.prevent
       @click="submit"
@@ -125,6 +125,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onBeforeUnmount, onMounted, nextTick } from 'vue';
 import { useNetworksStore } from '../stores/networks.js';
+import { SYSTEM_KEY } from '../lib/virtualBuffers.js';
 import { useBuffersStore } from '../stores/buffers.js';
 import { useAuthStore } from '../stores/auth.js';
 import { useInputHistoryStore } from '../stores/inputHistory.js';
@@ -247,18 +248,31 @@ const emojiPickerEl = ref<InstanceType<typeof EmojiPicker> | null>(null);
 
 const active = computed(() => networks.activeBuffer);
 
+// The app-scoped system buffer (issue #355) has no network, so networks
+// .activeBuffer reports null for it. It accepts slash commands, not chat, so it
+// gets a local-only input ref rather than a server-synced per-buffer draft (no
+// network to key a draft row to, and command typing needn't sync cross-device).
+const isSystemBuffer = computed(() => networks.activeKey === SYSTEM_KEY);
+const systemText = ref('');
+
 // Input contents are server-side per-buffer drafts — switching channels swaps
 // the input bar's body to that buffer's draft (or empty). v-model writes go
 // through the setter, which records the optimistic local update and schedules
 // a debounced WS flush; the typing-state side effects in onInput run here
 // (not in a watch(text)) so remote `draft-updated` echoes from other tabs
-// don't fire fake "active" typing notifications.
+// don't fire fake "active" typing notifications. The system buffer routes to
+// its local ref instead.
 const text = computed({
   get() {
+    if (isSystemBuffer.value) return systemText.value;
     const a = active.value;
     return a ? drafts.forBuffer(a.networkId, a.target) : '';
   },
   set(value) {
+    if (isSystemBuffer.value) {
+      systemText.value = value;
+      return;
+    }
     const a = active.value;
     if (!a) return;
     drafts.setLocal(a.networkId, a.target, value);
@@ -312,8 +326,14 @@ const isServer = computed(() => active.value?.target?.startsWith(':server:'));
 // honest (disabled composer, no optimistic bubble).
 const isPaused = computed(() => auth.isPaused);
 const sendable = computed(() => !!active.value && !isServer.value && !isPaused.value);
+// `sendable` gates network sends (PRIVMSG, typing). The system buffer takes
+// commands with no network, so it's never `sendable` — gate the composer's
+// enabled state on this instead, which also lights up for the system buffer
+// (unless the account is paused / read-only).
+const canCompose = computed(() => sendable.value || (isSystemBuffer.value && !isPaused.value));
 const placeholder = computed(() => {
   if (isPaused.value) return 'Account paused — read only';
+  if (isSystemBuffer.value) return 'try /commands';
   const a = active.value;
   if (!a) return 'Select a buffer';
   // `/raw <line>` was cryptic; `/commands` is the discoverable entry point and
@@ -1659,7 +1679,27 @@ async function submit() {
   closeColorPicker();
   closeHistoryPicker();
   const raw = text.value;
-  if (!raw.trim() || !active.value) return;
+  if (!raw.trim()) return;
+
+  // System buffer (issue #355): app-scoped, no network. It's a command surface,
+  // not a chat target — slash commands run through the same dispatcher with a
+  // null network, plain text has nowhere to send. Handled before the
+  // network-bound path below (which needs active.value).
+  if (isSystemBuffer.value && !active.value) {
+    if (isPaused.value) return;
+    const escaped = raw.startsWith('//');
+    if (raw.startsWith('/') && !escaped) {
+      handleCommand(raw, null, SYSTEM_KEY);
+    } else {
+      localInfo(null, SYSTEM_KEY, 'Not a command — type /commands to see what you can run here.');
+    }
+    systemText.value = '';
+    resetHistoryNav();
+    requestScrollToBottom();
+    return;
+  }
+
+  if (!active.value) return;
   const { networkId, target } = active.value;
 
   // Outgoing-split gate. irc-framework will break anything past ~350 bytes
@@ -1780,7 +1820,8 @@ function onLongMessageCancel() {
 // Drop a synthetic, non-persisted info line into the current buffer so the
 // user sees the output of client-resolved commands like /commands or argument
 // validation errors. id-less so pushMessage's replay guard doesn't trip.
-function localInfo(networkId: number, target: string, lineText: string): void {
+// networkId null targets the app-scoped system buffer (issue #355).
+function localInfo(networkId: number | null, target: string, lineText: string): void {
   buffers.pushMessage({
     networkId,
     target,
@@ -1920,10 +1961,28 @@ function ackedSend(payload: Record<string, unknown>, body: string): boolean {
   return true;
 }
 
-function handleCommand(line: string, networkId: number, target: string): boolean {
+// Commands that are network-agnostic and so may run from the app-scoped system
+// buffer (issue #355), which has no network. Everything else needs an active
+// network buffer. /network and /set/get (#356/#357) will join this set.
+const SYSTEM_BUFFER_COMMANDS = new Set(['commands']);
+
+function handleCommand(line: string, networkId: number | null, target: string): boolean {
   const [cmd, ...rest] = line.slice(1).split(/\s+/);
   const argLine = line.slice(1 + cmd.length).trim();
-  switch (cmd.toLowerCase()) {
+  const verb = cmd.toLowerCase();
+  // From the system buffer (no network) only network-agnostic commands run;
+  // anything else gets a friendly redirect rather than a raw send to nowhere.
+  // The branch is terminal — every null-network path returns here, which also
+  // narrows networkId to a number for the switch below.
+  if (networkId == null) {
+    if (!SYSTEM_BUFFER_COMMANDS.has(verb)) {
+      localInfo(null, target, `/${verb} needs an active network — open a channel or DM first.`);
+    } else if (verb === 'commands') {
+      for (const commandLine of COMMANDS_LINES) localInfo(null, target, commandLine);
+    }
+    return true;
+  }
+  switch (verb) {
     case 'me':
       return ackedSend({ type: 'action', networkId, target, text: argLine }, argLine);
     case 'msg':
@@ -2366,9 +2425,9 @@ function handleCommand(line: string, networkId: number, target: string): boolean
     // server buffer like any other server reply); the local slash-command
     // cheatsheet lives under `/commands` below (#316).
     case 'help': {
-      const verb = cmd.toUpperCase();
+      const rawVerb = cmd.toUpperCase();
       return sendOrToast(
-        { type: 'raw', networkId, line: argLine ? `${verb} ${argLine}` : verb },
+        { type: 'raw', networkId, line: argLine ? `${rawVerb} ${argLine}` : rawVerb },
         line,
       );
     }

@@ -302,7 +302,12 @@ function countFor(unread: number, highlights: number): number {
 // and show the ● per the global display mode, which is the whole point of
 // muting a busy-but-followed room. Mute is channel-only; DMs/server never muted.
 function isChannelMuted(buf: Buffer | null): boolean {
-  return !!buf && buf.target.startsWith('#') && channelNotify.muted(buf.networkId, buf.target);
+  return (
+    !!buf &&
+    buf.networkId != null &&
+    buf.target.startsWith('#') &&
+    channelNotify.muted(buf.networkId, buf.target)
+  );
 }
 function displayCount(buf: Buffer): number {
   const mode =
@@ -359,7 +364,7 @@ function unreadLabel(count: number): string {
 }
 
 function hasDraft(buf: Buffer): boolean {
-  return drafts.hasDraft(buf.networkId, buf.target);
+  return buf.networkId != null && drafts.hasDraft(buf.networkId, buf.target);
 }
 
 function labelFor(buf: Buffer): string {
@@ -566,7 +571,8 @@ function openFriendActions(e: MouseEvent, c: Contact): void {
 }
 // A friend's primary DM is shown under FRIENDS, so hide it from its real
 // network's buffer list (dedupe).
-function isFriendPrimaryDm(networkId: number, target: string): boolean {
+function isFriendPrimaryDm(networkId: number | null, target: string): boolean {
+  if (networkId == null) return false;
   return friends.primaryDmKeys.has(`${networkId}::${target.toLowerCase()}`);
 }
 
@@ -588,6 +594,7 @@ function isUnjoined(buf: Buffer, networkId: number): boolean {
 }
 
 function peerOf(buf: Buffer): PeerPresenceEntry | null {
+  if (buf.networkId == null) return null;
   return networks.peerFor(buf.networkId, buf.target);
 }
 function isPeerOffline(buf: Buffer): boolean {

@@ -30,6 +30,11 @@ vi.mock('../composables/useSocket.js', () => ({ socketSend: vi.fn<(payload: unkn
 import { useBuffersStore } from './buffers.js';
 import { socketSend } from '../composables/useSocket.js';
 
+// The store always seeds the app-scoped system buffer (#355). These tests assert
+// on network-buffer counts (fork/removal semantics), so filter it out.
+const netBuffers = (store: ReturnType<typeof useBuffersStore>) =>
+  store.list.filter((b) => b.networkId != null);
+
 beforeEach(() => {
   setActivePinia(createPinia());
   h.activeKey = null;
@@ -48,7 +53,7 @@ describe('applyReadState', () => {
     store.applyReadState(1, '#closed', { lastReadId: 10, unread: 5, highlights: 2 });
 
     expect(store.isOpen(1, '#closed')).toBe(false);
-    expect(store.list).toHaveLength(0);
+    expect(netBuffers(store)).toHaveLength(0);
   });
 
   it('updates the badge on an open buffer', () => {
@@ -94,7 +99,7 @@ describe('applyReadState', () => {
     expect(buf.highlighted).toBe(1);
     expect(buf.lastReadId).toBe(7);
     expect(store.byKey('1::#chan')).toBeNull(); // no phantom lowercase entry
-    expect(store.list).toHaveLength(1);
+    expect(netBuffers(store)).toHaveLength(1);
   });
 
   // While a buffer is active its unread divider is pinned (dividerAfterId set on
@@ -143,7 +148,7 @@ describe('case-insensitive buffer identity (#327)', () => {
     const fresh = store.pushMessage(dm('bob', 2));
     expect(fresh).toBe(true);
 
-    expect(store.list).toHaveLength(1);
+    expect(netBuffers(store)).toHaveLength(1);
     expect(store.byKey('1::Bob')!.messages).toHaveLength(2);
     expect(store.byKey('1::bob')).toBeNull(); // no lowercase fork
   });
@@ -157,7 +162,7 @@ describe('case-insensitive buffer identity (#327)', () => {
     // fork its own lowercase shell.
     store.recordSpeaker(1, 'bob', 'bob', 1000);
 
-    expect(store.list).toHaveLength(1);
+    expect(netBuffers(store)).toHaveLength(1);
     expect(store.byKey('1::bob')).toBeNull(); // no lowercase fork
     expect(store.byKey('1::Bob')!.speakers['bob']).toBeTruthy();
   });
@@ -188,7 +193,7 @@ describe('case-insensitive buffer identity (#327)', () => {
     // useActiveBuffer's byKey(activeKey) returns null and blanks the chat view.
     expect(h.activeKey).toBe('1::Bob');
     expect(store.byKey(h.activeKey!)).toBeTruthy();
-    expect(store.list).toHaveLength(1);
+    expect(netBuffers(store)).toHaveLength(1);
     expect(store.byKey('1::bob')).toBeNull(); // no lowercase fork
   });
 
@@ -209,14 +214,14 @@ describe('case-insensitive buffer identity (#327)', () => {
   it('drop removes the buffer when the close target case diverges', () => {
     const store = useBuffersStore();
     store.pushMessage(dm('Bob', 1));
-    expect(store.list).toHaveLength(1);
+    expect(netBuffers(store)).toHaveLength(1);
 
     // The server doesn't canonicalize DM casing, so a buffer-closed broadcast
     // can carry a different case than the stored buffer; an exact-key delete
     // would leave a sidebar ghost.
     store.drop(1, 'bob');
 
-    expect(store.list).toHaveLength(0);
+    expect(netBuffers(store)).toHaveLength(0);
     expect(store.isOpen(1, 'Bob')).toBe(false);
   });
 
@@ -229,6 +234,6 @@ describe('case-insensitive buffer identity (#327)', () => {
     store.setJoined(1, '#chan', false);
 
     expect(buf.joined).toBe(false);
-    expect(store.list).toHaveLength(1);
+    expect(netBuffers(store)).toHaveLength(1);
   });
 });

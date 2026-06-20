@@ -25,7 +25,7 @@ const selfLower = computed(() => {
   const key = networks.activeKey;
   if (!key) return null;
   const buf = buffers.byKey(key);
-  const sn = buf ? networks.states[buf.networkId]?.nick : null;
+  const sn = buf && buf.networkId != null ? networks.states[buf.networkId]?.nick : null;
   return sn ? sn.toLowerCase() : null;
 });
 

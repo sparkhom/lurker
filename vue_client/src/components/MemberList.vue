@@ -59,7 +59,7 @@ const buffer = computed(() => (networks.activeKey ? buffers.byKey(networks.activ
 const members = computed((): BufferMember[] => buffer.value?.members || []);
 const selfNick = computed(() => {
   const b = buffer.value;
-  if (!b) return null;
+  if (!b || b.networkId == null) return null;
   return networks.states[b.networkId]?.nick || null;
 });
 // The current user's own modes in this channel, used to gate the operator

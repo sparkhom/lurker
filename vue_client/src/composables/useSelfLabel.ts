@@ -30,7 +30,7 @@ export function useSelfLabel(): SelfLabelState {
 
   const channelPrefix = computed(() => {
     const buf = buffer.value;
-    if (!buf || !buf.target.startsWith('#')) return '';
+    if (!buf || buf.networkId == null || !buf.target.startsWith('#')) return '';
     const nick = networks.states[buf.networkId]?.nick;
     if (!nick) return '';
     const lc = nick.toLowerCase();

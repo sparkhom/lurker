@@ -393,7 +393,7 @@ function onReturnToPresent() {
   // and trips the wholesale-replace branch in MessageList's watcher (which
   // snaps to bottom and resets stickToBottom); the token is belt-and-
   // suspenders for a slow response.
-  if (buf.detached) buffers.reattachToLive(buf.networkId, buf.target);
+  if (buf.detached && buf.networkId != null) buffers.reattachToLive(buf.networkId, buf.target);
   requestScrollToBottom();
 }
 

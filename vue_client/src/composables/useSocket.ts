@@ -4,7 +4,7 @@
 import type { Ref } from 'vue';
 import { ref, onMounted, onBeforeUnmount } from 'vue';
 import { useNetworksStore } from '../stores/networks.js';
-import { useBuffersStore } from '../stores/buffers.js';
+import { useBuffersStore, type BufferMessage } from '../stores/buffers.js';
 import { useAuthStore } from '../stores/auth.js';
 import { useSettingsStore } from '../stores/settings.js';
 import { useHighlightRulesStore } from '../stores/highlightRules.js';
@@ -20,14 +20,40 @@ import { useNickNotesStore } from '../stores/nickNotes.js';
 import { useFriendsStore } from '../stores/friends.js';
 import { useWhoisStore } from '../stores/whois.js';
 import { useBookmarksStore } from '../stores/bookmarks.js';
-import { useSystemLogStore } from '../stores/systemLog.js';
 import { useDataExportStore } from '../stores/dataExport.js';
 import { useToastsStore } from '../stores/toasts.js';
 import { notifyForEvent, playSound } from './useHighlightNotifier.js';
+import { SYSTEM_KEY } from '../lib/virtualBuffers.js';
 
 export interface AckResult {
   ok: boolean;
   error?: string;
+}
+
+// Map a server system-log line (issue #355) into a BufferMessage for the
+// app-scoped system buffer. type 'motd' renders as a plain info line — the same
+// shape client command output uses (localInfo) — so the lifecycle log and
+// command output share one look in the buffer. level/scope/source ride along on
+// the message for any future per-line styling.
+function systemLogToMessage(line: {
+  id: number;
+  ts: string;
+  level: string;
+  scope: string;
+  source: string;
+  text: string;
+}): BufferMessage {
+  return {
+    id: line.id,
+    networkId: null,
+    target: SYSTEM_KEY,
+    type: 'motd',
+    text: line.text,
+    time: line.ts,
+    level: line.level,
+    scope: line.scope,
+    source: line.source,
+  };
 }
 
 export interface SocketAPI {
@@ -581,13 +607,13 @@ function handleMessage(raw: string): void {
     return;
   }
   if (payload.kind === 'system-log-snapshot') {
-    const systemLog = useSystemLogStore();
-    systemLog.applySnapshot(payload.lines || []);
+    // Seed/merge the system buffer (issue #355) from the on-(re)connect
+    // snapshot. applySystemLog dedupes by id, so a re-snapshot on resync is safe.
+    useBuffersStore().applySystemLog((payload.lines || []).map(systemLogToMessage));
     return;
   }
   if (payload.kind === 'system-log') {
-    const systemLog = useSystemLogStore();
-    systemLog.applyLine(payload.line);
+    if (payload.line) useBuffersStore().applySystemLog([systemLogToMessage(payload.line)]);
     return;
   }
   if (payload.kind === 'export') {

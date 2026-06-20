@@ -407,7 +407,8 @@ const messages = computed(() => buffer.value?.messages || []);
 
 const selfLower = computed(() => {
   const b = buffer.value;
-  const sn = b ? networks.states[b.networkId]?.nick : null;
+  // The app-scoped system buffer has no network (and no self nick).
+  const sn = b && b.networkId != null ? networks.states[b.networkId]?.nick : null;
   return sn ? sn.toLowerCase() : null;
 });
 
@@ -422,7 +423,7 @@ const nickSet = computed((): Set<string> => {
   if (b.target && !b.target.startsWith('#') && !b.target.startsWith(':server:')) {
     set.add(b.target);
   }
-  const sn = networks.states[b.networkId]?.nick;
+  const sn = b.networkId != null ? networks.states[b.networkId]?.nick : undefined;
   if (sn) set.add(sn);
   return set;
 });
@@ -436,7 +437,8 @@ function time(iso: string | undefined): string {
 // buffer-cleared fan-out echoes back and clearedBeforeId reverts to 0.
 function onUnclearClick(): void {
   const b = buffer.value;
-  if (!b) return;
+  // /clear never applies to the app-scoped system buffer (no network).
+  if (!b || b.networkId == null) return;
   buffers.unclearBuffer(b.networkId, b.target);
 }
 
@@ -494,7 +496,7 @@ const actionContext: MessageContext = {
       nick: msg.nick,
       user,
       host,
-      networkId: buffer.value?.networkId,
+      networkId: buffer.value?.networkId ?? undefined,
     };
   },
 };
@@ -567,7 +569,7 @@ const effectiveCollapseTimestamps = computed(() => collapseTimestampsEnabled.val
 
 const awayState = computed((): AwayState | null => {
   const b = buffer.value;
-  if (!b || b.target.startsWith(':server:')) return null;
+  if (!b || b.networkId == null || b.target.startsWith(':server:')) return null;
   return networks.states[b.networkId]?.away || null;
 });
 
@@ -893,6 +895,8 @@ function asNick(item: NickEntry | RenameEntry): NickEntry {
 function requestMoreHistory() {
   const buf = buffer.value;
   if (!buf) return;
+  // The app-scoped system buffer (no network) has no server-side history.
+  if (buf.networkId == null) return;
   if (!buf.hasMoreOlder || buf.loadingHistory) return;
   if (buf.target.startsWith(':server:')) return;
   const before = buf.oldestId ?? buf.messages[0]?.id;
@@ -919,6 +923,7 @@ function requestMoreHistory() {
 function requestNewerHistory() {
   const buf = buffer.value;
   if (!buf) return;
+  if (buf.networkId == null) return;
   if (!buf.detached || !buf.hasMoreNewer || buf.loadingHistory) return;
   if (buf.target.startsWith(':server:')) return;
   const afterId = buf.newestId ?? buf.messages[buf.messages.length - 1]?.id;
@@ -946,7 +951,7 @@ function maybeRequestNewer() {
   if (!el) return;
   if (el.scrollHeight - el.scrollTop - el.clientHeight > 80) return;
   const buf = buffer.value;
-  if (!buf || !buf.detached || buf.loadingHistory) return;
+  if (!buf || buf.networkId == null || !buf.detached || buf.loadingHistory) return;
   if (buf.target.startsWith(':server:')) return;
   if (buf.hasMoreNewer) {
     requestNewerHistory();
@@ -1218,8 +1223,12 @@ watch(scrollToUnreadToken, async () => {
   const buf = buffer.value;
   const dividerAfterId = buf?.dividerAfterId || 0;
   const dividerPinnedToTop =
-    dividerAfterId > 0 && buf != null && buf.oldestId != null && buf.oldestId > dividerAfterId;
-  if (dividerPinnedToTop && buf.hasMoreOlder && !buf.loadingHistory) {
+    dividerAfterId > 0 &&
+    buf != null &&
+    buf.networkId != null &&
+    buf.oldestId != null &&
+    buf.oldestId > dividerAfterId;
+  if (dividerPinnedToTop && buf.networkId != null && buf.hasMoreOlder && !buf.loadingHistory) {
     stickToBottom.value = false;
     setStuckToBottom(false);
     const wantKey = networks.activeKey;

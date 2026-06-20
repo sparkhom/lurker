@@ -9,7 +9,7 @@
     :class="{
       'sidebar-collapsed': !showChannels,
       'members-collapsed': !showMembers,
-      'system-active': isSystemConsole,
+      'system-active': isSystemBuffer,
     }"
     @click="onChatClick"
   >
@@ -19,8 +19,8 @@
           <button
             type="button"
             class="logo"
-            :class="{ active: isSystemConsole }"
-            title="Open system console"
+            :class="{ active: isSystemBuffer }"
+            title="Open system buffer"
             @click="openSystemConsole"
           >
             lurker
@@ -170,8 +170,7 @@
     </header>
     <div v-if="active || isVirtual" class="topic-divider"></div>
 
-    <SystemConsole v-if="renderMode === 'console'" />
-    <FriendsOverview v-else-if="renderMode === 'overview'" @view-activity="onViewActivity" />
+    <FriendsOverview v-if="renderMode === 'overview'" @view-activity="onViewActivity" />
     <MessageList v-else ref="messageListRef" :pending-scroll-id="pendingScrollId" />
     <MemberList v-if="showMembers && hasNicklist" />
     <StatusBar />
@@ -236,7 +235,6 @@ import { useActiveBuffer } from '../composables/useActiveBuffer.js';
 import { useSettingsStore } from '../stores/settings.js';
 import BufferList from '../components/BufferList.vue';
 import MessageList from '../components/MessageList.vue';
-import SystemConsole from '../components/SystemConsole.vue';
 import FriendsOverview from '../components/FriendsOverview.vue';
 import MessageInput from '../components/MessageInput.vue';
 import MemberList from '../components/MemberList.vue';
@@ -276,7 +274,7 @@ const {
   isServerBuffer,
   isChannel,
   bufferLabel,
-  isSystemConsole,
+  isSystemBuffer,
   isVirtual,
   isFriendsBuffer,
   renderMode,

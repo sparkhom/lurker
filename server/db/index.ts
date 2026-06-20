@@ -499,6 +499,33 @@ function migrate() {
     );
     CREATE INDEX IF NOT EXISTS idx_data_exports_user ON data_exports(user_id, id DESC);
     CREATE INDEX IF NOT EXISTS idx_data_exports_expires ON data_exports(expires_at);
+
+    -- Durable backing store for the system buffer (the "Lurker" sidebar header,
+    -- issue #355). A line is either GLOBAL (user_id NULL — broadcast to every
+    -- connected user, e.g. "server starting up" or a future admin/control-plane
+    -- notice) or PER-USER (user_id set — that account's own lifecycle log:
+    -- network connect/disconnect, joins, presence batches). Deliberately a
+    -- separate table from the chat-message store: no FTS, no highlight/ignore
+    -- matching, no read-state — an operational log, not chat. source tags origin
+    -- (server | client | admin | control-plane) so the client can style/route
+    -- and so the broadcast follow-up can mark control-plane lines. fields is an
+    -- optional JSON blob. Retention is count-capped per scope (see
+    -- db/systemMessages.ts), so the table stays small even on a busy cell — and
+    -- a persisted global line is still visible to users who connect after it was
+    -- written, which is what an admin notice wants. (See db/systemMessages.ts;
+    -- separate from the messages table on purpose.)
+    CREATE TABLE IF NOT EXISTS system_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER,
+      ts TEXT NOT NULL,
+      level TEXT NOT NULL DEFAULT 'info',
+      scope TEXT NOT NULL DEFAULT 'lurker',
+      source TEXT NOT NULL DEFAULT 'server',
+      text TEXT NOT NULL DEFAULT '',
+      fields TEXT,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_system_messages_recent ON system_messages(user_id, id);
   `);
 }
 
