@@ -63,6 +63,10 @@ const VALUE_FLAGS = new Set([
 ]);
 const BOOL_FLAGS = new Set(['tls', 'notls', 'auto', 'noauto']);
 
+function isKnownFlag(name: string): boolean {
+  return VALUE_FLAGS.has(name) || BOOL_FLAGS.has(name);
+}
+
 interface Flags {
   values: Record<string, string>;
   bools: Set<string>;
@@ -80,8 +84,18 @@ function parseFlags(tokens: string[]): Flags {
       const name = tok.slice(1).toLowerCase();
       if (VALUE_FLAGS.has(name)) {
         const val = tokens[i + 1];
-        if (val === undefined)
+        // Treat a following *recognized* option as a missing value (e.g.
+        // `-nick -tls`) instead of silently swallowing it. A dash-leading value
+        // that isn't a known flag (an odd password, irssi's bare `-` sentinel)
+        // is still accepted — quote it if it collides with a real flag name.
+        const nextIsFlag =
+          val !== undefined &&
+          val.length > 1 &&
+          val.startsWith('-') &&
+          isKnownFlag(val.slice(1).toLowerCase());
+        if (val === undefined || nextIsFlag) {
           return { values, bools, positional, error: `-${name} needs a value` };
+        }
         values[name] = val;
         i++;
       } else if (BOOL_FLAGS.has(name)) {

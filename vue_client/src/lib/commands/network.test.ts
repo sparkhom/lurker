@@ -98,6 +98,25 @@ describe('parseNetworkCommand', () => {
       });
     });
 
+    it('treats a following recognized flag as a missing value (-nick -tls)', () => {
+      expect(parseNetworkCommand('add -host h -nick -tls Libera')).toEqual({
+        kind: 'error',
+        message: '-nick needs a value',
+      });
+    });
+
+    it('still accepts a dash-leading value that is not a known flag', () => {
+      // odd-but-valid value, and irssi's bare `-` sentinel to clear a field
+      expect(parseNetworkCommand('add -host h -nick n -password -weird Net')).toMatchObject({
+        kind: 'add',
+        input: { server_password: '-weird' },
+      });
+      expect(parseNetworkCommand('add -host h -nick n -password - Net')).toMatchObject({
+        kind: 'add',
+        input: { server_password: '-' },
+      });
+    });
+
     it('flags an unquoted multi-word name as ambiguous', () => {
       expect(parseNetworkCommand('add -host h -nick n Libera Chat')).toMatchObject({
         kind: 'error',

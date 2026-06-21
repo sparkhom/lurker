@@ -2084,10 +2084,14 @@ function listNetworks(networkId: number | null, target: string): void {
 
 // Move a network to a 1-based position by rebuilding the full id order and
 // handing it to reorder() — the same store action the drag-to-reorder UI uses.
-async function moveNetwork(net: Network, position: number): Promise<void> {
+// Returns the effective (clamped) 1-based position so the caller reports where
+// it actually landed, not the requested slot.
+async function moveNetwork(net: Network, position: number): Promise<number> {
   const ids = networks.networks.map((n) => n.id).filter((id) => id !== net.id);
-  ids.splice(Math.min(position - 1, ids.length), 0, net.id);
+  const index = Math.min(position - 1, ids.length);
+  ids.splice(index, 0, net.id);
   await networks.reorder(ids);
+  return index + 1;
 }
 
 // /network — manage IRC networks from the input bar, driving the same store as
@@ -2137,9 +2141,10 @@ async function runNetwork(
       case 'disconnect':
         await networks.disconnect(net.id);
         return reply(`disconnecting from ${net.name}…`);
-      case 'move':
-        await moveNetwork(net, cmd.position);
-        return reply(`moved ${net.name} to position ${cmd.position}`);
+      case 'move': {
+        const landed = await moveNetwork(net, cmd.position);
+        return reply(`moved ${net.name} to position ${landed}`);
+      }
     }
   } catch (err) {
     reply(`/network ${cmd.kind} failed: ${err instanceof Error ? err.message : 'unknown error'}`);
