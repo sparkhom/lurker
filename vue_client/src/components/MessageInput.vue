@@ -43,7 +43,7 @@
     <button
       type="button"
       class="send-btn"
-      :disabled="!canCompose"
+      :disabled="!canCompose || !hasComposerContent"
       title="send message"
       @mousedown.prevent
       @click="submit"
@@ -341,6 +341,10 @@ const sendable = computed(() => !!active.value && !isServer.value && !isPaused.v
 // enabled state on this instead, which also lights up for the system buffer
 // (unless the account is paused / read-only).
 const canCompose = computed(() => sendable.value || (isSystemBuffer.value && !isPaused.value));
+// #366: the Send button stays disabled until there's something to send — any
+// non-whitespace in the composer (slash commands count). Mirrors submit()'s own
+// `!raw.trim()` bail; canCompose gates buffer/pause state on top of this.
+const hasComposerContent = computed(() => text.value.trim().length > 0);
 const placeholder = computed(() => {
   if (isPaused.value) return 'Account paused — read only';
   if (isSystemBuffer.value) return 'try /commands';
