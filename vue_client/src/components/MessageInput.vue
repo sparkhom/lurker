@@ -515,106 +515,23 @@ function setInputAndCaretEnd(value: string): void {
   });
 }
 
-// Style properties that influence where a textarea wraps text — copied onto the
-// measuring mirror below so its line breaks match the real composer's.
-const CARET_MIRROR_PROPS = [
-  'font-family',
-  'font-size',
-  'font-weight',
-  'font-style',
-  'font-variant',
-  'font-stretch',
-  'font-feature-settings',
-  'font-kerning',
-  'font-variant-ligatures',
-  'text-rendering',
-  'line-height',
-  'letter-spacing',
-  'word-spacing',
-  'text-transform',
-  'text-indent',
-  'tab-size',
-  'word-break',
-];
-
-// History-nav edge detection across VISUAL rows: Up walks history only when the
-// caret is on the first visual row of the composer, Down only on the last — so
-// within a multi-line OR a soft-wrapped draft the arrows move the caret between
-// rows like any editor, instead of jumping to history (#367). Textareas expose
-// no caret-row API, so we reproduce the wrap in an offscreen mirror and compare
-// the caret row's top to the first/last row's. Returns true (= at edge) if the
-// element can't be measured.
-function atHistoryEdge(key: string): boolean {
-  const el = inputEl.value;
-  if (!el) return true;
-  const value = el.value;
-  if (!value) return true;
-  const caret = key === 'ArrowUp' ? (el.selectionStart ?? 0) : (el.selectionEnd ?? value.length);
-
-  const cs = getComputedStyle(el);
-  let lineHeight = parseFloat(cs.lineHeight);
-  if (!Number.isFinite(lineHeight)) lineHeight = (parseFloat(cs.fontSize) || 16) * 1.4;
-  const contentWidth =
-    el.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
-  if (contentWidth <= 0) return true;
-
-  const mirror = document.createElement('div');
-  const s = mirror.style;
-  for (const prop of CARET_MIRROR_PROPS) s.setProperty(prop, cs.getPropertyValue(prop));
-  s.boxSizing = 'content-box';
-  s.width = `${contentWidth}px`;
-  s.padding = '0';
-  s.border = '0';
-  s.whiteSpace = 'pre-wrap';
-  s.overflowWrap = 'break-word';
-  s.position = 'absolute';
-  s.top = '0';
-  s.left = '-9999px';
-  s.visibility = 'hidden';
-
-  // Zero-width markers at the start, the caret, and the end. Comparing their
-  // offsetTop tells us which visual row the caret shares.
-  const zwsp = '\u200b';
-  const startMark = document.createElement('span');
-  const caretMark = document.createElement('span');
-  const endMark = document.createElement('span');
-  startMark.textContent = zwsp;
-  caretMark.textContent = zwsp;
-  endMark.textContent = zwsp;
-  mirror.append(
-    startMark,
-    document.createTextNode(value.slice(0, caret)),
-    caretMark,
-    document.createTextNode(value.slice(caret)),
-    endMark,
-  );
-  document.body.appendChild(mirror);
-  const firstTop = startMark.offsetTop;
-  const caretTop = caretMark.offsetTop;
-  const lastTop = endMark.offsetTop;
-  mirror.remove();
-
-  // Compare ROW INDICES, not raw pixels: offsetTop is a rounded integer while
-  // lineHeight is fractional (e.g. 19.6), so `caretTop - firstTop < lineHeight`
-  // wrongly flags the 2nd row as the 1st right at the boundary. Quantizing the
-  // gap to whole rows is robust to that ±0.5px rounding (#367).
-  return key === 'ArrowUp'
-    ? Math.round((caretTop - firstTop) / lineHeight) <= 0 // caret on the first visual row
-    : Math.round((lastTop - caretTop) / lineHeight) <= 0; // caret on the last visual row
-}
-
-function handleHistoryNav(e: KeyboardEvent): void {
+// Walk input history. Called only after the browser's native arrow move was a
+// no-op (the caret was already at the very start for Up / the very end for
+// Down — see the arrow handling in onKeydown), so within a multi-line OR a
+// soft-wrapped draft the arrows move the caret between rows first and only fall
+// through to history at the true top/bottom (#367). No preventDefault: the
+// native move already ran and did nothing, so we just swap the draft.
+function walkHistory(key: 'ArrowUp' | 'ArrowDown'): void {
   if (!active.value) return;
   const { networkId, target } = active.value;
   const list = inputHistory.forBuffer(networkId, target);
   if (!list.length) return;
-  e.preventDefault();
   resetCompletion();
   closePicker();
   closeStrip();
   closeChannelPicker();
 
-  if (e.key === 'ArrowUp') {
+  if (key === 'ArrowUp') {
     if (historyIndex === null) {
       historyDraft = text.value;
       historyIndex = list.length - 1;
@@ -1010,12 +927,21 @@ function onKeydown(e: KeyboardEvent): void {
     if (e.altKey || e.metaKey || e.ctrlKey) return;
     // Leave the arrows to an active IME — they navigate its candidate window.
     if (e.isComposing) return;
-    // Multi-line textarea: only walk history at the logical-line edges, so
-    // arrows still move the caret between newline-separated lines within
-    // the draft. Up = at first logical line (no \n before caret).
-    // Down = at last logical line (no \n after caret).
-    if (!atHistoryEdge(e.key)) return;
-    handleHistoryNav(e);
+    const el = inputEl.value;
+    // Only consider history with a collapsed caret (no selection). Don't
+    // preventDefault — let the browser move the caret natively first. That
+    // handles soft-wrapped rows AND \n lines correctly, with no fragile mirror
+    // measurement. On the next frame, if the caret couldn't move (already at the
+    // very start for Up / the very end for Down), THEN walk history (#367).
+    if (el && el.selectionStart === el.selectionEnd) {
+      const before = el.selectionStart ?? 0;
+      const key = e.key;
+      requestAnimationFrame(() => {
+        if (el.isConnected && el.selectionStart === before && el.selectionEnd === before) {
+          walkHistory(key);
+        }
+      });
+    }
     return;
   }
   // Home / End — and the macOS Cmd+←/→ equivalents — jump the caret to the
