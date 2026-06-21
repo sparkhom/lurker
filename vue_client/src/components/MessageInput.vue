@@ -127,7 +127,11 @@ import { ref, computed, watch, onBeforeUnmount, onMounted, nextTick } from 'vue'
 import { useNetworksStore, type Network } from '../stores/networks.js';
 import { SYSTEM_KEY } from '../lib/virtualBuffers.js';
 import { parseNetworkCommand } from '../lib/commands/network.js';
+import { splitSetArgs, coerceSettingValue, formatSettingValue } from '../lib/commands/settings.js';
 import { formatColumns } from '../lib/commands/output.js';
+import { REGISTRY, getOption, optionVisible, CATEGORIES } from '../utils/settingsRegistry.js';
+import type { SettingOption } from '../../../shared/settingsRegistry.js';
+import { useConfigStore } from '../stores/config.js';
 import { useBuffersStore } from '../stores/buffers.js';
 import { useAuthStore } from '../stores/auth.js';
 import { useInputHistoryStore } from '../stores/inputHistory.js';
@@ -183,6 +187,7 @@ const auth = useAuthStore();
 const inputHistory = useInputHistoryStore();
 const drafts = useDraftStore();
 const settings = useSettingsStore();
+const config = useConfigStore();
 const uploads = useUploadsStore();
 const toasts = useToastsStore();
 const ignores = useIgnoresStore();
@@ -1896,6 +1901,8 @@ const COMMANDS_LINES = [
   "          [-autosendcmd '<cmds>'] [-channel <#chan>] [-auto|-noauto] <name>",
   '      modify <name> [-flags…]   ·   remove <name>   ·   move <name> <position>',
   '      connect <name>   ·   disconnect <name>   (Lurker folds irssi /server into these)',
+  '  /set <key> <value…>    — change a setting; /set (or /set ?) lists all keys',
+  '  /get <key>             — read a setting back (output in the system buffer)',
   '  /raw <line>            — send a raw IRC line (alias: /quote)',
   '  /commands              — this list',
   '  //text                 — send literal "/text" as a message (escape)',
@@ -2151,6 +2158,66 @@ async function runNetwork(
   }
 }
 
+// Edition-aware registry lookup: return the option only if it's visible in this
+// build (selfHostedOnly knobs are hidden in the hosted edition), so /set, /get,
+// and the listing expose exactly the same surface as the Settings panes (#357).
+function lookupSetting(key: string): SettingOption | null {
+  const opt = getOption(key);
+  if (!opt) return null;
+  return optionVisible(opt, { isNode: config.isNode }) ? opt : null;
+}
+
+// /set with no value lists every visible registry key + current value, grouped
+// by Settings category. Passkeys, push subscriptions, and drag-to-reorder stay
+// GUI-only by design (#357) — they aren't registry-driven, so they don't appear.
+function listSettings(networkId: number | null, target: string): void {
+  localInfo(networkId, target, 'settings — /set <key> <value> to change, /get <key> to read:');
+  for (const cat of CATEGORIES) {
+    if (cat.kind !== 'registry') continue;
+    const opts = REGISTRY.filter(
+      (o) => o.category === cat.id && optionVisible(o, { isNode: config.isNode }),
+    );
+    if (!opts.length) continue;
+    localInfo(networkId, target, `${cat.label.toLowerCase()}:`);
+    const rows = opts.map((o) => [`  ${o.key}`, formatSettingValue(o, settings.effective(o.key))]);
+    for (const line of formatColumns(rows)) localInfo(networkId, target, line);
+  }
+}
+
+// /set <key> <value> — coerce to the typed value and write through the same
+// store the Settings panes use. /set alone (or `?`) lists keys (#357).
+function runSet(argLine: string, networkId: number | null, target: string): void {
+  const reply = (msg: string) => localInfo(networkId, target, msg);
+  const args = splitSetArgs(argLine);
+  if (args.kind === 'list') return listSettings(networkId, target);
+  const opt = lookupSetting(args.key);
+  if (!opt) return reply(`/set: unknown setting "${args.key}" — /set lists available keys`);
+  if (args.kind === 'keyonly') {
+    return reply(`usage: /set ${opt.key} <value>  (or /get ${opt.key} to read it)`);
+  }
+  const coerced = coerceSettingValue(opt, args.rawValue);
+  if (!coerced.ok) return reply(`/set: ${coerced.error}`);
+  settings
+    .setValue(opt.key, coerced.value)
+    .then(() => reply(`set ${opt.key} = ${formatSettingValue(opt, coerced.value)}`))
+    .catch((err: unknown) =>
+      reply(`/set failed: ${err instanceof Error ? err.message : 'unknown error'}`),
+    );
+}
+
+// /get <key> — read a setting into the buffer, noting the default when changed.
+function runGet(argLine: string, networkId: number | null, target: string): void {
+  const reply = (msg: string) => localInfo(networkId, target, msg);
+  const key = argLine.trim().split(/\s+/)[0] ?? '';
+  if (!key) return reply('usage: /get <key>  (/set lists available keys)');
+  const opt = lookupSetting(key);
+  if (!opt) return reply(`/get: unknown setting "${key}" — /set lists available keys`);
+  reply(`${opt.key} = ${formatSettingValue(opt, settings.effective(opt.key))}`);
+  if (settings.isModified(opt.key)) {
+    reply(`  default: ${formatSettingValue(opt, opt.default)}`);
+  }
+}
+
 function handleCommand(line: string, networkId: number | null, target: string): boolean {
   const [cmd, ...rest] = line.slice(1).split(/\s+/);
   const argLine = line.slice(1 + cmd.length).trim();
@@ -2181,6 +2248,13 @@ function handleCommand(line: string, networkId: number | null, target: string): 
       // off and let it report into the buffer when it settles; the command is
       // "handled" the moment we recognize it. runNetwork catches its own errors.
       void runNetwork(argLine, networkId, target);
+      return true;
+    case 'set':
+      // Registry-wide setting writes (#357), app-scoped like the others.
+      runSet(argLine, networkId, target);
+      return true;
+    case 'get':
+      runGet(argLine, networkId, target);
       return true;
   }
 
