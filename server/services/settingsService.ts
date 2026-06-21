@@ -8,11 +8,15 @@ import { setUserSetting, deleteUserSetting, getUserSettings } from '../db/settin
 
 // Resolve a single setting's effective value for a user: their stored override,
 // or the registry default. For code paths outside the request cycle (e.g. the
-// IRC quit reason) that have no client-supplied value to fall back on.
+// IRC quit reason) that have no client-supplied value to fall back on. Unknown
+// keys return undefined; the own-property check avoids treating inherited
+// names (toString, etc.) as overrides.
 export function effectiveSetting(userId: number, key: string): SettingValue | undefined {
+  const opt = getOption(key);
+  if (!opt) return undefined;
   const stored = getUserSettings(userId);
-  if (key in stored) return stored[key] as SettingValue;
-  return getOption(key)?.default;
+  if (Object.prototype.hasOwnProperty.call(stored, key)) return stored[key] as SettingValue;
+  return opt.default;
 }
 
 function valuesEqual(a: SettingValue, b: SettingValue): boolean {

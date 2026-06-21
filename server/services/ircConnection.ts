@@ -2159,8 +2159,10 @@ export class IrcConnection {
 
   // The QUIT reason for a clean disconnect when the caller gave none (the bare
   // /quit command, auto-disconnect, shutdown): the user's configured
-  // chat.quit_message, or the built-in Lurker default when blank. Read here
-  // rather than baked into a const so APP_VERSION stays live in the fallback.
+  // chat.quit_message, or the built-in Lurker default when blank. The built-in
+  // default stays a single source of truth here (DEFAULT_QUIT_MESSAGE, composed
+  // with APP_VERSION) instead of being duplicated as a static string in the
+  // registry — which is why the registry default is '' rather than the version line.
   private defaultQuitMessage(): string {
     const custom = effectiveSetting(this.network.user_id, 'chat.quit_message');
     return typeof custom === 'string' && custom.trim() ? custom : DEFAULT_QUIT_MESSAGE;
