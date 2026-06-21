@@ -559,7 +559,7 @@ const friendsPresence = computed<'good' | 'warn' | 'bad'>(() => {
   return online > 0 ? 'good' : away > 0 ? 'warn' : 'bad';
 });
 const friendsStatusTitle = computed(() => {
-  if (!lurkerConnected.value) return 'Disconnected from lurker';
+  if (!lurkerConnected.value) return 'Disconnected from Lurker';
   if (!anyNetworkConnected.value) return 'Not connected to any network';
   return friendsPresence.value === 'good'
     ? 'Friends online'
