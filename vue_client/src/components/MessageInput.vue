@@ -515,12 +515,12 @@ function setInputAndCaretEnd(value: string): void {
   });
 }
 
-// Walk input history. Called only after the browser's native arrow move was a
-// no-op (the caret was already at the very start for Up / the very end for
-// Down — see the arrow handling in onKeydown), so within a multi-line OR a
-// soft-wrapped draft the arrows move the caret between rows first and only fall
-// through to history at the true top/bottom (#367). No preventDefault: the
-// native move already ran and did nothing, so we just swap the draft.
+// Walk input history. Called only after the browser's native arrow move left
+// the caret unchanged (nothing above it for Up / below it for Down — see the
+// arrow handling in onKeydown), so within a multi-line OR a soft-wrapped draft
+// the arrows move the caret between rows first and only fall through to history
+// at the true top/bottom (#367). No preventDefault: the native move already ran
+// and didn't move the caret, so we just swap the draft.
 function walkHistory(key: 'ArrowUp' | 'ArrowDown'): void {
   if (!active.value) return;
   const { networkId, target } = active.value;
@@ -922,17 +922,17 @@ function onKeydown(e: KeyboardEvent): void {
     return;
   }
   if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-    // Bare arrows only — Alt+Arrow is buffer navigation (handled globally in
-    // useKeyboardShortcuts), so don't hijack it for input history here.
-    if (e.altKey || e.metaKey || e.ctrlKey) return;
+    // Bare arrows only — Alt+Arrow is buffer navigation (useKeyboardShortcuts),
+    // and Shift+Arrow extends the selection; neither should hijack history.
+    if (e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return;
     // Leave the arrows to an active IME — they navigate its candidate window.
     if (e.isComposing) return;
     const el = inputEl.value;
     // Only consider history with a collapsed caret (no selection). Don't
     // preventDefault — let the browser move the caret natively first. That
     // handles soft-wrapped rows AND \n lines correctly, with no fragile mirror
-    // measurement. On the next frame, if the caret couldn't move (already at the
-    // very start for Up / the very end for Down), THEN walk history (#367).
+    // measurement. On the next frame, if the caret didn't move (nothing above it
+    // for Up / below it for Down), walk input history (#367).
     if (el && el.selectionStart === el.selectionEnd) {
       const before = el.selectionStart ?? 0;
       const key = e.key;
