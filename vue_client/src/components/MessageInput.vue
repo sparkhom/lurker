@@ -523,6 +523,11 @@ const CARET_MIRROR_PROPS = [
   'font-weight',
   'font-style',
   'font-variant',
+  'font-stretch',
+  'font-feature-settings',
+  'font-kerning',
+  'font-variant-ligatures',
+  'text-rendering',
   'line-height',
   'letter-spacing',
   'word-spacing',
@@ -589,9 +594,13 @@ function atHistoryEdge(key: string): boolean {
   const lastTop = endMark.offsetTop;
   mirror.remove();
 
+  // Compare ROW INDICES, not raw pixels: offsetTop is a rounded integer while
+  // lineHeight is fractional (e.g. 19.6), so `caretTop - firstTop < lineHeight`
+  // wrongly flags the 2nd row as the 1st right at the boundary. Quantizing the
+  // gap to whole rows is robust to that ±0.5px rounding (#367).
   return key === 'ArrowUp'
-    ? caretTop - firstTop < lineHeight // caret on the first visual row
-    : lastTop - caretTop < lineHeight; // caret on the last visual row
+    ? Math.round((caretTop - firstTop) / lineHeight) <= 0 // caret on the first visual row
+    : Math.round((lastTop - caretTop) / lineHeight) <= 0; // caret on the last visual row
 }
 
 function handleHistoryNav(e: KeyboardEvent): void {
