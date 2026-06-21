@@ -515,21 +515,83 @@ function setInputAndCaretEnd(value: string): void {
   });
 }
 
-// IRCCloud-style edge detection for history nav: Up at the first logical
-// line / Down at the last logical line walks history. Otherwise the arrow
-// is left alone so it can move the caret between lines within a multi-line
-// draft. "Logical line" = explicit \n in the text; visual wrapping is not
-// counted (a single long wrapped line still triggers history, which matches
-// IRCCloud's behavior).
+// Style properties that influence where a textarea wraps text — copied onto the
+// measuring mirror below so its line breaks match the real composer's.
+const CARET_MIRROR_PROPS = [
+  'font-family',
+  'font-size',
+  'font-weight',
+  'font-style',
+  'font-variant',
+  'line-height',
+  'letter-spacing',
+  'word-spacing',
+  'text-transform',
+  'text-indent',
+  'tab-size',
+  'word-break',
+];
+
+// History-nav edge detection across VISUAL rows: Up walks history only when the
+// caret is on the first visual row of the composer, Down only on the last — so
+// within a multi-line OR a soft-wrapped draft the arrows move the caret between
+// rows like any editor, instead of jumping to history (#367). Textareas expose
+// no caret-row API, so we reproduce the wrap in an offscreen mirror and compare
+// the caret row's top to the first/last row's. Returns true (= at edge) if the
+// element can't be measured.
 function atHistoryEdge(key: string): boolean {
   const el = inputEl.value;
   if (!el) return true;
-  const value = text.value;
-  const caret = el.selectionStart ?? value.length;
-  if (key === 'ArrowUp') {
-    return !value.slice(0, caret).includes('\n');
-  }
-  return !value.slice(caret).includes('\n');
+  const value = el.value;
+  if (!value) return true;
+  const caret = key === 'ArrowUp' ? (el.selectionStart ?? 0) : (el.selectionEnd ?? value.length);
+
+  const cs = getComputedStyle(el);
+  let lineHeight = parseFloat(cs.lineHeight);
+  if (!Number.isFinite(lineHeight)) lineHeight = (parseFloat(cs.fontSize) || 16) * 1.4;
+  const contentWidth =
+    el.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+  if (contentWidth <= 0) return true;
+
+  const mirror = document.createElement('div');
+  const s = mirror.style;
+  for (const prop of CARET_MIRROR_PROPS) s.setProperty(prop, cs.getPropertyValue(prop));
+  s.boxSizing = 'content-box';
+  s.width = `${contentWidth}px`;
+  s.padding = '0';
+  s.border = '0';
+  s.whiteSpace = 'pre-wrap';
+  s.overflowWrap = 'break-word';
+  s.position = 'absolute';
+  s.top = '0';
+  s.left = '-9999px';
+  s.visibility = 'hidden';
+
+  // Zero-width markers at the start, the caret, and the end. Comparing their
+  // offsetTop tells us which visual row the caret shares.
+  const zwsp = '\u200b';
+  const startMark = document.createElement('span');
+  const caretMark = document.createElement('span');
+  const endMark = document.createElement('span');
+  startMark.textContent = zwsp;
+  caretMark.textContent = zwsp;
+  endMark.textContent = zwsp;
+  mirror.append(
+    startMark,
+    document.createTextNode(value.slice(0, caret)),
+    caretMark,
+    document.createTextNode(value.slice(caret)),
+    endMark,
+  );
+  document.body.appendChild(mirror);
+  const firstTop = startMark.offsetTop;
+  const caretTop = caretMark.offsetTop;
+  const lastTop = endMark.offsetTop;
+  mirror.remove();
+
+  return key === 'ArrowUp'
+    ? caretTop - firstTop < lineHeight // caret on the first visual row
+    : lastTop - caretTop < lineHeight; // caret on the last visual row
 }
 
 function handleHistoryNav(e: KeyboardEvent): void {
