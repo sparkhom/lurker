@@ -3,17 +3,29 @@
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import net from 'net';
-import { createIdentdServer, registerIdent, unregisterIdent, isPrivateAddress } from './identd.js';
+import {
+  createIdentdServer,
+  registerIdent,
+  unregisterIdent,
+  isPrivateAddress,
+  getIdentdMetrics,
+  resetIdentdMetrics,
+} from './identd.js';
 
 let server: net.Server;
 let port: number;
 
 beforeAll(async () => {
-  // The address-mismatch tests deliberately exercise the NO-USER diagnostic
-  // path (which logs); keep the run output clean.
+  // The address-mismatch tests exercise the NO-USER diagnostic path (warn/error)
+  // and the grace path logs a line on every rescue; mute all three so the run
+  // output stays clean.
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
-  server = createIdentdServer();
+  vi.spyOn(console, 'log').mockImplementation(() => {});
+  // A short grace window keeps the legitimate-miss cases (which now route
+  // through the grace path before answering NO-USER) fast; the dedicated
+  // grace-window describe below pins the timing behavior itself.
+  server = createIdentdServer({ graceMs: 150, graceStepMs: 30 });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   port = (server.address() as net.AddressInfo).port;
 });
@@ -28,6 +40,8 @@ afterAll(() => {
 // register with those so the 4-tuple matches. (In production the registered
 // remote address is the IRC server, and the query legitimately arrives FROM it.)
 const LOOPBACK = '127.0.0.1';
+
+const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 // Send one ident query line and collect the reply.
 function query(line: string): Promise<string> {
@@ -178,6 +192,88 @@ describe('built-in identd', () => {
 
     expect(await query('41001, 6667\r\n')).toContain('USERID : UNIX : lu1');
     expect(await query('41002, 6667\r\n')).toContain('USERID : UNIX : lu2');
+  });
+});
+
+// The residual ~7% failure after the pre-TLS-registration fix: the IRC server's
+// :113 callback can beat our own registerIdent through a busy event loop, so the
+// query arrives before any matching 4-tuple exists. Answering NO-USER on that
+// first miss is the bug; the grace window holds the socket and re-checks so a
+// registration that lands a few ms late still yields USERID. (issue #374)
+describe('identd grace window (registration race)', () => {
+  let graceServer: net.Server;
+  let gracePort: number;
+
+  beforeAll(async () => {
+    resetIdentdMetrics();
+    // Short window so the race cases stay fast and deterministic.
+    graceServer = createIdentdServer({ graceMs: 600, graceStepMs: 40, graceMaxPending: 4 });
+    await new Promise<void>((resolve) => graceServer.listen(0, '127.0.0.1', resolve));
+    gracePort = (graceServer.address() as net.AddressInfo).port;
+  });
+
+  afterAll(() => graceServer.close());
+
+  function graceQuery(line: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const c = net.connect(gracePort, '127.0.0.1', () => c.write(line));
+      let out = '';
+      c.on('data', (d) => (out += d.toString()));
+      c.on('end', () => resolve(out));
+      c.on('error', reject);
+    });
+  }
+
+  // The core fix: a query that arrives before the outbound connection registers
+  // its 4-tuple must wait out the window, not get an instant NO-USER.
+  it('rescues a query when registration lands during the grace window', async () => {
+    const pending = graceQuery('42100, 6667\r\n'); // nothing registered yet
+    await delay(120); // a few rechecks in, still well inside the 600ms window
+    registerIdent({
+      localAddress: LOOPBACK,
+      localPort: 42100,
+      remoteAddress: LOOPBACK,
+      remotePort: 6667,
+      ident: 'raced',
+    });
+    expect(await pending).toContain('USERID : UNIX : raced');
+    expect(getIdentdMetrics().rescued).toBeGreaterThanOrEqual(1);
+  });
+
+  it('answers NO-USER when nothing registers before the window expires', async () => {
+    const before = getIdentdMetrics().silentMiss;
+    expect(await graceQuery('42199, 6667\r\n')).toContain('ERROR : NO-USER');
+    expect(getIdentdMetrics().silentMiss).toBe(before + 1);
+  });
+
+  it('answers an exact match immediately without sitting through the window', async () => {
+    registerIdent({
+      localAddress: LOOPBACK,
+      localPort: 42101,
+      remoteAddress: LOOPBACK,
+      remotePort: 6667,
+      ident: 'fast',
+    });
+    const t0 = Date.now();
+    expect(await graceQuery('42101, 6667\r\n')).toContain('USERID : UNIX : fast');
+    expect(Date.now() - t0).toBeLessThan(300); // did not wait the 600ms grace
+  });
+
+  // Enumeration protection must not be softened by the grace window: a ports
+  // match with the wrong source address is refused at once, not held open.
+  it('still refuses an address mismatch instantly (no grace for enumeration)', async () => {
+    registerIdent({
+      localAddress: LOOPBACK,
+      localPort: 42102,
+      remoteAddress: '198.51.100.9', // a different server than the loopback querier
+      remotePort: 6667,
+      ident: 'secret',
+    });
+    const t0 = Date.now();
+    const res = await graceQuery('42102, 6667\r\n');
+    expect(res).toContain('ERROR : NO-USER');
+    expect(res).not.toContain('secret');
+    expect(Date.now() - t0).toBeLessThan(300);
   });
 });
 
