@@ -90,6 +90,14 @@ describe('built-in identd', () => {
     expect(res).toContain('ERROR : INVALID-PORT');
   });
 
+  // A syntactically-valid but out-of-range port (the regex allows 5 digits)
+  // must fail fast as INVALID-PORT, not fall into the grace window — otherwise a
+  // scanner could pin grace slots with 99999,99999.
+  it('rejects an out-of-range port as INVALID-PORT', async () => {
+    const res = await query('99999, 6667\r\n');
+    expect(res).toContain('ERROR : INVALID-PORT');
+  });
+
   it('tolerates loose whitespace in the query', async () => {
     registerIdent({
       localAddress: LOOPBACK,
@@ -246,7 +254,10 @@ describe('identd grace window (registration race)', () => {
     expect(getIdentdMetrics().silentMiss).toBe(before + 1);
   });
 
-  it('answers an exact match immediately without sitting through the window', async () => {
+  // A first-lookup hit must answer without entering the grace recheck loop.
+  // Asserted via the metrics (served up, rescued unchanged) rather than a
+  // wall-clock threshold, which flakes on a loaded CI runner.
+  it('answers an exact match on the first lookup (no grace recheck)', async () => {
     registerIdent({
       localAddress: LOOPBACK,
       localPort: 42101,
@@ -254,14 +265,17 @@ describe('identd grace window (registration race)', () => {
       remotePort: 6667,
       ident: 'fast',
     });
-    const t0 = Date.now();
+    const before = getIdentdMetrics();
     expect(await graceQuery('42101, 6667\r\n')).toContain('USERID : UNIX : fast');
-    expect(Date.now() - t0).toBeLessThan(300); // did not wait the 600ms grace
+    const after = getIdentdMetrics();
+    expect(after.served).toBe(before.served + 1);
+    expect(after.rescued).toBe(before.rescued);
   });
 
   // Enumeration protection must not be softened by the grace window: a ports
-  // match with the wrong source address is refused at once, not held open.
-  it('still refuses an address mismatch instantly (no grace for enumeration)', async () => {
+  // match with the wrong source address is refused on the first lookup, not held
+  // open. Asserted by addrMiss up + rescued unchanged (never entered the loop).
+  it('refuses an address mismatch on the first lookup (no grace for enumeration)', async () => {
     registerIdent({
       localAddress: LOOPBACK,
       localPort: 42102,
@@ -269,11 +283,13 @@ describe('identd grace window (registration race)', () => {
       remotePort: 6667,
       ident: 'secret',
     });
-    const t0 = Date.now();
+    const before = getIdentdMetrics();
     const res = await graceQuery('42102, 6667\r\n');
     expect(res).toContain('ERROR : NO-USER');
     expect(res).not.toContain('secret');
-    expect(Date.now() - t0).toBeLessThan(300);
+    const after = getIdentdMetrics();
+    expect(after.addrMiss).toBe(before.addrMiss + 1);
+    expect(after.rescued).toBe(before.rescued);
   });
 });
 

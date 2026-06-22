@@ -262,7 +262,14 @@ function handleConnection(socket: net.Socket, cfg: GraceConfig): void {
     buf += chunk.toString('latin1');
     const nl = buf.indexOf('\n');
     if (nl === -1) {
-      if (buf.length > 100) socket.destroy(); // junk, no newline — bail
+      // Junk flood with no newline — bail. Mark answered + count as invalid (not
+      // a silent probe) so it doesn't pollute noData, which is the starvation
+      // signal we read for the DALnet-class follow-up.
+      if (buf.length > 100) {
+        answered = true;
+        metrics.invalid++;
+        socket.destroy();
+      }
       return;
     }
     const m = /^\s*(\d{1,5})\s*,\s*(\d{1,5})/.exec(buf.slice(0, nl));
@@ -273,9 +280,18 @@ function handleConnection(socket: net.Socket, cfg: GraceConfig): void {
       return;
     }
     answered = true;
-    metrics.queries++;
     const lport = Number(m[1]);
     const rport = Number(m[2]);
+    // `\d{1,5}` lets a 5-digit value like 99999 through; an out-of-range port can
+    // never identify a real connection, so reject it as INVALID-PORT up front
+    // rather than letting it fall into the grace window and burn a grace slot
+    // (and a held socket) for a scanner.
+    if (lport < 1 || lport > 65535 || rport < 1 || rport > 65535) {
+      metrics.invalid++;
+      finish(`${lport}, ${rport} : ERROR : INVALID-PORT\r\n`);
+      return;
+    }
+    metrics.queries++;
 
     const first = lookupIdent(lport, rport, queryLocalAddress, queryRemoteAddress);
     if (first.ident) {
@@ -383,10 +399,16 @@ function startSummary(): void {
   summaryTimer = setInterval(() => {
     if (metrics.accepted === prevAccepted) return;
     prevAccepted = metrics.accepted;
+    // "race win-rate" = of the queries matching a real connection we could win or
+    // lose (served+rescued vs silentMiss), how many we answered. Deliberately
+    // excludes addrMiss/noData (mostly :113 scans) so scan traffic can't drag the
+    // headline number — those are printed raw on the same line.
     const resolved = metrics.served + metrics.rescued + metrics.silentMiss;
-    const ok = resolved ? Math.round(((metrics.served + metrics.rescued) / resolved) * 100) : 100;
+    const winRate = resolved
+      ? Math.round(((metrics.served + metrics.rescued) / resolved) * 100)
+      : 100;
     console.log(
-      `[identd] stats: served=${metrics.served} rescued=${metrics.rescued} silentMiss=${metrics.silentMiss} addrMiss=${metrics.addrMiss} noData=${metrics.noData} graceSkipped=${metrics.graceSkipped} — ident success ${ok}%`,
+      `[identd] stats: served=${metrics.served} rescued=${metrics.rescued} silentMiss=${metrics.silentMiss} addrMiss=${metrics.addrMiss} noData=${metrics.noData} graceSkipped=${metrics.graceSkipped} — race win-rate ${winRate}%`,
     );
   }, SUMMARY_INTERVAL_MS);
   // Don't let the summary timer keep the process alive on its own.
@@ -405,13 +427,15 @@ export function startIdentd(port: number): void {
     if (srv.listening) srv.close();
     if (server === srv) server = null;
   });
-  srv.listen(port, () =>
+  srv.listen(port, () => {
     console.log(
       `[identd] listening on :${port} — verifying idents against the full RFC 1413 4-tuple, with a ${GRACE_MS}ms grace window to absorb the connect/registration race; relies on the container seeing IRC servers' real inbound source IPs (Docker bridge preserves them; if idents fail wholesale, run with network_mode: host)`,
-    ),
-  );
+    );
+    // Only once we're actually listening — a failed bind shouldn't leave a stray
+    // interval ticking for a service that never came up.
+    startSummary();
+  });
   server = srv;
-  startSummary();
 }
 
 export function stopIdentd(): void {
