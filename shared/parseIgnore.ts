@@ -85,7 +85,8 @@ export function durationToExpiry(s: string, now: number = Date.now()): string | 
 
 // Tokenize on whitespace, but keep a "(…)" group (balanced) or a "quoted" string
 // as a single token so `-pattern (a|b c)` / `-pattern "two words"` survive.
-function tokenize(s: string): string[] {
+// Exported so the sibling /highlight parser shares the exact same tokenization.
+export function tokenize(s: string): string[] {
   const tokens: string[] = [];
   let i = 0;
   const n = s.length;

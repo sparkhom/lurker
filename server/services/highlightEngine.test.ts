@@ -147,6 +147,105 @@ describe('matchEvent — URL exclusion', () => {
   });
 });
 
+describe('matchEvent — formatting and Unicode', () => {
+  it('matches a word wrapped in IRC color/bold codes', () => {
+    const compiled = compileRules([rule({ pattern: 'QUACK!' })]);
+    expect(matchEvent(event({ text: '\x0304QUACK!\x03' }), compiled).matched).toBe(true);
+    expect(matchEvent(event({ text: '\x02\x0304QUACK!\x0f' }), compiled).matched).toBe(true);
+    expect(matchEvent(event({ text: '\x02QUACK!\x02' }), compiled).matched).toBe(true);
+  });
+
+  it('does not match a keyword inside an accented word', () => {
+    const compiled = compileRules([rule({ pattern: 'em' })]);
+    expect(matchEvent(event({ text: 'zrozumiałem' }), compiled).matched).toBe(false);
+    expect(matchEvent(event({ text: 'say em now' }), compiled).matched).toBe(true);
+  });
+});
+
+describe('matchEvent — mask rules', () => {
+  it('highlights every message from a matching sender, regardless of text', () => {
+    const compiled = compileRules([
+      {
+        id: 7,
+        pattern: null,
+        mask: 'bob!*@*',
+        channels: null,
+        kind: 'full',
+        case_sensitive: false,
+        enabled: true,
+      },
+    ]);
+    expect(
+      matchEvent(
+        { type: 'message', text: 'anything at all', nick: 'bob', userhost: 'bob!u@h' },
+        compiled,
+      ).matched,
+    ).toBe(true);
+    expect(
+      matchEvent(
+        { type: 'message', text: 'anything at all', nick: 'carol', userhost: 'carol!u@h' },
+        compiled,
+      ).matched,
+    ).toBe(false);
+  });
+
+  it('matches a bare-nick mask case-insensitively', () => {
+    const compiled = compileRules([
+      {
+        id: 8,
+        pattern: null,
+        mask: 'Bob',
+        channels: null,
+        kind: 'full',
+        case_sensitive: false,
+        enabled: true,
+      },
+    ]);
+    expect(matchEvent({ type: 'message', text: 'hi', nick: 'bob' }, compiled).matched).toBe(true);
+  });
+
+  it('AND-s a mask with a keyword when both are set', () => {
+    const compiled = compileRules([
+      {
+        id: 9,
+        pattern: 'deploy',
+        mask: 'bob!*@*',
+        channels: null,
+        kind: 'full',
+        case_sensitive: false,
+        enabled: true,
+      },
+    ]);
+    const from = (nick: string, text: string) =>
+      matchEvent({ type: 'message', text, nick, userhost: `${nick}!u@h` }, compiled).matched;
+    expect(from('bob', 'time to deploy')).toBe(true);
+    expect(from('bob', 'just chatting')).toBe(false); // mask matches, keyword does not
+    expect(from('carol', 'time to deploy')).toBe(false); // keyword matches, mask does not
+  });
+});
+
+describe('matchEvent — channel scope', () => {
+  it('only matches in the listed channels', () => {
+    const compiled = compileRules([
+      {
+        id: 10,
+        pattern: 'foo',
+        mask: null,
+        channels: ['#ops'],
+        kind: 'full',
+        case_sensitive: false,
+        enabled: true,
+      },
+    ]);
+    expect(matchEvent({ type: 'message', text: 'foo', target: '#ops' }, compiled).matched).toBe(
+      true,
+    );
+    expect(matchEvent({ type: 'message', text: 'foo', target: '#random' }, compiled).matched).toBe(
+      false,
+    );
+  });
+});
+
 describe('matchEvent — eligibility gating', () => {
   it('does not match self-authored events', () => {
     const compiled: CompiledRule[] = compileRules([rule()]);

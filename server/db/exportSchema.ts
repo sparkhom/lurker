@@ -234,6 +234,8 @@ export const EXPORT_TABLES = Object.freeze({
       'id',
       'user_id',
       'pattern',
+      'mask',
+      'channels',
       'kind',
       'case_sensitive',
       'enabled',

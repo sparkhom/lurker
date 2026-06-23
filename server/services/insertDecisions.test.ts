@@ -66,7 +66,7 @@ function stamp(event: {
       target: event.target,
       text: event.text,
     },
-    highlightRulesService.getCompiled(user.id),
+    highlightRulesService.getCompiled(user.id, net!.id),
     ignoreRulesService.getCompiled(user.id, net!.id),
     !!event.isDm,
   );

@@ -9,7 +9,9 @@
     <p class="section-desc">
       Rules whose pattern matches an incoming message mark it as a highlight (line accent + sidebar
       dot). Auto-managed entries track each network's current nick and can only be enabled/disabled.
-      Configure notification delivery for matched highlights in the Notifications pane.
+      For sender masks, per-network or per-channel scope, use the
+      <code>/highlight</code> command (e.g. <code>/highlight -mask bob!*@*</code>). Configure
+      notification delivery for matched highlights in the Notifications pane.
     </p>
     <p v-if="rulesError" class="error inline">{{ rulesError }}</p>
     <ul class="rule-list">
@@ -17,20 +19,24 @@
         <span class="lock" :title="rule.auto_managed ? 'auto-managed (network nick)' : 'user rule'">
           {{ rule.auto_managed ? '🔒' : '' }}
         </span>
-        <input
-          type="text"
-          class="pattern"
-          :value="rule.pattern"
-          :disabled="rule.auto_managed"
-          @change="onRuleField(rule, 'pattern', ($event.target as HTMLInputElement).value)"
-          placeholder="pattern"
-        />
+        <div class="pat-cell">
+          <input
+            type="text"
+            class="pattern"
+            :value="rule.mask ?? rule.pattern ?? ''"
+            :disabled="rule.auto_managed || !!rule.mask"
+            @change="onRuleField(rule, 'pattern', ($event.target as HTMLInputElement).value)"
+            :placeholder="rule.mask ? 'mask' : 'pattern'"
+          />
+          <span v-if="ruleScopeLabel(rule)" class="scope">{{ ruleScopeLabel(rule) }}</span>
+        </div>
         <select
           :value="rule.kind"
-          :disabled="rule.auto_managed"
+          :disabled="rule.auto_managed || !!rule.mask"
           @change="onRuleField(rule, 'kind', ($event.target as HTMLSelectElement).value)"
         >
-          <option value="plain">plain</option>
+          <option value="substr">substr</option>
+          <option value="full">full</option>
           <option value="glob">glob</option>
           <option value="regex">regex</option>
         </select>
@@ -38,7 +44,7 @@
           <input
             type="checkbox"
             :checked="rule.case_sensitive"
-            :disabled="rule.auto_managed"
+            :disabled="rule.auto_managed || !!rule.mask"
             @change="
               onRuleField(rule, 'case_sensitive', ($event.target as HTMLInputElement).checked)
             "
@@ -71,7 +77,8 @@
         @keydown.enter="onRuleAdd"
       />
       <select v-model="newKind">
-        <option value="plain">plain</option>
+        <option value="substr">substr</option>
+        <option value="full">full</option>
         <option value="glob">glob</option>
         <option value="regex">regex</option>
       </select>
@@ -88,26 +95,33 @@
 import { ref, computed, onMounted } from 'vue';
 import { useHighlightRulesStore } from '../../stores/highlightRules.js';
 import type { HighlightRule } from '../../stores/highlightRules.js';
+import { useNetworksStore } from '../../stores/networks.js';
 
-// The store interface covers core fields; `kind` and `case_sensitive` are also
-// returned by the server but not yet typed in the shared interface.
-type RuleKind = 'plain' | 'glob' | 'regex';
-
-interface HighlightRuleRow extends HighlightRule {
-  kind: RuleKind;
-  case_sensitive: boolean;
-}
+type RuleKind = 'substr' | 'full' | 'glob' | 'regex';
 
 const rulesStore = useHighlightRulesStore();
+const networks = useNetworksStore();
 
-// The store types rules as HighlightRule[], but the server also returns
-// `kind` and `case_sensitive`; cast here so the template can use those fields.
-const rules = computed(() => rulesStore.rules as HighlightRuleRow[]);
+const rules = computed(() => rulesStore.rules);
 
 const rulesError = ref('');
 const newPattern = ref('');
-const newKind = ref<RuleKind>('plain');
+const newKind = ref<RuleKind>('substr');
 const newCaseSensitive = ref(false);
+
+// A muted descriptor for a rule's scope: channels and/or the networks it's
+// limited to. Empty for a plain global keyword rule (the common case), so the
+// row stays uncluttered.
+function ruleScopeLabel(rule: HighlightRule): string {
+  const parts: string[] = [];
+  if (rule.channels?.length) parts.push(rule.channels.join(', '));
+  if (rule.networkIds.length) {
+    parts.push(
+      rule.networkIds.map((id) => networks.networkById(id)?.name || `net:${id}`).join(', '),
+    );
+  }
+  return parts.join(' · ');
+}
 
 onMounted(() => {
   if (!rulesStore.loaded) {
@@ -117,7 +131,7 @@ onMounted(() => {
   }
 });
 
-async function onRuleField(rule: HighlightRuleRow, field: string, value: string | boolean) {
+async function onRuleField(rule: HighlightRule, field: string, value: string | boolean) {
   rulesError.value = '';
   try {
     await rulesStore.update(rule.id, { [field]: value });
@@ -129,7 +143,7 @@ async function onRuleField(rule: HighlightRuleRow, field: string, value: string 
   }
 }
 
-async function onRuleDelete(rule: HighlightRuleRow) {
+async function onRuleDelete(rule: HighlightRule) {
   rulesError.value = '';
   try {
     await rulesStore.remove(rule.id);
@@ -148,9 +162,9 @@ async function onRuleAdd() {
       kind: newKind.value,
       case_sensitive: newCaseSensitive.value,
       enabled: true,
-    } as Partial<HighlightRuleRow>);
+    });
     newPattern.value = '';
-    newKind.value = 'plain';
+    newKind.value = 'substr';
     newCaseSensitive.value = false;
   } catch (e: any) {
     rulesError.value = e.message || 'create failed';
@@ -180,6 +194,19 @@ async function onRuleAdd() {
   background: var(--bg-soft);
 }
 .rule.auto .pattern {
+  color: var(--fg-muted);
+}
+.pat-cell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.pat-cell .pattern {
+  width: 100%;
+}
+/* Muted scope descriptor (channels / networks); color, not size, sets hierarchy. */
+.scope {
   color: var(--fg-muted);
 }
 .lock {

@@ -161,11 +161,20 @@ function migrate() {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    -- A highlight rule marks a matching message (line accent + sidebar dot).
+    -- pattern is the keyword/regex (NULL for a pure mask rule); mask is an
+    -- optional nick!user@host glob that highlights every message from matching
+    -- senders; channels is an optional CSV scope. Network scope lives in the
+    -- highlight_rule_networks junction (no rows = global). kind is the unified
+    -- substr / full / regex vocabulary shared with ignore rules (glob rows still
+    -- match for back-compat).
     CREATE TABLE IF NOT EXISTS highlight_rules (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
-      pattern TEXT NOT NULL,
-      kind TEXT NOT NULL DEFAULT 'plain',
+      pattern TEXT,
+      mask TEXT COLLATE NOCASE,
+      channels TEXT,
+      kind TEXT NOT NULL DEFAULT 'full',
       case_sensitive INTEGER NOT NULL DEFAULT 0,
       enabled INTEGER NOT NULL DEFAULT 1,
       auto_managed INTEGER NOT NULL DEFAULT 0,
@@ -705,7 +714,7 @@ ensureColumn('upload_history', 'removed', 'INTEGER NOT NULL DEFAULT 0');
 // Schema versioning lets us retire one-shot recovery blocks once every
 // production DB has run through them. Bump SCHEMA_VERSION when adding a new
 // recovery block, and delete blocks for versions far enough in the past.
-const SCHEMA_VERSION = 12;
+const SCHEMA_VERSION = 13;
 const schemaVersionRow = db
   .prepare(`SELECT value FROM app_meta WHERE key = 'schema_version'`)
   .get() as { value: string } | undefined;
@@ -1165,6 +1174,59 @@ if (schemaVersion < 11) {
       `);
       db.exec(`DROP TABLE buffer_reads`);
       db.exec(`ALTER TABLE buffer_reads_new RENAME TO buffer_reads`);
+    });
+    const prevFk = db.pragma('foreign_keys', { simple: true });
+    db.pragma('foreign_keys = OFF');
+    try {
+      rebuild();
+    } finally {
+      db.pragma(`foreign_keys = ${prevFk ? 'ON' : 'OFF'}`);
+    }
+  }
+}
+
+// Issue #349 highlight overhaul: `pattern` must be nullable so a pure -mask
+// rule (highlight everyone matching a nick!user@host) can carry no keyword, and
+// the table gains `mask` + `channels` scope columns. SQLite can't drop a NOT
+// NULL in place, so rebuild. The copy remaps the retired kind 'plain' (which
+// meant whole-word) to the unified 'full'. Shape-gated on pattern's notnull flag
+// — idempotent, self-heals a half-migrated DB, and won't touch a DB already on
+// the new shape. FKs off during the swap so the cascade from
+// highlight_rule_networks.rule_id doesn't wipe the junction; ids are preserved.
+{
+  const patternCol = (
+    db.prepare(`PRAGMA table_info(highlight_rules)`).all() as TableInfoRow[]
+  ).find((c) => c.name === 'pattern');
+  if (patternCol && patternCol.notnull === 1) {
+    const rebuild = db.transaction(() => {
+      db.exec(`DROP INDEX IF EXISTS idx_highlight_rules_user`);
+      db.exec(`DROP INDEX IF EXISTS idx_auto_rule_unique`);
+      db.exec(`
+        CREATE TABLE highlight_rules_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          pattern TEXT,
+          mask TEXT COLLATE NOCASE,
+          channels TEXT,
+          kind TEXT NOT NULL DEFAULT 'full',
+          case_sensitive INTEGER NOT NULL DEFAULT 0,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          auto_managed INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+      `);
+      db.exec(`
+        INSERT INTO highlight_rules_new
+          (id, user_id, pattern, mask, channels, kind, case_sensitive, enabled, auto_managed, created_at)
+        SELECT
+          id, user_id, pattern, NULL, NULL,
+          CASE WHEN kind = 'plain' THEN 'full' ELSE kind END,
+          case_sensitive, enabled, auto_managed, created_at
+        FROM highlight_rules
+      `);
+      db.exec(`DROP TABLE highlight_rules`);
+      db.exec(`ALTER TABLE highlight_rules_new RENAME TO highlight_rules`);
     });
     const prevFk = db.pragma('foreign_keys', { simple: true });
     db.pragma('foreign_keys = OFF');

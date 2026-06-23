@@ -51,11 +51,11 @@ describe('GET /api/highlight-rules', () => {
 });
 
 describe('POST /api/highlight-rules', () => {
-  it('creates a plain rule by default', async () => {
+  it('creates a substr rule by default', async () => {
     const res = await aliceAgent.post('/api/highlight-rules').send({ pattern: 'review' });
     expect(res.status).toBe(201);
     expect(res.body.rule.pattern).toBe('review');
-    expect(res.body.rule.kind).toBe('plain');
+    expect(res.body.rule.kind).toBe('substr');
     expect(res.body.rule.enabled).toBe(true);
     expect(res.body.rule.case_sensitive).toBe(false);
   });

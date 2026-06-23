@@ -37,7 +37,7 @@ afterAll(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
 
 describe('CRUD basics', () => {
   it('createRule + getRule + updateRule + deleteRule round-trip', () => {
-    const r = mod.createRule(user.id, { pattern: 'review', kind: 'plain' });
+    const r = mod.createRule(user.id, { pattern: 'review', kind: 'full' });
     expect(r).toMatchObject({ pattern: 'review', enabled: true, case_sensitive: false });
     expect(mod.getRule(r!.id, user.id)!.pattern).toBe('review');
     const updated = mod.updateRule(r!.id, user.id, { enabled: false });
@@ -51,6 +51,52 @@ describe('CRUD basics', () => {
     const stranger = createUser('hr-stranger');
     expect(mod.getRule(r!.id, stranger.id)).toBeNull();
     expect(mod.updateRule(r!.id, stranger.id, { enabled: false })).toBeNull();
+  });
+
+  it('round-trips a mask + channels rule (no keyword)', () => {
+    const r = mod.createRule(user.id, {
+      mask: 'bob!*@*',
+      channels: ['#ops', '#dev'],
+      kind: 'full',
+    });
+    const got = mod.getRule(r!.id, user.id)!;
+    expect(got.pattern).toBeNull();
+    expect(got.mask).toBe('bob!*@*');
+    expect(got.channels).toEqual(['#ops', '#dev']);
+  });
+});
+
+describe('listScopedRules — network scope', () => {
+  it('returns global rules plus rules attached to the network', () => {
+    const scopeUser = createUser('hr-scope');
+    const nA = createNetwork(scopeUser.id, {
+      name: 'a',
+      host: 'h',
+      port: 6697,
+      tls: true,
+      nick: 'n',
+    });
+    const nB = createNetwork(scopeUser.id, {
+      name: 'b',
+      host: 'h',
+      port: 6697,
+      tls: true,
+      nick: 'n',
+    });
+    const globalRule = mod.createRule(scopeUser.id, { pattern: 'global' });
+    const aRule = mod.createRule(scopeUser.id, { pattern: 'onlyA', networkId: nA!.id });
+
+    const scopedA = mod.listScopedRules(scopeUser.id, nA!.id).map((r) => r.pattern);
+    expect(scopedA).toContain('global');
+    expect(scopedA).toContain('onlyA');
+
+    const scopedB = mod.listScopedRules(scopeUser.id, nB!.id).map((r) => r.pattern);
+    expect(scopedB).toContain('global');
+    expect(scopedB).not.toContain('onlyA');
+
+    // networkIds is reported on the scoped/listed rules
+    expect(mod.getRule(globalRule!.id, scopeUser.id)!.networkIds).toEqual([]);
+    expect(mod.getRule(aRule!.id, scopeUser.id)!.networkIds).toEqual([nA!.id]);
   });
 });
 
@@ -98,7 +144,7 @@ describe('upsertAutoNickRule', () => {
   it('skips auto-creation when a matching manual rule already exists', () => {
     const manual = mod.createRule(user.id, {
       pattern: 'override',
-      kind: 'plain',
+      kind: 'full',
       case_sensitive: false,
     });
     const out = mod.upsertAutoNickRule(user.id, net1!.id, 'override');

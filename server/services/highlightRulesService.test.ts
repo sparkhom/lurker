@@ -43,7 +43,7 @@ describe('create', () => {
   it('validates kind', () => {
     const res = highlightRulesService.create(user.id, { pattern: 'x', kind: 'fuzzy' });
     expect(res.ok).toBe(false);
-    expect(!res.ok && res.error).toMatch(/plain, glob, or regex/);
+    expect(!res.ok && res.error).toMatch(/substr, full, glob, or regex/);
   });
 
   it('rejects an invalid regex up front', () => {
@@ -92,12 +92,12 @@ describe('remove', () => {
 
 describe('getCompiled (caching)', () => {
   it('returns a compiled engine and caches across calls until invalidated', () => {
-    const before = highlightRulesService.getCompiled(user.id);
-    const cached = highlightRulesService.getCompiled(user.id);
+    const before = highlightRulesService.getCompiled(user.id, net.id);
+    const cached = highlightRulesService.getCompiled(user.id, net.id);
     expect(cached).toBe(before);
     // Create a new rule → cache invalidated.
     highlightRulesService.create(user.id, { pattern: 'fresh' });
-    const after = highlightRulesService.getCompiled(user.id);
+    const after = highlightRulesService.getCompiled(user.id, net.id);
     expect(after).not.toBe(before);
   });
 });

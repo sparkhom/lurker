@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 import { describe, it, expect } from 'vitest';
-import { buildTextTest } from './textMatch.js';
+import { buildTextTest, stripFormatting, cleanForMatch } from './textMatch.js';
 
 describe('buildTextTest — substr', () => {
   it('matches case-insensitive substring by default', () => {
@@ -35,5 +35,52 @@ describe('buildTextTest — plain/glob/regex parity', () => {
   it('regex is raw and returns null on invalid', () => {
     expect(buildTextTest('^hi', 'regex', false)!('hi there')).toBe(true);
     expect(buildTextTest('(unclosed', 'regex', false)).toBeNull();
+  });
+});
+
+describe('buildTextTest — Unicode word boundaries', () => {
+  it('treats non-ASCII letters as word chars, not boundaries', () => {
+    // `\W`-based matching wrongly saw `ł` as a boundary and matched `em` inside.
+    const test = buildTextTest('em', 'plain', false)!;
+    expect(test('zrozumiałem')).toBe(false);
+    expect(test('łem')).toBe(false);
+    expect(test('say em now')).toBe(true);
+  });
+
+  it('matches whole accented words and respects their boundaries', () => {
+    const test = buildTextTest('café', 'plain', false)!;
+    expect(test('a café here')).toBe(true);
+    expect(test('cafés plural')).toBe(false);
+  });
+
+  it('matches a nick followed by punctuation but not inside a longer word', () => {
+    const test = buildTextTest('brad', 'plain', false)!;
+    expect(test('hey brad: hi')).toBe(true);
+    expect(test('bradley spoke')).toBe(false);
+  });
+
+  it('matches a keyword that itself ends in punctuation', () => {
+    const test = buildTextTest('QUACK!', 'plain', false)!;
+    expect(test('QUACK!')).toBe(true);
+    expect(test('the bot says QUACK! loudly')).toBe(true);
+  });
+});
+
+describe('stripFormatting / cleanForMatch', () => {
+  it('removes color, hex color, and toggle codes', () => {
+    expect(stripFormatting('\x0304,08QUACK!\x03')).toBe('QUACK!');
+    expect(stripFormatting('\x02bold\x0f \x1ditalic\x1d')).toBe('bold italic');
+    expect(stripFormatting('\x04FF0000red\x04000000')).toBe('red');
+  });
+
+  it('lets whole-word matching see through formatting (the colored-QUACK bug)', () => {
+    // Color code leaves a digit glued to the word, which broke the boundary.
+    const test = buildTextTest('QUACK!', 'plain', false)!;
+    expect(test('\x0304QUACK!\x03')).toBe(false); // raw text: boundary broken
+    expect(test(cleanForMatch('\x0304QUACK!\x03'))).toBe(true); // cleaned: matches
+  });
+
+  it('cleanForMatch also strips URLs', () => {
+    expect(cleanForMatch('see https://example.com/amiantos here')).not.toContain('amiantos');
   });
 });

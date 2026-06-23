@@ -28,6 +28,16 @@ export function globToRegexSource(pattern: string): string {
   return out;
 }
 
+// A "word character" for whole-word matching: any Unicode letter or number, or
+// underscore. Crucially this is NOT JS's ASCII-only `\w`/`\W` — those treat any
+// accented or non-Latin letter (e.g. `ł`) as a boundary, so a keyword `em` would
+// wrongly match inside `zrozumiałem`. `\p{L}\p{N}` (with the `u` flag) keeps
+// non-ASCII letters as word chars. The prefix is a consuming negated class
+// rather than a lookbehind so the regex compiles on older engines (Safari < 16.4
+// lacks lookbehind — a throw there would silently drop the rule).
+const WORD_CHAR = '[\\p{L}\\p{N}_]';
+const NON_WORD_CHAR = '[^\\p{L}\\p{N}_]';
+
 // Compile a text pattern into a predicate. Returns null when the pattern can't
 // compile (invalid regex) so callers can drop the rule rather than throw.
 export function buildTextTest(
@@ -41,17 +51,22 @@ export function buildTextTest(
     return (text: string) => text.toLowerCase().includes(needle);
   }
   const flags = caseSensitive ? '' : 'i';
-  let source: string;
+  // Raw user regex compiles as-is (no `u` flag — a user pattern may use syntax
+  // that's invalid in Unicode mode, e.g. an unescaped `{`).
   if (kind === 'regex') {
-    source = pattern;
-  } else if (kind === 'glob') {
-    source = `(?:^|\\W)(?:${globToRegexSource(pattern)})(?=\\W|$)`;
-  } else {
-    // 'plain'
-    source = `(?:^|\\W)(?:${escapeRegex(pattern)})(?=\\W|$)`;
+    try {
+      const re = new RegExp(pattern, flags);
+      return (text: string) => re.test(text);
+    } catch {
+      return null;
+    }
   }
+  // 'plain' (literal whole-word) or 'glob' (whole-word with * and ?). We control
+  // the generated source, so the `u` flag is always safe here.
+  const body = kind === 'glob' ? globToRegexSource(pattern) : escapeRegex(pattern);
+  const source = `(?:^|${NON_WORD_CHAR})(?:${body})(?!${WORD_CHAR})`;
   try {
-    const re = new RegExp(source, flags);
+    const re = new RegExp(source, flags + 'u');
     return (text: string) => re.test(text);
   } catch {
     return null;
@@ -68,4 +83,25 @@ const URL_RE = createUrlRegex();
 // fuse into a false match.
 export function stripUrls(text: string): string {
   return text.replace(URL_RE, ' ');
+}
+
+// mIRC/IRC formatting control codes: color (\x03[fg][,bg]), hex color
+// (\x04RRGGBB), and the toggles bold/italic/underline/reverse/reset/monospace.
+// These must be removed before whole-word matching: a colored word like
+// `\x0304QUACK!` leaves the digit `4` glued to the front of QUACK, which breaks
+// the word boundary and makes the highlight miss. Color is stripped before the
+// toggles so the numeric arguments go with their \x03. Matching the control
+// codes literally is the whole point here, so the no-control-regex rule is moot.
+// eslint-disable-next-line no-control-regex
+const FORMAT_RE = /\x03\d{0,2}(?:,\d{1,2})?|\x04[0-9A-Fa-f]{6}|[\x02\x1d\x1f\x16\x0f\x11\x06]/g;
+
+export function stripFormatting(text: string): string {
+  return text.replace(FORMAT_RE, '');
+}
+
+// Normalize a message body for highlight/ignore-pattern matching: drop IRC
+// formatting codes, then blank out URLs. Both the highlight engine and the
+// ignore content matcher run this so they agree on what the "text" is.
+export function cleanForMatch(text: string): string {
+  return stripUrls(stripFormatting(text));
 }

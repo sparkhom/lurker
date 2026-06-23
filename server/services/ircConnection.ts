@@ -356,7 +356,7 @@ export class IrcConnection {
             text: event.text as string | null | undefined,
             self: event.self as boolean | undefined,
           },
-          highlightRulesService.getCompiled(this.network.user_id),
+          highlightRulesService.getCompiled(this.network.user_id, this.network.id),
           ignoreRulesService.getCompiled(this.network.user_id, this.network.id),
           isDmTargetName(event.target as string),
         );

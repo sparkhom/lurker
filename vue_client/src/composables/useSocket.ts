@@ -331,6 +331,14 @@ function applySnapshot(snapshot: any[], globalIgnores: any[] = []): void {
   channelNotify.applySnapshot(snapshot);
   ignores.applySnapshot(snapshot, globalIgnores);
   nickNotes.applySnapshot(snapshot);
+  // Highlight rules aren't in the snapshot; load them now so client-side
+  // render-time highlight evaluation (#349) works app-wide, not just after the
+  // settings pane has been opened.
+  useHighlightRulesStore()
+    .fetchAll()
+    .catch(() => {
+      /* ignore — server stamp (m.matched) still drives highlighting */
+    });
   for (const net of snapshot) {
     for (const ch of net.channels) {
       // Snapshot members are already { nick, modes } objects from the server.
@@ -451,8 +459,10 @@ function handleMessage(raw: string): void {
     return;
   }
   if (payload.kind === 'highlight-rules-changed') {
-    const rules = useHighlightRulesStore();
-    if (rules.loaded) rules.applyServerChanged();
+    // Re-fetch on any change (another tab/device, or an auto-nick rule created on
+    // (re)connect / nick change). Re-fetch unconditionally so the client-eval set
+    // stays current even if the settings pane was never opened.
+    useHighlightRulesStore().applyServerChanged();
     return;
   }
   if (payload.kind === 'read-state') {

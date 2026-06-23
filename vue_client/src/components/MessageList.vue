@@ -191,6 +191,7 @@ import { useNetworksStore, type AwayState } from '../stores/networks.js';
 import { useBuffersStore } from '../stores/buffers.js';
 import { useSettingsStore } from '../stores/settings.js';
 import { useIgnoresStore } from '../stores/ignores.js';
+import { useHighlightRulesStore } from '../stores/highlightRules.js';
 import { socketSend } from '../composables/useSocket.js';
 import { useNickColors } from '../composables/useNickColors.js';
 import { useViewport } from '../composables/useViewport.js';
@@ -272,6 +273,9 @@ interface RenderRow {
   continuationTime?: boolean;
   // A NOHIGHLIGHT ignore rule matched — suppress the highlight tint (#301).
   nohilight?: boolean;
+  // A highlight rule matched — server stamp (m.matched) OR live client eval
+  // (#349), so a freshly added rule tints scrollback without a reload.
+  highlight?: boolean;
 }
 
 // Ignore-confirm modal target
@@ -293,6 +297,7 @@ const networks = useNetworksStore();
 const buffers = useBuffersStore();
 const settings = useSettingsStore();
 const ignores = useIgnoresStore();
+const highlights = useHighlightRulesStore();
 const nicks = useNickColors();
 const { isMobile } = useViewport();
 
@@ -451,7 +456,7 @@ function rowClass(row: RenderRow) {
     [`type-${m?.type}`]: true,
     self: m?.self,
     alt: row.alt,
-    highlight: !!m?.matched && !row.nohilight,
+    highlight: !!row.highlight && !row.nohilight,
     'cont-author': !!row.continuationAuthor,
     'cont-time': !!row.continuationTime,
   };
@@ -696,6 +701,23 @@ const renderRows = computed((): RenderRow[] => {
       rowNohilight = verdict.nohilight;
     }
 
+    // Render-time highlight match (#349). The server already stamps m.matched at
+    // insert (drives notifications + the highlights feed); evaluating again here
+    // means a rule added/removed/toggled now re-colors on-screen rows live, and
+    // honors -network/-channels/-mask scope. Skip the work when the stamp already
+    // says matched, or for self rows.
+    let rowHighlight = !!m.matched;
+    if (!rowHighlight && !m.self && networkId) {
+      rowHighlight = highlights.evaluate(networkId, {
+        nick: m.nick,
+        userhost: m.userhost ?? null,
+        target: bufTarget,
+        text: m.text ?? '',
+        type: m.type,
+        self: m.self,
+      });
+    }
+
     if (filterOn && m.nick && !m.self) {
       const filterable =
         (m.type === 'join' && fJoin) ||
@@ -748,7 +770,13 @@ const renderRows = computed((): RenderRow[] => {
       out.push({ divider: 'unread', key: 'unread-divider' });
       dividerInserted = true;
     }
-    out.push({ m, alt: STRIPED_TYPES.has(m.type) && !!m.alt, key, nohilight: rowNohilight });
+    out.push({
+      m,
+      alt: STRIPED_TYPES.has(m.type) && !!m.alt,
+      key,
+      nohilight: rowNohilight,
+      highlight: rowHighlight,
+    });
   }
 
   // Both presence timestamps newer than every loaded message → markers land

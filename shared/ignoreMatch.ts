@@ -7,7 +7,7 @@
 // what (pattern), which (levels incl. the special NOHIGHLIGHT); is_except
 // inverts it into a longest-mask-wins whitelist entry, expires_at lapses it.
 
-import { buildTextTest, stripUrls, type TextKind } from './textMatch.js';
+import { buildTextTest, cleanForMatch, type TextKind } from './textMatch.js';
 import { LEVEL_DEFS, ALL_TYPES, HIGHLIGHTABLE } from './ignoreLevels.js';
 
 // Re-export the level helpers the store / parser / service pull from here.
@@ -43,6 +43,39 @@ function globToRegex(pattern: string, caseInsensitive: boolean): RegExp {
     .replace(/\*/g, '.*')
     .replace(/\?/g, '.');
   return new RegExp('^' + escaped + '$', caseInsensitive ? 'i' : '');
+}
+
+// Build a sender matcher from a mask. `null`/`*` matches anyone; a bare token is
+// a case-insensitive nick glob; a `nick!user@host` form globs each part. Shared
+// with the highlight engine so highlight `-mask` and ignore masks behave alike.
+export function buildMaskMatcher(
+  mask: string | null,
+): (nick: string | null, userhost: string | null) => boolean {
+  if (!mask || mask === '*') return () => true;
+  if (mask.includes('!') || mask.includes('@')) {
+    const { nick, user, host } = splitMask(mask);
+    const nickRe = globToRegex(nick, true);
+    const userRe = globToRegex(user, false);
+    const hostRe = globToRegex(host, false);
+    return (n, uh) => {
+      if (!n || !nickRe.test(n)) return false;
+      if (!uh) return user === '*' && host === '*';
+      const bang = uh.indexOf('!');
+      const at = uh.indexOf('@', bang + 1);
+      if (bang === -1 || at === -1) return user === '*' && host === '*';
+      return userRe.test(uh.slice(bang + 1, at)) && hostRe.test(uh.slice(at + 1));
+    };
+  }
+  const nickRe = globToRegex(mask, true);
+  return (n) => !!n && nickRe.test(n);
+}
+
+// Build a channel-scope matcher. `null`/empty matches every buffer; otherwise a
+// case-insensitive glob against each channel name. Shared with the highlight engine.
+export function buildChannelMatcher(channels: string[] | null): (target: string) => boolean {
+  if (!channels || channels.length === 0) return () => true;
+  const res = channels.map((c) => globToRegex(c, true));
+  return (t) => !!t && res.some((re) => re.test(t));
 }
 
 // ---- rule shape + evaluation -----------------------------------------------
@@ -89,9 +122,13 @@ export interface CompiledIgnoreRule {
   hideLevel: (type: string, isDm: boolean) => boolean;
 }
 
-function patternKindToTextKind(kind: string): TextKind {
+// Map a stored rule `kind` to the textMatch vocabulary. Ignore uses only
+// substr/full/regex; highlights add 'glob' and may carry the legacy 'plain'
+// alias, both handled here so the two engines share one mapping.
+export function patternKindToTextKind(kind: string): TextKind {
   if (kind === 'regex') return 'regex';
-  if (kind === 'full') return 'plain';
+  if (kind === 'glob') return 'glob';
+  if (kind === 'full' || kind === 'plain') return 'plain';
   return 'substr';
 }
 
@@ -103,34 +140,8 @@ export function compileIgnoreRules(rules: IgnoreRule[]): CompiledIgnoreRule[] {
     const hasAll = hideLevels.includes('ALL');
     const hides = hideLevels.length > 0;
 
-    let matchesNick: (nick: string | null, userhost: string | null) => boolean;
-    if (!rule.mask || rule.mask === '*') {
-      matchesNick = () => true;
-    } else if (rule.mask.includes('!') || rule.mask.includes('@')) {
-      const { nick, user, host } = splitMask(rule.mask);
-      const nickRe = globToRegex(nick, true);
-      const userRe = globToRegex(user, false);
-      const hostRe = globToRegex(host, false);
-      matchesNick = (n, uh) => {
-        if (!n || !nickRe.test(n)) return false;
-        if (!uh) return user === '*' && host === '*';
-        const bang = uh.indexOf('!');
-        const at = uh.indexOf('@', bang + 1);
-        if (bang === -1 || at === -1) return user === '*' && host === '*';
-        return userRe.test(uh.slice(bang + 1, at)) && hostRe.test(uh.slice(at + 1));
-      };
-    } else {
-      const nickRe = globToRegex(rule.mask, true);
-      matchesNick = (n) => !!n && nickRe.test(n);
-    }
-
-    let matchesChannel: (target: string) => boolean;
-    if (!rule.channels || rule.channels.length === 0) {
-      matchesChannel = () => true;
-    } else {
-      const res = rule.channels.map((c) => globToRegex(c, true));
-      matchesChannel = (t) => !!t && res.some((re) => re.test(t));
-    }
+    const matchesNick = buildMaskMatcher(rule.mask);
+    const matchesChannel = buildChannelMatcher(rule.channels);
 
     let matchesText: (text: string) => boolean;
     if (!rule.pattern) {
@@ -182,8 +193,8 @@ export function evaluateIgnores(
 ): IgnoreVerdict {
   if (compiled.length === 0) return { hide: false, nohilight: false };
   const { nick, userhost, target, type, isDm } = input;
-  // Only pay for URL-stripping when a rule actually matches text.
-  const text = input.text && anyHasPattern(compiled) ? stripUrls(input.text) : '';
+  // Only pay for the URL/formatting strip when a rule actually matches text.
+  const text = input.text && anyHasPattern(compiled) ? cleanForMatch(input.text) : '';
 
   let bestHide = -1;
   let bestHideExcept = -1;

@@ -140,7 +140,9 @@ import { useSettingsStore } from '../stores/settings.js';
 import { useUploadsStore, onInsertUrl } from '../stores/uploads.js';
 import { useToastsStore } from '../stores/toasts.js';
 import { useIgnoresStore, type IgnoreEntry } from '../stores/ignores.js';
+import { useHighlightRulesStore, type HighlightRule } from '../stores/highlightRules.js';
 import { parseIgnoreArgs } from '../../../shared/parseIgnore.js';
+import { parseHighlightArgs } from '../../../shared/parseHighlight.js';
 import { useWhoisStore } from '../stores/whois.js';
 import { useChanlistStore } from '../stores/chanlist.js';
 import { useChannelListModal } from '../composables/useChannelListModal.js';
@@ -191,6 +193,7 @@ const config = useConfigStore();
 const uploads = useUploadsStore();
 const toasts = useToastsStore();
 const ignores = useIgnoresStore();
+const highlightRules = useHighlightRulesStore();
 const chanlist = useChanlistStore();
 const channelListModal = useChannelListModal();
 const nickColors = useNickColors();
@@ -206,6 +209,23 @@ function combinedIgnores(networkId: number | null): { entry: IgnoreEntry; scope:
   if (networkId == null) return globals;
   const own = ignores
     .masksFor(networkId)
+    .map((entry) => ({ entry, scope: networkId as number | null }));
+  return [...globals, ...own];
+}
+
+// Highlight rules visible from this network, in /highlight-listing order: globals
+// first (scope null), then this network's own (scope = networkId). Mirrors
+// combinedIgnores so /unhighlight <n> maps 1:1 to the listed index. Auto-managed
+// (network-nick) rules are network-scoped, so they appear in the own section.
+function combinedHighlights(
+  networkId: number | null,
+): { entry: HighlightRule; scope: number | null }[] {
+  const globals = highlightRules.rules
+    .filter((r) => r.networkIds.length === 0)
+    .map((entry) => ({ entry, scope: null as number | null }));
+  if (networkId == null) return globals;
+  const own = highlightRules.rules
+    .filter((r) => r.networkIds.includes(networkId))
     .map((entry) => ({ entry, scope: networkId as number | null }));
   return [...globals, ...own];
 }
@@ -1862,6 +1882,31 @@ function formatIgnoreEntry(entry: IgnoreEntry, idx: number, global = false): str
   return `  ${idx}. ${summarizeIgnoreEntry(entry, global)}`;
 }
 
+// "QUACK!  [global]  [full]  #chan" — a highlight rule's dimensions, no index.
+function summarizeHighlightEntry(entry: HighlightRule, global = false): string {
+  const parts: string[] = [];
+  if (entry.mask) {
+    parts.push(entry.mask, '[mask]');
+  } else if (entry.pattern) {
+    parts.push(entry.kind === 'regex' ? `/${entry.pattern}/` : `"${entry.pattern}"`);
+  }
+  if (global) parts.push('[global]');
+  // Default match is substr; only call out the non-default kinds for keywords.
+  if (!entry.mask && entry.kind && entry.kind !== 'substr' && entry.kind !== 'regex') {
+    parts.push(`[${entry.kind}]`);
+  }
+  if (entry.case_sensitive) parts.push('[case]');
+  if (entry.channels?.length) parts.push(entry.channels.join(','));
+  if (entry.auto_managed) parts.push('[auto]');
+  if (!entry.enabled) parts.push('[disabled]');
+  return parts.join('  ');
+}
+
+// One indexed line for the /highlight listing.
+function formatHighlightEntry(entry: HighlightRule, idx: number, global = false): string {
+  return `  ${idx}. ${summarizeHighlightEntry(entry, global)}`;
+}
+
 const COMMANDS_LINES = [
   'commands:',
   '  /me <text>             — emote in the current buffer',
@@ -1896,6 +1941,10 @@ const COMMANDS_LINES = [
   '      LEVELS: ALL PUBLIC MSGS NOTICES ACTIONS JOINS PARTS QUITS NICKS KICKS MODES TOPICS NOHIGHLIGHT',
   '      e.g. /ignore bob NOHIGHLIGHT   ·   /ignore -network -regexp -pattern (foo|bar) #chan',
   '  /unignore <index|mask> — remove an ignore (index from /ignore list)',
+  '  /highlight [opts] <text> — list, or add a highlight rule (global by default; alias: /hilight)',
+  '      opts: -network -mask -full -regexp -matchcase -channels <#a,#b>',
+  '      e.g. /highlight QUACK!   ·   /highlight -mask bob!*@*   ·   /highlight -network -regexp qu+ack',
+  '  /unhighlight <index|text> — remove a highlight (index from /highlight list; alias: /dehilight)',
   '  /network [list]        — manage networks (alias: /net); runs from the system buffer',
   '      add [-host <addr>] [-port <n>] [-tls|-notls] [-nick <n>] [-user <u>] [-realname <name>]',
   '          [-sasl_username <u>] [-sasl_password <p>] [-password <serverpass>]',
@@ -2052,6 +2101,112 @@ function runUnignore(argLine: string, networkId: number | null, target: string):
     target,
     `removed ${matches.length} ignore${matches.length > 1 ? 's' : ''} matching "${arg}".`,
   );
+  return true;
+}
+
+// /highlight and /unhighlight manage the per-user highlight rules (global by
+// default; `-network` scopes to the active network), the same list the settings
+// pane edits. Network-agnostic, so they run from the system buffer too. CRUD is
+// REST-backed (async); the server fans `highlight-rules-changed` to keep other
+// sessions in sync.
+function runHighlight(argLine: string, networkId: number | null, target: string): boolean {
+  const args = argLine.trim();
+  if (!args) {
+    const list = combinedHighlights(networkId);
+    if (!list.length) {
+      localInfo(networkId, target, 'highlight list is empty.');
+    } else {
+      localInfo(networkId, target, `highlight list (${list.length}):`);
+      list.forEach(({ entry, scope }, i) =>
+        localInfo(networkId, target, formatHighlightEntry(entry, i + 1, scope === null)),
+      );
+    }
+    return true;
+  }
+  const parsed = parseHighlightArgs(args);
+  if (parsed.error) {
+    localInfo(networkId, target, `/highlight: ${parsed.error}`);
+    return true;
+  }
+  if (parsed.scopeNetwork && networkId == null) {
+    localInfo(
+      networkId,
+      target,
+      '/highlight -network needs an active network — switch to a channel or DM.',
+    );
+    return true;
+  }
+  highlightRules
+    .create({
+      pattern: parsed.pattern,
+      mask: parsed.mask,
+      channels: parsed.channels,
+      kind: parsed.kind,
+      case_sensitive: parsed.caseSensitive,
+      enabled: true,
+      networkId: parsed.scopeNetwork ? networkId : null,
+    })
+    .then((rule) => {
+      if (rule)
+        localInfo(
+          networkId,
+          target,
+          `highlight added: ${summarizeHighlightEntry(rule, rule.networkIds.length === 0)}`,
+        );
+      return rule;
+    })
+    .catch((e: any) => localInfo(networkId, target, `/highlight: ${e?.message || 'failed'}`));
+  return true;
+}
+
+function runUnhighlight(argLine: string, networkId: number | null, target: string): boolean {
+  const arg = argLine.trim();
+  if (!arg) {
+    localInfo(networkId, target, 'usage: /unhighlight <index|text>  (index from /highlight)');
+    return true;
+  }
+  const list = combinedHighlights(networkId);
+  const autoHint = 'auto-managed (your nick) — disable it in the Highlights settings pane instead';
+  if (/^\d+$/.test(arg)) {
+    const item = list[Number(arg) - 1];
+    if (!item) {
+      localInfo(networkId, target, `/unhighlight: no highlight #${arg} (see /highlight)`);
+      return true;
+    }
+    if (item.entry.auto_managed) {
+      localInfo(networkId, target, `/unhighlight: #${arg} is ${autoHint}`);
+      return true;
+    }
+    const summary = summarizeHighlightEntry(item.entry, item.scope === null);
+    highlightRules
+      .remove(item.entry.id)
+      .then(() => localInfo(networkId, target, `removed highlight #${arg}: ${summary}`))
+      .catch((e: any) => localInfo(networkId, target, `/unhighlight: ${e?.message || 'failed'}`));
+    return true;
+  }
+  // Remove by keyword/mask text (case-insensitive, exact match of pattern or mask).
+  const lc = arg.toLowerCase();
+  const matches = list.filter(
+    ({ entry }) => (entry.pattern ?? entry.mask ?? '').toLowerCase() === lc,
+  );
+  const removable = matches.filter(({ entry }) => !entry.auto_managed);
+  if (!matches.length) {
+    localInfo(networkId, target, `/unhighlight: no highlight matching "${arg}" (see /highlight)`);
+    return true;
+  }
+  if (!removable.length) {
+    localInfo(networkId, target, `/unhighlight: "${arg}" is ${autoHint}`);
+    return true;
+  }
+  Promise.all(removable.map(({ entry }) => highlightRules.remove(entry.id)))
+    .then(() =>
+      localInfo(
+        networkId,
+        target,
+        `removed ${removable.length} highlight${removable.length > 1 ? 's' : ''} matching "${arg}".`,
+      ),
+    )
+    .catch((e: any) => localInfo(networkId, target, `/unhighlight: ${e?.message || 'failed'}`));
   return true;
 }
 
@@ -2252,6 +2407,12 @@ function handleCommand(line: string, networkId: number | null, target: string): 
       return runIgnore(argLine, networkId, target);
     case 'unignore':
       return runUnignore(argLine, networkId, target);
+    case 'highlight':
+    case 'hilight':
+      return runHighlight(argLine, networkId, target);
+    case 'unhighlight':
+    case 'dehilight':
+      return runUnhighlight(argLine, networkId, target);
     case 'network':
     case 'net':
       // Network CRUD + connection control. REST-backed and async, so fire it
