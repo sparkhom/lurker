@@ -446,7 +446,7 @@ function startSummary(): void {
   summaryTimer.unref();
 }
 
-export function startIdentd(port: number): void {
+export function startIdentd(port: number, bindHost?: string): void {
   if (server) return;
   const srv = createIdentdServer();
   srv.on('error', (err: Error) => {
@@ -458,14 +458,16 @@ export function startIdentd(port: number): void {
     if (srv.listening) srv.close();
     if (server === srv) server = null;
   });
-  srv.listen(port, () => {
+  const onListen = () => {
     console.log(
-      `[identd] listening on :${port} — verifying idents against the full RFC 1413 4-tuple, with a ${GRACE_MS}ms grace window to absorb the connect/registration race; relies on the container seeing IRC servers' real inbound source IPs (Docker bridge preserves them; if idents fail wholesale, run with network_mode: host)`,
+      `[identd] listening on ${bindHost ? `[${bindHost}]:` : ':'}${port} — verifying idents against the full RFC 1413 4-tuple, with a ${GRACE_MS}ms grace window to absorb the connect/registration race; relies on the container seeing IRC servers' real inbound source IPs (Docker bridge preserves them; if idents fail wholesale, run with network_mode: host)`,
     );
     // Only once we're actually listening — a failed bind shouldn't leave a stray
     // interval ticking for a service that never came up.
     startSummary();
-  });
+  };
+  if (bindHost) srv.listen(port, bindHost, onListen);
+  else srv.listen(port, onListen);
   server = srv;
 }
 
@@ -487,4 +489,14 @@ export function isIdentdEnabled(): boolean {
 export function identdPort(): number {
   const p = Number(process.env.LURKER_IDENTD_PORT);
   return Number.isInteger(p) && p > 0 ? p : 113;
+}
+
+// Optional bind address for the identd listener (LURKER_IDENTD_BIND). A
+// multi-homed host can pin the identd to a single local address (e.g. a
+// dedicated IPv6) so it coexists with another ident daemon serving the host's
+// other addresses — each answers :113 on its own IP. Unset (the default) binds
+// every interface.
+export function identdBindHost(): string | undefined {
+  const host = (process.env.LURKER_IDENTD_BIND || '').trim();
+  return host || undefined;
 }

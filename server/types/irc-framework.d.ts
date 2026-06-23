@@ -27,6 +27,13 @@ declare module 'irc-framework' {
     enable_setname?: boolean;
     enable_echomessage?: boolean;
     version?: string;
+    /**
+     * Local source address to bind the outgoing socket to. irc-framework's net
+     * transport forwards this as the socket's `localAddress` (and derives the
+     * address family from it), letting a multi-homed host choose which local IP
+     * — and therefore which identd — a connection appears to originate from.
+     */
+    outgoing_addr?: string;
   }
 
   /** Options passed to the Client constructor. */

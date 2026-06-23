@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Brad Root
 // SPDX-License-Identifier: MPL-2.0
 
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import net from 'net';
 import {
   createIdentdServer,
@@ -10,6 +10,7 @@ import {
   isPrivateAddress,
   getIdentdMetrics,
   resetIdentdMetrics,
+  identdBindHost,
 } from './identd.js';
 
 let server: net.Server;
@@ -363,5 +364,28 @@ describe('isPrivateAddress', () => {
 
   it('treats an empty/unknown address as not private', () => {
     expect(isPrivateAddress('')).toBe(false);
+  });
+});
+
+describe('identdBindHost', () => {
+  const prev = process.env.LURKER_IDENTD_BIND;
+  afterEach(() => {
+    if (prev === undefined) delete process.env.LURKER_IDENTD_BIND;
+    else process.env.LURKER_IDENTD_BIND = prev;
+  });
+
+  it('is undefined when unset', () => {
+    delete process.env.LURKER_IDENTD_BIND;
+    expect(identdBindHost()).toBeUndefined();
+  });
+
+  it('returns the trimmed address when set', () => {
+    process.env.LURKER_IDENTD_BIND = '  2001:db8::dead  ';
+    expect(identdBindHost()).toBe('2001:db8::dead');
+  });
+
+  it('treats a whitespace-only value as unset', () => {
+    process.env.LURKER_IDENTD_BIND = '   ';
+    expect(identdBindHost()).toBeUndefined();
   });
 });

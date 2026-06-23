@@ -2030,6 +2030,12 @@ export class IrcConnection {
       // — irc-framework overwrites client.options with this dict, so passing
       // it to the constructor doesn't survive. See client.js:202.
       enable_chghost: true,
+      // Source-bind outbound IRC to a dedicated local address when configured
+      // (LURKER_OUTGOING_ADDR). irc-framework forwards this as the socket's
+      // localAddress, so the IRC server's RFC 1413 callback lands on that
+      // address's :113 — where the built-in identd answers per-user. Unset =
+      // kernel default source, the upstream behaviour.
+      outgoing_addr: (process.env.LURKER_OUTGOING_ADDR || '').trim() || undefined,
     });
   }
 

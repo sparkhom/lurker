@@ -17,7 +17,13 @@ import { resolveSessionSecret } from './utils/sessionSecret.js';
 import { getEdition, isNodeMode } from './utils/edition.js';
 import { startOrchestratorClient, stopOrchestratorClient } from './services/orchestratorClient.js';
 import { startModerationReporter, stopModerationReporter } from './services/moderationReport.js';
-import { startIdentd, stopIdentd, isIdentdEnabled, identdPort } from './services/identd.js';
+import {
+  startIdentd,
+  stopIdentd,
+  isIdentdEnabled,
+  identdPort,
+  identdBindHost,
+} from './services/identd.js';
 import {
   recoverInterruptedExports,
   startExportSweeper,
@@ -26,6 +32,10 @@ import {
 import { startIgnoreSweeper, stopIgnoreSweeper } from './services/ignoreSweeper.js';
 
 const PORT = Number(process.env.PORT || 8010);
+// Optional bind address for the web/API server (HOST). Unset keeps upstream
+// behaviour (listen on all interfaces); set HOST=127.0.0.1 to keep Lurker
+// private behind a local reverse proxy / tunnel such as cloudflared.
+const HOST = process.env.HOST?.trim() || undefined;
 const EDITION = getEdition();
 const { secret: SESSION_SECRET, source: sessionSecretSource } = resolveSessionSecret();
 if (sessionSecretSource === 'generated') {
@@ -61,7 +71,7 @@ systemLog.log({ scope: 'server', text: `Lurker server starting up (edition: ${ED
 // needs it so IRC networks can attribute each user behind the shared IP; bind
 // it before connections register their idents.
 if (isIdentdEnabled()) {
-  startIdentd(identdPort());
+  startIdentd(identdPort(), identdBindHost());
 }
 
 // Wrap any plaintext network secrets at rest now that the DB schema is ready
@@ -91,8 +101,8 @@ startOrchestratorClient();
 // didn't reach the control plane at upload time. No-op in standalone.
 startModerationReporter();
 
-server.listen(PORT, () => {
-  console.log(`[lurker] listening on http://localhost:${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`[lurker] listening on http://${HOST || '0.0.0.0'}:${PORT}`);
   systemLog.log({ scope: 'server', text: `Listening on port ${PORT}` });
 });
 
