@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 import db from './index.js';
+import { parseChannelList } from '../../shared/channels.js';
 
 /** A raw row from the `highlight_rules` table. */
 interface HighlightRuleRow {
@@ -51,10 +52,7 @@ export interface RuleFields {
 
 function splitChannels(csv: string | null): string[] | null {
   if (!csv) return null;
-  const parts = csv
-    .split(',')
-    .map((c) => c.trim())
-    .filter(Boolean);
+  const parts = parseChannelList(csv);
   return parts.length ? parts : null;
 }
 
@@ -211,14 +209,32 @@ export function deleteRule(id: number, userId: number): void {
 }
 
 // Auto-nick rules are shared across every network that currently uses the same
-// nick. We detach the network from any prior auto rule, find-or-create one for
-// the new nick, attach the network, then sweep any auto rule that no longer
-// has any networks attached. A manual rule matching the same nick (same
-// pattern + whole-word/case-insensitive) suppresses auto-creation, since the
-// manual rule already covers the highlight.
-const findExistingStmt = db.prepare(`
-  SELECT id, auto_managed FROM highlight_rules
-  WHERE user_id = ? AND pattern = ? AND mask IS NULL AND kind = 'full' AND case_sensitive = 0
+// nick. The upsert is idempotent: it makes this network's own-nick state correct
+// and reports whether it actually changed anything (so the caller only fans a
+// cross-tab refetch on real change, not on every no-op reconnect).
+//
+// A manual rule the user added for their nick suppresses the auto rule entirely.
+// The manual default is 'substr' now, so a substr/full/plain (case-insensitive,
+// no-mask) rule with pattern = nick all count as "covers the nick" — otherwise a
+// manual /highlight <ownnick> wouldn't suppress auto-creation and you'd get a
+// duplicate auto rule on the next reconnect.
+const manualCoveringStmt = db.prepare(`
+  SELECT id FROM highlight_rules
+  WHERE user_id = ? AND pattern = ? AND mask IS NULL AND auto_managed = 0
+    AND kind IN ('full', 'substr', 'plain') AND case_sensitive = 0
+  LIMIT 1
+`);
+const autoForNickStmt = db.prepare(`
+  SELECT id FROM highlight_rules
+  WHERE user_id = ? AND pattern = ? AND auto_managed = 1
+  LIMIT 1
+`);
+// The auto rule (if any) this network is currently attached to.
+const currentAutoAttachmentStmt = db.prepare(`
+  SELECT r.id AS id, r.pattern AS pattern
+  FROM highlight_rule_networks j
+  JOIN highlight_rules r ON r.id = j.rule_id
+  WHERE j.network_id = ? AND r.user_id = ? AND r.auto_managed = 1
   LIMIT 1
 `);
 const detachNetworkStmt = db.prepare(`
@@ -238,27 +254,39 @@ const sweepOrphanedAutoStmt = db.prepare(`
 `);
 
 const upsertAutoNickRuleTx = db.transaction(
-  (userId: number, networkId: number, nick: string): number | bigint | null => {
-    detachNetworkStmt.run(networkId, userId);
-    const existing = findExistingStmt.get(userId, nick) as
-      | { id: number; auto_managed: number }
+  (
+    userId: number,
+    networkId: number,
+    nick: string,
+  ): { ruleId: number | bigint | null; changed: boolean } => {
+    const manual = manualCoveringStmt.get(userId, nick) as { id: number } | undefined;
+    const currentAuto = currentAutoAttachmentStmt.get(networkId, userId) as
+      | { id: number; pattern: string }
       | undefined;
-    let ruleId: number | bigint | null = null;
-    if (existing) {
-      if (existing.auto_managed) {
-        attachNetworkStmt.run(existing.id, networkId);
-        ruleId = existing.id;
-      }
-      // Manual rule with the same triple already covers this nick — skip
-      // auto-creation. If the user later deletes their manual rule, the next
-      // reconnect / nick change will re-create the auto.
-    } else {
-      const result = insertAutoRuleStmt.run(userId, nick);
-      ruleId = result.lastInsertRowid;
-      attachNetworkStmt.run(ruleId, networkId);
+
+    if (manual) {
+      // A manual rule already covers this nick → this network must carry no auto.
+      if (!currentAuto) return { ruleId: null, changed: false }; // already correct
+      detachNetworkStmt.run(networkId, userId);
+      sweepOrphanedAutoStmt.run(userId);
+      return { ruleId: null, changed: true };
     }
+
+    // No manual override: this network should be attached to the auto rule for
+    // `nick`. If it already is, there's nothing to do.
+    if (currentAuto && currentAuto.pattern === nick) {
+      return { ruleId: currentAuto.id, changed: false };
+    }
+    // Re-map: drop a stale auto attachment (old nick), then find-or-create the
+    // auto rule for the current nick and attach this network.
+    if (currentAuto) detachNetworkStmt.run(networkId, userId);
+    const auto = autoForNickStmt.get(userId, nick) as { id: number } | undefined;
+    const ruleId: number | bigint = auto
+      ? auto.id
+      : insertAutoRuleStmt.run(userId, nick).lastInsertRowid;
+    attachNetworkStmt.run(ruleId, networkId);
     sweepOrphanedAutoStmt.run(userId);
-    return ruleId;
+    return { ruleId, changed: true };
   },
 );
 
@@ -266,8 +294,8 @@ export function upsertAutoNickRule(
   userId: number,
   networkId: number,
   nick: string,
-): HighlightRule | null {
-  if (!nick) return null;
-  const ruleId = upsertAutoNickRuleTx(userId, networkId, nick);
-  return ruleId ? getRule(ruleId, userId) : null;
+): { rule: HighlightRule | null; changed: boolean } {
+  if (!nick) return { rule: null, changed: false };
+  const { ruleId, changed } = upsertAutoNickRuleTx(userId, networkId, nick);
+  return { rule: ruleId ? getRule(ruleId, userId) : null, changed };
 }

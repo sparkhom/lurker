@@ -89,11 +89,16 @@ export function stripUrls(text: string): string {
 // (\x04RRGGBB), and the toggles bold/italic/underline/reverse/reset/monospace.
 // These must be removed before whole-word matching: a colored word like
 // `\x0304QUACK!` leaves the digit `4` glued to the front of QUACK, which breaks
-// the word boundary and makes the highlight miss. Color is stripped before the
-// toggles so the numeric arguments go with their \x03. Matching the control
-// codes literally is the whole point here, so the no-control-regex rule is moot.
-// eslint-disable-next-line no-control-regex
-const FORMAT_RE = /\x03\d{0,2}(?:,\d{1,2})?|\x04[0-9A-Fa-f]{6}|[\x02\x1d\x1f\x16\x0f\x11\x06]/g;
+// the word boundary and makes the highlight miss. The color form mirrors the
+// client renderer (vue_client/src/utils/nickColor.ts) exactly so the matcher
+// strips precisely what the user sees: \x03 with an optional 1-2 digit fg and an
+// optional ,bg — a bare \x03 is a reset, and \x03 followed by `,NN` (bg, no fg)
+// is NOT a color code, so its digits stay as text. Matching the control codes
+// literally is the whole point here, so the no-control-regex rule is moot.
+/* eslint-disable no-control-regex */
+const FORMAT_RE =
+  /\x03(?:\d{1,2}(?:,\d{1,2})?)?|\x04[0-9A-Fa-f]{6}|[\x02\x1d\x1f\x16\x0f\x11\x06]/g;
+/* eslint-enable no-control-regex */
 
 export function stripFormatting(text: string): string {
   return text.replace(FORMAT_RE, '');

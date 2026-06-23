@@ -14,6 +14,7 @@ import {
 } from '../db/highlightRules.js';
 import type { CompiledRule } from './highlightEngine.js';
 import { compileRules } from './highlightEngine.js';
+import { normalizeChannelList } from '../../shared/channels.js';
 
 // Unified with ignore's pattern kinds; 'glob' is highlight-only and 'plain' is
 // the retired alias for 'full', both still accepted so old rules keep working.
@@ -34,8 +35,8 @@ function validateKind(kind: unknown): string | null {
 function validateRegex(pattern: string | null): string | null {
   if (!pattern) return null;
   try {
-    const compiled = new RegExp(pattern);
-    return compiled ? null : null;
+    void new RegExp(pattern);
+    return null;
   } catch (e) {
     return `invalid regex: ${(e as Error).message}`;
   }
@@ -43,10 +44,7 @@ function validateRegex(pattern: string | null): string | null {
 
 function normalizeChannels(raw: unknown): string[] | null {
   if (raw == null) return null;
-  const arr = Array.isArray(raw) ? raw : [raw];
-  const out = arr
-    .map((c) => (typeof c === 'string' ? c.trim() : ''))
-    .filter((c): c is string => !!c);
+  const out = normalizeChannelList(Array.isArray(raw) ? raw : [raw]);
   return out.length ? out : null;
 }
 
@@ -78,7 +76,11 @@ class HighlightRulesService extends EventEmitter {
     fields: CreateFields,
   ): { ok: false; error: string } | { ok: true; rule: HighlightRule | null } {
     const pattern = typeof fields.pattern === 'string' ? fields.pattern.trim() : '';
-    const mask = typeof fields.mask === 'string' ? fields.mask.trim() : '';
+    // A bare '*' mask means "anyone" — i.e. no sender constraint. On its own it
+    // would compile to a dead rule, so normalize it away and let the
+    // pattern-or-mask check below reject a '*'-only rule.
+    const rawMask = typeof fields.mask === 'string' ? fields.mask.trim() : '';
+    const mask = rawMask === '*' ? '' : rawMask;
     if (!pattern && !mask) return { ok: false, error: 'a pattern or mask is required' };
     if (pattern.length > MAX_PATTERN_LENGTH)
       return { ok: false, error: `pattern exceeds ${MAX_PATTERN_LENGTH} chars` };
@@ -132,7 +134,8 @@ class HighlightRulesService extends EventEmitter {
     if ('mask' in fields) {
       const blocked = blockAuto('mask');
       if (blocked) return blocked;
-      const mask = typeof fields.mask === 'string' ? fields.mask.trim() : '';
+      const rawMask = typeof fields.mask === 'string' ? fields.mask.trim() : '';
+      const mask = rawMask === '*' ? '' : rawMask;
       if (mask.length > MAX_MASK_LENGTH)
         return { ok: false, error: `mask exceeds ${MAX_MASK_LENGTH} chars` };
       update.mask = mask || null;
@@ -163,7 +166,10 @@ class HighlightRulesService extends EventEmitter {
     }
 
     const finalKind = update.kind || existing.kind;
-    const finalPattern = update.pattern ?? existing.pattern;
+    // Use `in` (not ??) so an explicit clear-to-null (PATCH {pattern:''}) is
+    // honored: otherwise the guard reads the stale existing value and a rule with
+    // neither pattern nor mask slips through and compiles to nothing.
+    const finalPattern = 'pattern' in update ? update.pattern : existing.pattern;
     const finalMask = 'mask' in update ? update.mask : existing.mask;
     if (!finalPattern && !finalMask) return { ok: false, error: 'a pattern or mask is required' };
     if (finalKind === 'regex') {
@@ -192,8 +198,12 @@ class HighlightRulesService extends EventEmitter {
     nick: string | null | undefined,
   ): HighlightRule | null {
     if (!nick) return null;
-    const rule = upsertAutoNickRule(userId, networkId, nick);
-    this.invalidate(userId);
+    // Only invalidate (→ cross-tab refetch fanout) when the upsert actually
+    // changed something. A reconnect re-attaches an already-attached nick rule
+    // (a no-op), so without this gate every reconnect storms all tabs with
+    // redundant GET /api/highlight-rules for zero change.
+    const { rule, changed } = upsertAutoNickRule(userId, networkId, nick);
+    if (changed) this.invalidate(userId);
     return rule;
   }
 

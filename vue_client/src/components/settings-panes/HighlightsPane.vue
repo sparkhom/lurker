@@ -189,6 +189,7 @@ import { useNetworksStore } from '../../stores/networks.js';
 import { useHighlightRulesStore } from '../../stores/highlightRules.js';
 import type { HighlightRule } from '../../stores/highlightRules.js';
 import IconButton from '../IconButton.vue';
+import { parseChannelList } from '../../../../shared/channels.js';
 
 type RuleKind = 'substr' | 'full' | 'glob' | 'regex';
 
@@ -310,10 +311,7 @@ function selectNetworkScope() {
 }
 
 function parseChannels(s: string): string[] | null {
-  const list = s
-    .split(/[\s,]+/)
-    .map((c) => c.trim().toLowerCase())
-    .filter(Boolean);
+  const list = parseChannelList(s);
   return list.length ? list : null;
 }
 

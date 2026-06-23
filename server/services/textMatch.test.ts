@@ -80,6 +80,14 @@ describe('stripFormatting / cleanForMatch', () => {
     expect(test(cleanForMatch('\x0304QUACK!\x03'))).toBe(true); // cleaned: matches
   });
 
+  it('treats a bare reset before digits/comma as a reset, not a color (matches the renderer)', () => {
+    // \x03 + up to 2 digits IS a color code, so the digits go with it...
+    expect(stripFormatting('see \x03123 done')).toBe('see 3 done');
+    // ...but \x03 immediately followed by ',NN' is a bare reset; the ',NN' is
+    // literal text (a bg with no fg is not a color code).
+    expect(stripFormatting('a \x03,12 b')).toBe('a ,12 b');
+  });
+
   it('cleanForMatch also strips URLs', () => {
     expect(cleanForMatch('see https://example.com/amiantos here')).not.toContain('amiantos');
   });

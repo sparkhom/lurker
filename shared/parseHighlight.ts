@@ -17,6 +17,7 @@
 // via -channels.
 
 import { tokenize } from './parseIgnore.js';
+import { parseChannelList } from './channels.js';
 
 export type HighlightKind = 'substr' | 'full' | 'regex';
 
@@ -29,13 +30,6 @@ export interface ParsedHighlight {
   // true = scope to the current network (-network); false (default) = global.
   scopeNetwork: boolean;
   error?: string;
-}
-
-function splitChannelList(value: string): string[] {
-  return value
-    .split(',')
-    .map((c) => c.trim().toLowerCase())
-    .filter(Boolean);
 }
 
 export function parseHighlightArgs(argLine: string): ParsedHighlight {
@@ -98,8 +92,10 @@ export function parseHighlightArgs(argLine: string): ParsedHighlight {
     }
     if (lower === '-channels' || lower === '-channel') {
       const val = tokens[++i];
-      if (val === undefined) return fail('-channels needs a value');
-      for (const c of splitChannelList(val)) channels.push(c);
+      // A value that's missing or itself a flag (channels never start with '-')
+      // means the user forgot the argument — don't silently swallow the next flag.
+      if (val === undefined || val.startsWith('-')) return fail('-channels needs a value');
+      for (const c of parseChannelList(val)) channels.push(c);
       continue;
     }
     if (t.startsWith('-') && t.length > 1) return fail(`unknown flag: ${t}`);

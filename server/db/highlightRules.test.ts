@@ -101,8 +101,9 @@ describe('listScopedRules — network scope', () => {
 });
 
 describe('upsertAutoNickRule', () => {
-  it('creates an auto rule and attaches the network', () => {
-    const rule = mod.upsertAutoNickRule(user.id, net1!.id, 'alice');
+  it('creates an auto rule and attaches the network (changed: true)', () => {
+    const { rule, changed } = mod.upsertAutoNickRule(user.id, net1!.id, 'alice');
+    expect(changed).toBe(true);
     expect(rule!.auto_managed).toBe(true);
     expect(rule!.pattern).toBe('alice');
     const links = db
@@ -111,10 +112,16 @@ describe('upsertAutoNickRule', () => {
     expect(links.map((l) => l.network_id)).toEqual([net1!.id]);
   });
 
+  it('is idempotent — re-attaching the same nick reports changed: false', () => {
+    const again = mod.upsertAutoNickRule(user.id, net1!.id, 'alice');
+    expect(again.changed).toBe(false);
+    expect(again.rule!.pattern).toBe('alice');
+  });
+
   it('attaches additional networks that share the same nick', () => {
     // Now set net2's nick to also be 'alice' and call upsert; the existing
     // auto rule should pick up net2.
-    const rule = mod.upsertAutoNickRule(user.id, net2!.id, 'alice');
+    const { rule } = mod.upsertAutoNickRule(user.id, net2!.id, 'alice');
     const links = db
       .prepare(
         `SELECT network_id FROM highlight_rule_networks WHERE rule_id = ? ORDER BY network_id`,
@@ -128,7 +135,7 @@ describe('upsertAutoNickRule', () => {
     // old auto rule for 'alice' loses net1, gains nothing for 'alice', and
     // the new auto rule for 'newbie' should appear.
     mod.upsertAutoNickRule(user.id, net1!.id, 'newbie');
-    const aliceRule = mod.upsertAutoNickRule(user.id, net2!.id, 'alice'); // ensure stable
+    const { rule: aliceRule } = mod.upsertAutoNickRule(user.id, net2!.id, 'alice'); // ensure stable
     const aliceLinks = db
       .prepare(`SELECT network_id FROM highlight_rule_networks WHERE rule_id = ?`)
       .all(aliceRule!.id) as Array<{ network_id: number }>;
@@ -141,22 +148,26 @@ describe('upsertAutoNickRule', () => {
     expect(newbieLinks.map((l) => l.network_id)).toEqual([net1!.id]);
   });
 
-  it('skips auto-creation when a matching manual rule already exists', () => {
+  it('skips auto-creation when a matching manual rule already exists (incl. substr default)', () => {
+    // The manual default is substr — it must still suppress the auto rule.
     const manual = mod.createRule(user.id, {
       pattern: 'override',
-      kind: 'full',
+      kind: 'substr',
       case_sensitive: false,
     });
     const out = mod.upsertAutoNickRule(user.id, net1!.id, 'override');
-    // upsert returned null because a manual rule covers it.
-    expect(out).toBeNull();
+    // No auto rule (rule null) because the manual substr rule covers it.
+    expect(out.rule).toBeNull();
+    expect(mod.listRules(user.id).some((r) => r.pattern === 'override' && r.auto_managed)).toBe(
+      false,
+    );
     // The manual rule was not converted to auto_managed.
     expect(mod.getRule(manual!.id, user.id)!.auto_managed).toBe(false);
   });
 
   it('null/empty nick returns null', () => {
-    expect(mod.upsertAutoNickRule(user.id, net1!.id, '')).toBeNull();
+    expect(mod.upsertAutoNickRule(user.id, net1!.id, '').rule).toBeNull();
     // The implementation guards !nick at runtime; cast for the type check
-    expect(mod.upsertAutoNickRule(user.id, net1!.id, null as unknown as string)).toBeNull();
+    expect(mod.upsertAutoNickRule(user.id, net1!.id, null as unknown as string).rule).toBeNull();
   });
 });
