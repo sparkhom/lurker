@@ -142,6 +142,9 @@ const insertRuleStmt = db.prepare(`
 const attachNetworkStmt = db.prepare(`
   INSERT OR IGNORE INTO highlight_rule_networks (rule_id, network_id) VALUES (?, ?)
 `);
+const clearRuleNetworksStmt = db.prepare(`
+  DELETE FROM highlight_rule_networks WHERE rule_id = ?
+`);
 
 export function createRule(userId: number, fields: RuleFields): HighlightRule | null {
   const {
@@ -196,11 +199,31 @@ export function updateRule(id: number, userId: number, fields: RuleFields): High
     setClauses.push('enabled = ?');
     params.push(fields.enabled ? 1 : 0);
   }
-  if (!setClauses.length) return getRule(id, userId);
-  params.push(id, userId);
-  db.prepare(
-    `UPDATE highlight_rules SET ${setClauses.join(', ')} WHERE id = ? AND user_id = ?`,
-  ).run(...params);
+  // Re-scope (network attachment) lives in the junction, not a column. Including
+  // it here lets an edit change scope atomically (single id-stable update) rather
+  // than the caller doing create-then-delete. A user rule is global (no rows) or
+  // scoped to exactly one network, so we clear then optionally re-attach.
+  const reScope = 'networkId' in fields;
+  if (!setClauses.length && !reScope) return getRule(id, userId);
+  const apply = db.transaction(() => {
+    if (setClauses.length) {
+      db.prepare(
+        `UPDATE highlight_rules SET ${setClauses.join(', ')} WHERE id = ? AND user_id = ?`,
+      ).run(...params, id, userId);
+    }
+    if (reScope) {
+      // Guard on ownership before touching the junction (UPDATE above is already
+      // user-scoped; a column-less re-scope must check it too).
+      const owned = db
+        .prepare('SELECT 1 FROM highlight_rules WHERE id = ? AND user_id = ?')
+        .get(id, userId);
+      if (owned) {
+        clearRuleNetworksStmt.run(id);
+        if (fields.networkId != null) attachNetworkStmt.run(id, fields.networkId);
+      }
+    }
+  });
+  apply();
   return getRule(id, userId);
 }
 

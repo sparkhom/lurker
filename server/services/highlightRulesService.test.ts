@@ -65,8 +65,18 @@ describe('update', () => {
     expect(highlightRulesService.update(auto.id, user.id, { pattern: 'new' }).ok).toBe(false);
     expect(highlightRulesService.update(auto.id, user.id, { kind: 'regex' }).ok).toBe(false);
     expect(highlightRulesService.update(auto.id, user.id, { case_sensitive: true }).ok).toBe(false);
-    // Auto rules are fully system-managed: enable/disable is locked too.
+    // Auto rules are fully system-managed: enable/disable and re-scope are locked too.
     expect(highlightRulesService.update(auto.id, user.id, { enabled: false }).ok).toBe(false);
+    expect(highlightRulesService.update(auto.id, user.id, { networkId: null }).ok).toBe(false);
+  });
+
+  it('re-scopes a user rule global↔network in one update', () => {
+    const created = highlightRulesService.create(user.id, { pattern: 'movable' });
+    const id = created.ok ? created.rule!.id : 0;
+    const toNet = highlightRulesService.update(id, user.id, { networkId: net.id });
+    expect(toNet.ok && toNet.rule!.networkIds).toEqual([net.id]);
+    const toGlobal = highlightRulesService.update(id, user.id, { networkId: null });
+    expect(toGlobal.ok && toGlobal.rule!.networkIds).toEqual([]);
   });
 
   it('validates regex on update when kind changes to regex', () => {

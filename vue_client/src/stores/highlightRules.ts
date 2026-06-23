@@ -123,7 +123,7 @@ export const useHighlightRulesStore = defineStore('highlightRules', {
       this.rules = [...this.rules, rule];
       return rule as HighlightRule;
     },
-    async update(id: number, fields: Partial<HighlightRule>) {
+    async update(id: number, fields: Partial<HighlightRule> & { networkId?: number | null }) {
       const { rule } = await api(`/api/highlight-rules/${id}`, { method: 'PATCH', body: fields });
       this.rules = this.rules.map((r) => (r.id === id ? rule : r));
       return rule as HighlightRule;

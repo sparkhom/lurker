@@ -190,6 +190,7 @@ import { useHighlightRulesStore } from '../../stores/highlightRules.js';
 import type { HighlightRule } from '../../stores/highlightRules.js';
 import IconButton from '../IconButton.vue';
 import { parseChannelList } from '../../../../shared/channels.js';
+import { highlightRuleDetailParts } from '../../utils/highlightFormat.js';
 
 type RuleKind = 'substr' | 'full' | 'glob' | 'regex';
 
@@ -214,36 +215,11 @@ interface HighlightGroup {
   entries: HighlightRule[];
 }
 
-function kindLabel(kind: string): string {
-  return kind === 'full'
-    ? 'whole word'
-    : kind === 'glob'
-      ? 'glob'
-      : kind === 'regex'
-        ? 'regex'
-        : 'contains';
-}
-
 // One-line summary of a rule's secondary dimensions for the list (the mask or
-// pattern is the main label rendered separately).
+// pattern is the main label rendered separately). Shared with the /highlight
+// command listing so the two never drift.
 function describe(entry: HighlightRule): string {
-  const parts: string[] = [];
-  // For a mask rule that ALSO has a keyword, surface the keyword here since the
-  // mask is the main label. For a pure keyword rule, show how it matches.
-  if (entry.mask && entry.pattern) {
-    parts.push(
-      entry.kind === 'regex'
-        ? `/${entry.pattern}/`
-        : `"${entry.pattern}" (${kindLabel(entry.kind)})`,
-    );
-  } else if (!entry.mask) {
-    parts.push(kindLabel(entry.kind));
-  }
-  if (entry.case_sensitive) parts.push('case-sensitive');
-  if (entry.channels?.length) parts.push(entry.channels.join(', '));
-  if (entry.auto_managed) parts.push('auto');
-  if (!entry.enabled) parts.push('disabled');
-  return parts.join(' · ');
+  return highlightRuleDetailParts(entry).join(' · ');
 }
 
 // Global group first (no network scope), then per-network groups sorted by name.
@@ -394,16 +370,18 @@ function cancelEdit() {
   formError.value = '';
 }
 
-// Edit = create the new version, then drop the old one. Create-then-remove (not
-// remove-then-create) so a server-side rejection leaves the original intact
-// rather than losing it. Scope changes can't be done via update (network scope
-// lives in a junction set on create), so an edit is always a replace.
+// Add = create; edit = a single atomic update (the service re-scopes via the
+// junction), so the rule keeps its id and list position and there's no
+// create-then-delete window that could orphan a duplicate.
 async function submit() {
   const fields = buildFields();
   if (!fields) return;
   try {
-    await rulesStore.create(fields);
-    if (editing.value) await rulesStore.remove(editing.value.id);
+    if (editing.value) {
+      await rulesStore.update(editing.value.id, fields);
+    } else {
+      await rulesStore.create(fields);
+    }
     resetForm();
   } catch (e: any) {
     formError.value = e.message || 'failed to save highlight';

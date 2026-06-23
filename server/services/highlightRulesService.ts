@@ -164,6 +164,14 @@ class HighlightRulesService extends EventEmitter {
       if (blocked) return blocked;
       update.enabled = !!fields.enabled;
     }
+    if ('networkId' in fields) {
+      // Re-scope: makes an edit (incl. global↔network) a single atomic, id-stable
+      // update instead of create-then-delete. null = global.
+      const blocked = blockAuto('network scope');
+      if (blocked) return blocked;
+      update.networkId =
+        typeof fields.networkId === 'number' && fields.networkId > 0 ? fields.networkId : null;
+    }
 
     const finalKind = update.kind || existing.kind;
     // Use `in` (not ??) so an explicit clear-to-null (PATCH {pattern:''}) is

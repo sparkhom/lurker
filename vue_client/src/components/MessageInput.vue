@@ -143,6 +143,7 @@ import { useIgnoresStore, type IgnoreEntry } from '../stores/ignores.js';
 import { useHighlightRulesStore, type HighlightRule } from '../stores/highlightRules.js';
 import { parseIgnoreArgs } from '../../../shared/parseIgnore.js';
 import { parseHighlightArgs } from '../../../shared/parseHighlight.js';
+import { highlightRuleDetailParts } from '../utils/highlightFormat.js';
 import { useWhoisStore } from '../stores/whois.js';
 import { useChanlistStore } from '../stores/chanlist.js';
 import { useChannelListModal } from '../composables/useChannelListModal.js';
@@ -1882,24 +1883,15 @@ function formatIgnoreEntry(entry: IgnoreEntry, idx: number, global = false): str
   return `  ${idx}. ${summarizeIgnoreEntry(entry, global)}`;
 }
 
-// "QUACK!  [global]  [full]  #chan" — a highlight rule's dimensions, no index.
+// "QUACK! · whole word · #chan" — a highlight rule's dimensions, no index. The
+// subject (mask/pattern) and scope are framed here; the secondary descriptors
+// come from the shared formatter the settings pane also uses.
 function summarizeHighlightEntry(entry: HighlightRule, global = false): string {
-  const parts: string[] = [];
-  if (entry.mask) {
-    parts.push(entry.mask, '[mask]');
-  } else if (entry.pattern) {
-    parts.push(entry.kind === 'regex' ? `/${entry.pattern}/` : `"${entry.pattern}"`);
-  }
-  if (global) parts.push('[global]');
-  // Default match is substr; only call out the non-default kinds for keywords.
-  if (!entry.mask && entry.kind && entry.kind !== 'substr' && entry.kind !== 'regex') {
-    parts.push(`[${entry.kind}]`);
-  }
-  if (entry.case_sensitive) parts.push('[case]');
-  if (entry.channels?.length) parts.push(entry.channels.join(','));
-  if (entry.auto_managed) parts.push('[auto]');
-  if (!entry.enabled) parts.push('[disabled]');
-  return parts.join('  ');
+  const subject = entry.mask ? `${entry.mask} (mask)` : (entry.pattern ?? '*');
+  const parts = [subject];
+  if (global) parts.push('global');
+  parts.push(...highlightRuleDetailParts(entry));
+  return parts.join(' · ');
 }
 
 // One indexed line for the /highlight listing.

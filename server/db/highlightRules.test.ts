@@ -53,6 +53,20 @@ describe('CRUD basics', () => {
     expect(mod.updateRule(r!.id, stranger.id, { enabled: false })).toBeNull();
   });
 
+  it('updateRule re-scopes between global and networks, id-stable', () => {
+    const r = mod.createRule(user.id, { pattern: 'scoped' }); // global
+    const id = r!.id;
+    expect(mod.getRule(id, user.id)!.networkIds).toEqual([]);
+    mod.updateRule(id, user.id, { networkId: net1!.id }); // global → net1
+    expect(mod.getRule(id, user.id)!.networkIds).toEqual([net1!.id]);
+    mod.updateRule(id, user.id, { networkId: net2!.id }); // net1 → net2
+    expect(mod.getRule(id, user.id)!.networkIds).toEqual([net2!.id]);
+    mod.updateRule(id, user.id, { networkId: null }); // net2 → global
+    expect(mod.getRule(id, user.id)!.networkIds).toEqual([]);
+    expect(mod.getRule(id, user.id)!.pattern).toBe('scoped'); // same row throughout
+    mod.deleteRule(id, user.id);
+  });
+
   it('round-trips a mask + channels rule (no keyword)', () => {
     const r = mod.createRule(user.id, {
       mask: 'bob!*@*',
