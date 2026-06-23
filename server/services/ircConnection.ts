@@ -27,6 +27,16 @@ import { isNodeMode } from '../utils/edition.js';
 import { deriveIdent } from '../utils/ident.js';
 import { registerIdent, unregisterIdent, isIdentdEnabled } from './identd.js';
 
+// Optional source address for outbound IRC connections (LURKER_OUTGOING_ADDR),
+// passed to irc-framework as `outgoing_addr` → the socket's localAddress. Lets a
+// multi-homed host choose which local IP (and therefore which identd) a
+// connection originates from. Unset = kernel default source. Mirrors the
+// identdBindHost() helper in identd.ts.
+export function outgoingAddr(): string | undefined {
+  const addr = (process.env.LURKER_OUTGOING_ADDR || '').trim();
+  return addr || undefined;
+}
+
 // Shown to peers as the QUIT reason on a clean disconnect. Most IRC clients
 // surface this in JOIN/PART messages, so it doubles as a Lurker
 // announcement — gives operators a quick read on what client + version is
@@ -2030,12 +2040,10 @@ export class IrcConnection {
       // — irc-framework overwrites client.options with this dict, so passing
       // it to the constructor doesn't survive. See client.js:202.
       enable_chghost: true,
-      // Source-bind outbound IRC to a dedicated local address when configured
-      // (LURKER_OUTGOING_ADDR). irc-framework forwards this as the socket's
-      // localAddress, so the IRC server's RFC 1413 callback lands on that
-      // address's :113 — where the built-in identd answers per-user. Unset =
-      // kernel default source, the upstream behaviour.
-      outgoing_addr: (process.env.LURKER_OUTGOING_ADDR || '').trim() || undefined,
+      // Source-bind outbound IRC when LURKER_OUTGOING_ADDR is set, so the
+      // network's RFC 1413 callback lands on the built-in identd rather than the
+      // host's (outgoingAddr → irc-framework outgoing_addr → socket localAddress).
+      outgoing_addr: outgoingAddr(),
     });
   }
 

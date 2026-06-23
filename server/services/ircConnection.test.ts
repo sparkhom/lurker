@@ -23,6 +23,7 @@ import {
   joinRejectionMessageByTag,
   sendRejectionTargetKind,
   sendRejectionText,
+  outgoingAddr,
 } from './ircConnection.js';
 import { createIdentdServer, unregisterIdent } from './identd.js';
 import { createUser } from '../db/users.js';
@@ -937,5 +938,28 @@ describe('self nick updates the input bar (#362)', () => {
     conn.currentNick = 'amiantos1';
     conn.client.emit('nick', { nick: 'amiantos1', new_nick: 'amiantos' });
     expect(conn.snapshot()).toMatchObject({ nick: 'amiantos' });
+  });
+});
+
+describe('outgoingAddr', () => {
+  const prev = process.env.LURKER_OUTGOING_ADDR;
+  afterEach(() => {
+    if (prev === undefined) delete process.env.LURKER_OUTGOING_ADDR;
+    else process.env.LURKER_OUTGOING_ADDR = prev;
+  });
+
+  it('is undefined when unset', () => {
+    delete process.env.LURKER_OUTGOING_ADDR;
+    expect(outgoingAddr()).toBeUndefined();
+  });
+
+  it('returns the trimmed address when set', () => {
+    process.env.LURKER_OUTGOING_ADDR = '  2001:db8::dead  ';
+    expect(outgoingAddr()).toBe('2001:db8::dead');
+  });
+
+  it('treats a whitespace-only value as unset', () => {
+    process.env.LURKER_OUTGOING_ADDR = '   ';
+    expect(outgoingAddr()).toBeUndefined();
   });
 });

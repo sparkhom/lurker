@@ -459,8 +459,10 @@ export function startIdentd(port: number, bindHost?: string): void {
     if (server === srv) server = null;
   });
   const onListen = () => {
+    // Bracket notation is IPv6-only; an IPv4 bind host must print bare.
+    const where = bindHost ? (net.isIPv6(bindHost) ? `[${bindHost}]:` : `${bindHost}:`) : ':';
     console.log(
-      `[identd] listening on ${bindHost ? `[${bindHost}]:` : ':'}${port} — verifying idents against the full RFC 1413 4-tuple, with a ${GRACE_MS}ms grace window to absorb the connect/registration race; relies on the container seeing IRC servers' real inbound source IPs (Docker bridge preserves them; if idents fail wholesale, run with network_mode: host)`,
+      `[identd] listening on ${where}${port} — verifying idents against the full RFC 1413 4-tuple, with a ${GRACE_MS}ms grace window to absorb the connect/registration race; relies on the container seeing IRC servers' real inbound source IPs (Docker bridge preserves them; if idents fail wholesale, run with network_mode: host)`,
     );
     // Only once we're actually listening — a failed bind shouldn't leave a stray
     // interval ticking for a service that never came up.
