@@ -1362,5 +1362,21 @@ describe('IRCv3 draft/multiline (#381)', () => {
       expect(conn.multilineLimits()).toBeNull();
       expect(conn.supportsMultiline()).toBe(false);
     });
+
+    it('reports no support without message-tags (the batch reference rides a tag)', () => {
+      const conn = makeConn();
+      (
+        conn.client as unknown as {
+          network: { cap: { enabled: string[]; available: Map<string, string> } };
+        }
+      ).network = {
+        cap: {
+          enabled: ['batch', 'draft/multiline'], // no message-tags
+          available: new Map([['draft/multiline', 'max-bytes=4096,max-lines=24']]),
+        },
+      };
+      expect(conn.multilineLimits()).toBeNull();
+      expect(conn.supportsMultiline()).toBe(false);
+    });
   });
 });

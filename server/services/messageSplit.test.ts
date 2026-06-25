@@ -8,6 +8,7 @@ import {
   splitMultiline,
   partitionMultiline,
   reassembleMultiline,
+  hasInteriorNewline,
 } from './messageSplit.js';
 
 const MESSAGE_MAX_BYTES = 350;
@@ -296,5 +297,21 @@ describe('reassembleMultiline', () => {
   it('round-trips a partitioned batch back to its source text', () => {
     const [batch] = partitionMultiline('a\n\nb', { maxBytes: 4096, maxLines: 24 });
     expect(reassembleMultiline(batch)).toBe('a\n\nb');
+  });
+});
+
+describe('hasInteriorNewline', () => {
+  it('is false for single-line input or edge-only newlines', () => {
+    expect(hasInteriorNewline('hello')).toBe(false);
+    expect(hasInteriorNewline('hello\n')).toBe(false); // trailing edge
+    expect(hasInteriorNewline('\nhello')).toBe(false); // leading edge
+    expect(hasInteriorNewline('\n\nhello\n\n')).toBe(false);
+    expect(hasInteriorNewline('')).toBe(false);
+  });
+
+  it('is true when a newline sits between content (a real multi-line body)', () => {
+    expect(hasInteriorNewline('a\nb')).toBe(true);
+    expect(hasInteriorNewline('a\n\nb')).toBe(true); // interior blank counts
+    expect(hasInteriorNewline('hello\nworld\n')).toBe(true); // edges trimmed, interior remains
   });
 });

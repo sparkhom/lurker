@@ -37,7 +37,7 @@ import {
   findContactIdByTarget,
 } from '../db/contacts.js';
 import type { ContactRecord } from '../db/contacts.js';
-import { splitSay, splitAction } from './messageSplit.js';
+import { splitSay, splitAction, hasInteriorNewline } from './messageSplit.js';
 import db from '../db/index.js';
 
 // User away state row shape from userAwayState.ts (that file isn't typed yet).
@@ -278,8 +278,11 @@ class IrcManager extends EventEmitter {
     // partitioned to the server's limits, so a big paste is N messages, not N
     // raw lines), and the sender echoes one bubble per batch to match. Networks
     // without the cap fall through to the per-line split that mirrors what
-    // irc-framework actually puts on the wire. (#381)
-    if (/\r\n|\n|\r/.test(text) && conn.supportsMultiline()) {
+    // irc-framework actually puts on the wire. We gate on an INTERIOR newline
+    // (not a bare newline) so "hello\n" stays a single-line send — splitMultiline
+    // trims edge blanks, and the client's multilineMessageCount gates the same
+    // way, so the two stay in sync. (#381)
+    if (hasInteriorNewline(text) && conn.supportsMultiline()) {
       const nick = conn.client.user?.nick;
       for (const echo of conn.sendMultiline(target, text)) {
         conn.publish({ type: 'message', target, nick, text: echo, kind: 'privmsg', self: true });

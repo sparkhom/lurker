@@ -2135,18 +2135,26 @@ export class IrcConnection {
   // fallback to per-line splitting everywhere else.
 
   // The server's advertised limits for a multiline batch, or null when multiline
-  // isn't usable here: the cap pair wasn't negotiated, or the advertised
-  // max-bytes is below one full wire line (MESSAGE_MAX_BYTES) and so can't carry
-  // a single PRIVMSG inside a batch — in which case the send path falls back to
-  // the legacy splitter rather than framing batches the server would FAIL+drop.
-  // An omitted dimension defaults conservatively; once non-null, the body always
-  // rides batches (spanning as many as the limits require), never the legacy path.
+  // isn't usable here: the cap trio (batch + draft/multiline + message-tags —
+  // the batch reference rides a message tag, so framing is impossible without
+  // it) wasn't negotiated, or the advertised max-bytes is below one full wire
+  // line (MESSAGE_MAX_BYTES) and so can't carry a single PRIVMSG inside a batch.
+  // In either case the send path falls back to the legacy splitter rather than
+  // framing batches the server would FAIL+drop. An omitted dimension defaults
+  // conservatively; once non-null, the body always rides batches (spanning as
+  // many as the limits require), never the legacy path.
   multilineLimits(): MultilineLimits | null {
     const cap = this.client.network?.cap as
       | { enabled?: string[]; available?: Map<string, string> }
       | undefined;
     const enabled = cap?.enabled ?? [];
-    if (!enabled.includes('batch') || !enabled.includes('draft/multiline')) return null;
+    if (
+      !enabled.includes('batch') ||
+      !enabled.includes('draft/multiline') ||
+      !enabled.includes('message-tags')
+    ) {
+      return null;
+    }
     let maxBytes = 4096;
     let maxLines = 24;
     const advertised = cap?.available?.get('draft/multiline') ?? '';

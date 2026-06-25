@@ -179,6 +179,15 @@ export function partitionMultiline(
   return batches;
 }
 
+// True when `text` carries a newline that isn't just a leading/trailing edge —
+// i.e. it would actually become a multi-line draft/multiline send once
+// splitMultiline trims edge blanks. The send path gates multiline on this (not a
+// bare newline test) so "hello\n" stays a single-line legacy send and the server
+// agrees with the client's multilineMessageCount, which trims the same way. (#381)
+export function hasInteriorNewline(text: string): boolean {
+  return /\r\n|\n|\r/.test(text.replace(/^(?:\r\n|\r|\n)+/, '').replace(/(?:\r\n|\r|\n)+$/, ''));
+}
+
 // Inverse of the receiver's reassembly: collapse a batch's wire messages back
 // into the display text a multiline-capable peer would show (join with '\n'
 // except across concat continuations). Used for the sender's local echo so each

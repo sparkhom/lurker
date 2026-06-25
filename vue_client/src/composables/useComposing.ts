@@ -11,9 +11,12 @@
 // produce on the wire. 0 = empty, 1 = single line, ≥2 = the SPLIT/FLOOD
 // indicator should appear. `isAction` flips when the user has typed /me so
 // downstream code can pick the tighter ACTION byte budget if it wants.
-// `multiline` is true when the draft will ride a single draft/multiline batch
-// (the network supports it and the body fits its limits) — so it lands as one
-// logical message and the SPLIT/FLOOD hint should stand down. (#381)
+// `multiline` is true when the draft will be sent as draft/multiline batches
+// (the network negotiated the cap and the body has an interior newline). In
+// that mode `chunks` is the batch (message) count, not the wire-PRIVMSG count:
+// StatusBar shows 1 → a neutral MULTILINE chip and 2+ → MULTILINE ×N escalating
+// to warn/bad. The legacy SPLIT/FLOOD wording is used only when `multiline` is
+// false. (#381)
 
 import { reactive, readonly } from 'vue';
 
