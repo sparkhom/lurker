@@ -31,6 +31,10 @@
   ],
   "license": "MPL-2.0",
   "dependencies": {
+    "@noble/ciphers": "^2.2.0",
+    "@noble/curves": "^2.2.0",
+    "@noble/hashes": "^2.2.0",
+    "@scure/bip39": "^2.2.0",
     "@simplewebauthn/server": "^13.3.1",
     "archiver": "^8.0.0",
     "better-sqlite3": "^12.10.1",
