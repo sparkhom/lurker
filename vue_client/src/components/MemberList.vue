@@ -45,6 +45,11 @@ import { useBuffersStore, type BufferMember } from '../stores/buffers.js';
 import { useNickColors } from '../composables/useNickColors.js';
 import { useMemberActions } from '../composables/useMemberActions.js';
 import { useIgnoresStore } from '../stores/ignores.js';
+import {
+  PREFIX_ORDER,
+  prefixOf as modePrefixOf,
+  prefixClass as modePrefixClass,
+} from '../utils/memberPrefix.js';
 import IgnoreModal from './IgnoreModal.vue';
 
 const networks = useNetworksStore();
@@ -93,8 +98,6 @@ function nickStyle(m: BufferMember): { color: string } | null {
   return c ? { color: c } : null;
 }
 
-const PREFIX_ORDER = ['~', '&', '@', '%', '+', ''];
-
 function nickOf(m: BufferMember): string {
   return m.nick;
 }
@@ -137,17 +140,10 @@ function onActionsClick(e: MouseEvent, m: BufferMember): void {
   memberActions.openMenuFromButton(m, menuContext(), e.currentTarget as Element);
 }
 function prefixOf(m: BufferMember): string {
-  const modes = modesOf(m);
-  if (modes.includes('q')) return '~';
-  if (modes.includes('a')) return '&';
-  if (modes.includes('o')) return '@';
-  if (modes.includes('h')) return '%';
-  if (modes.includes('v')) return '+';
-  return '';
+  return modePrefixOf(modesOf(m));
 }
 function prefixClass(m: BufferMember): string {
-  const p = prefixOf(m);
-  return p ? `mode-${p}` : '';
+  return modePrefixClass(modesOf(m));
 }
 function isAway(m: BufferMember): boolean {
   return !!m?.away;

@@ -542,6 +542,17 @@ export const REGISTRY: readonly SettingOption[] = Object.freeze([
     default: 'djb2-32',
     description: 'Hash algorithm used to map nicknames to palette colors.',
   },
+  {
+    key: 'look.nick.show_mode_prefix',
+    label: 'Show mode prefix on nicks',
+    category: 'appearance',
+    group: 'nicks',
+    type: 'bool',
+    default: false,
+    description:
+      'Show the channel user-mode prefix (@ op, + voice, % halfop, ~ owner, & admin) before a ' +
+      "speaker's nick in the message list. Reflects the user's current status in that channel.",
+  },
 
   // ─── Misc look ────────────────────────────────────────────────────────
   {

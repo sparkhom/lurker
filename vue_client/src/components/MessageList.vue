@@ -59,9 +59,25 @@
                 ii === g.visible.length - 1 && g.hidden === 0 ? ' and ' : ', '
               }}</template
               ><template v-if="g.kind === 'renamed'"
-                ><NickRef :nick="asRename(item).from" /> →
-                <NickRef :nick="asRename(item).to" /></template
-              ><template v-else><NickRef :nick="asNick(item).nick" /></template></template
+                ><NickRef
+                  :nick="asRename(item).from"
+                  interactive
+                  @click.stop.prevent="onNickMenu($event, asRename(item).from)"
+                  @contextmenu.stop.prevent="onNickMenu($event, asRename(item).from)" />
+                →
+                <NickRef
+                  :nick="asRename(item).to"
+                  interactive
+                  @click.stop.prevent="onNickMenu($event, asRename(item).to)"
+                  @contextmenu.stop.prevent="onNickMenu($event, asRename(item).to)" /></template
+              ><template v-else
+                ><NickRef
+                  :nick="asNick(item).nick"
+                  interactive
+                  @click.stop.prevent="onNickMenu($event, asNick(item).nick)"
+                  @contextmenu.stop.prevent="
+                    onNickMenu($event, asNick(item).nick)
+                  " /></template></template
             ><template v-if="g.hidden > 0"
               >, and {{ g.hidden }} {{ g.hidden === 1 ? 'other' : 'others' }}</template
             ><template v-if="g.kind === 'joined'"> joined</template
@@ -79,15 +95,23 @@
              author continuations so a run of same-author messages reads
              as one block, but every body row still shows its own time. -->
           <div v-if="!row.continuationAuthor" class="head">
-            <span class="prefix" :class="prefixClass(row.m)" :style="prefixStyle(row.m)">{{
-              row.m?.nick
-            }}</span>
+            <span class="prefix" :class="prefixClass(row.m)"
+              ><NickRef
+                :nick="row.m?.nick ?? ''"
+                :modes="authorModes(row.m)"
+                :show-prefix="showModePrefix"
+                interactive
+                @click.stop.prevent="onNickMenu($event, row.m?.nick, row.m)"
+                @contextmenu.stop.prevent="onNickMenu($event, row.m?.nick, row.m)"
+            /></span>
           </div>
           <span class="body" :class="bodyClass(row.m)">
             <RenderSegments
               :segments="textSegments(row.m)"
               :self-color="selfColor"
               :network-id="buffer?.networkId ?? null"
+              interactive-nicks
+              @nick-click="onMentionMenu"
             />
           </span>
           <span class="time">{{ row.continuationTime ? '' : time(row.m?.time) }}</span>
@@ -97,8 +121,16 @@
           <span
             class="prefix"
             :class="prefixClass(row.m)"
-            :style="row.continuationAuthor ? null : prefixStyle(row.m)"
-            >{{ row.continuationAuthor ? '' : prefixText(row.m) }}</span
+            :style="row.continuationAuthor || row.m?.type === 'message' ? null : prefixStyle(row.m)"
+            ><template v-if="row.m?.type === 'message' && !row.continuationAuthor"
+              ><NickRef
+                :nick="row.m?.nick ?? ''"
+                :modes="authorModes(row.m)"
+                :show-prefix="showModePrefix"
+                interactive
+                @click.stop.prevent="onNickMenu($event, row.m?.nick, row.m)"
+                @contextmenu.stop.prevent="onNickMenu($event, row.m?.nick, row.m)" /></template
+            ><template v-else>{{ row.continuationAuthor ? '' : prefixText(row.m) }}</template></span
           >
           <span class="body" :class="bodyClass(row.m)">
             <RenderSegments
@@ -106,41 +138,87 @@
               :segments="textSegments(row.m)"
               :self-color="selfColor"
               :network-id="buffer?.networkId ?? null"
+              interactive-nicks
+              @nick-click="onMentionMenu"
             />
             <template v-else-if="row.m?.type === 'join'"
-              ><NickRef :nick="row.m.nick ?? ''" />{{ eventHostSuffix(row.m) }} joined</template
+              ><NickRef
+                :nick="row.m.nick ?? ''"
+                interactive
+                @click.stop.prevent="onNickMenu($event, row.m?.nick, row.m)"
+                @contextmenu.stop.prevent="onNickMenu($event, row.m?.nick, row.m)"
+              />{{ eventHostSuffix(row.m) }} joined</template
             >
             <template v-else-if="row.m?.type === 'part'"
-              ><NickRef :nick="row.m.nick ?? ''" />{{ eventHostSuffix(row.m) }} left<template
-                v-if="row.m.text"
-              >
+              ><NickRef
+                :nick="row.m.nick ?? ''"
+                interactive
+                @click.stop.prevent="onNickMenu($event, row.m?.nick, row.m)"
+                @contextmenu.stop.prevent="onNickMenu($event, row.m?.nick, row.m)"
+              />{{ eventHostSuffix(row.m) }} left<template v-if="row.m.text">
                 (<LinkedText :text="row.m.text" />)</template
               ></template
             >
             <template v-else-if="row.m?.type === 'quit'"
-              ><NickRef :nick="row.m.nick ?? ''" />{{ eventHostSuffix(row.m) }} quit<template
-                v-if="row.m.text"
-              >
+              ><NickRef
+                :nick="row.m.nick ?? ''"
+                interactive
+                @click.stop.prevent="onNickMenu($event, row.m?.nick, row.m)"
+                @contextmenu.stop.prevent="onNickMenu($event, row.m?.nick, row.m)"
+              />{{ eventHostSuffix(row.m) }} quit<template v-if="row.m.text">
                 (<LinkedText :text="row.m.text" />)</template
               ></template
             >
             <template v-else-if="row.m?.type === 'kick'"
-              ><NickRef :nick="row.m.kicked ?? ''" /> kicked by
-              <NickRef :nick="row.m.nick ?? ''" /><template v-if="row.m.text">
+              ><NickRef
+                :nick="row.m.kicked ?? ''"
+                interactive
+                @click.stop.prevent="onNickMenu($event, row.m?.kicked)"
+                @contextmenu.stop.prevent="onNickMenu($event, row.m?.kicked)"
+              />
+              kicked by
+              <NickRef
+                :nick="row.m.nick ?? ''"
+                interactive
+                @click.stop.prevent="onNickMenu($event, row.m?.nick, row.m)"
+                @contextmenu.stop.prevent="onNickMenu($event, row.m?.nick, row.m)"
+              /><template v-if="row.m.text">
                 (<LinkedText :text="row.m.text" />)</template
               ></template
             >
             <template v-else-if="row.m?.type === 'nick'"
-              ><NickRef :nick="row.m.nick ?? ''" /> is now <NickRef :nick="row.m.newNick ?? ''" />{{
-                eventHostSuffix(row.m)
-              }}</template
+              ><NickRef
+                :nick="row.m.nick ?? ''"
+                interactive
+                @click.stop.prevent="onNickMenu($event, row.m?.nick, row.m)"
+                @contextmenu.stop.prevent="onNickMenu($event, row.m?.nick, row.m)"
+              />
+              is now
+              <NickRef
+                :nick="row.m.newNick ?? ''"
+                interactive
+                @click.stop.prevent="onNickMenu($event, row.m?.newNick, row.m)"
+                @contextmenu.stop.prevent="onNickMenu($event, row.m?.newNick, row.m)"
+              />{{ eventHostSuffix(row.m) }}</template
             >
             <template v-else-if="row.m?.type === 'mode'"
-              >mode by <NickRef :nick="row.m.nick ?? ''" /><template v-if="row.m.text"
+              >mode by
+              <NickRef
+                :nick="row.m.nick ?? ''"
+                interactive
+                @click.stop.prevent="onNickMenu($event, row.m?.nick, row.m)"
+                @contextmenu.stop.prevent="onNickMenu($event, row.m?.nick, row.m)" /><template
+                v-if="row.m.text"
                 >: <LinkedText :text="row.m.text" /></template
             ></template>
             <template v-else-if="row.m?.type === 'topic'"
-              >topic set by <NickRef :nick="row.m.nick ?? ''" /><template v-if="row.m.text"
+              >topic set by
+              <NickRef
+                :nick="row.m.nick ?? ''"
+                interactive
+                @click.stop.prevent="onNickMenu($event, row.m?.nick, row.m)"
+                @contextmenu.stop.prevent="onNickMenu($event, row.m?.nick, row.m)" /><template
+                v-if="row.m.text"
                 >: <LinkedText :text="row.m.text" /></template
             ></template>
             <template v-else-if="row.m?.type === 'motd' || row.m?.type === 'system'"
@@ -188,7 +266,7 @@
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import type { CSSProperties, ComponentPublicInstance } from 'vue';
 import { useNetworksStore, type AwayState } from '../stores/networks.js';
-import { useBuffersStore } from '../stores/buffers.js';
+import { useBuffersStore, type BufferMember } from '../stores/buffers.js';
 import { useSettingsStore } from '../stores/settings.js';
 import { useIgnoresStore } from '../stores/ignores.js';
 import { useHighlightRulesStore } from '../stores/highlightRules.js';
@@ -223,6 +301,8 @@ import type {
   MessageAction,
   MessageActionKey,
 } from '../composables/useMessageActions.js';
+import { useMemberActions } from '../composables/useMemberActions.js';
+import type { MemberContext, MemberLike } from '../composables/useMemberActions.js';
 import { addressNick } from '../composables/useComposerOverlay.js';
 import { setViewedBuffer } from '../composables/useViewedBuffer.js';
 
@@ -519,6 +599,90 @@ function runAction(key: MessageActionKey, m: ChatMessage | undefined | null): vo
   if (!m) return;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   messageActions.run(key, m as any, actionContext);
+}
+
+// ─── Nick interactivity (#238) + mode-prefix glyph (#376) ──────────────────
+// Message-list nicks behave exactly like their nicklist entry: a tap (or
+// right-click / long-press) opens the shared member-action menu — Reply, Copy
+// Nickname, whois, DM, note, friend, ignore, and op-gated kick/ban/op/voice.
+// The menu and ignore modal are owned here, mirroring MemberList's pattern.
+const memberActions = useMemberActions();
+
+const showModePrefix = computed(() => !!settings.effective('look.nick.show_mode_prefix'));
+
+// Look up a speaker in the active buffer by case-folded nick — servers send
+// case-variant nicks, so we never key on exact casing.
+function nickMember(nick: string): BufferMember | undefined {
+  const b = buffer.value;
+  if (!b || !nick) return undefined;
+  const lc = nick.toLowerCase();
+  return b.members?.find((m) => m.nick.toLowerCase() === lc);
+}
+
+// The current user's own modes in the active channel, gating the operator
+// actions in the nick menu (mirrors MemberList's selfModes).
+const selfModes = computed<string[]>(() => {
+  const sl = selfLower.value;
+  if (!sl) return [];
+  const me = buffer.value?.members?.find((m) => m.nick.toLowerCase() === sl);
+  return me && Array.isArray(me.modes) ? me.modes : [];
+});
+
+// The author's channel modes for the prefix glyph — channel buffers only (DMs
+// and the system buffer carry no modes). Returns undefined (no glyph) when the
+// speaker isn't a current member, e.g. backlog from someone who has since left.
+// Called per message row at render, so short-circuit when the glyph is off (the
+// default) to skip the per-row member-list scan entirely.
+function authorModes(m: ChatMessage | undefined): string[] | undefined {
+  if (!showModePrefix.value || !m?.nick) return undefined;
+  const b = buffer.value;
+  if (!b || !b.target?.startsWith('#')) return undefined;
+  return nickMember(m.nick)?.modes;
+}
+
+function nickIsSelf(member: MemberLike | string): boolean {
+  const sl = selfLower.value;
+  const nick = typeof member === 'string' ? member : member.nick;
+  return !!sl && !!nick && nick.toLowerCase() === sl;
+}
+
+function nickMenuContext(): MemberContext {
+  return {
+    networkId: buffer.value?.networkId ?? 0,
+    isSelf: nickIsSelf,
+    onIgnore: (member) => {
+      const nick = typeof member === 'string' ? member : member.nick;
+      ignoreTarget.value = {
+        nick,
+        user: typeof member === 'string' ? null : (member.user ?? null),
+        host: typeof member === 'string' ? null : (member.host ?? null),
+        networkId: buffer.value?.networkId ?? undefined,
+      };
+    },
+    channel: buffer.value?.target ?? null,
+    selfModes: selfModes.value,
+  };
+}
+
+// `m` is the source message, used only to recover a userhost for a speaker who
+// is no longer in the member list — so whois/ban masks still work on backlog.
+// Omit it for nicks where the message's userhost belongs to someone else (e.g.
+// the kicked user in a kick line).
+function onNickMenu(e: MouseEvent, nick: string | undefined, m?: ChatMessage): void {
+  if (!nick || !buffer.value) return;
+  // Prefer the live member (modes for op-gating, host for a clean ban mask);
+  // fall back to the message's own userhost so a departed speaker stays
+  // actionable.
+  const member: MemberLike = nickMember(nick) ?? { nick, ...parseUserHost(m?.userhost) };
+  memberActions.openMenuFor(member, nickMenuContext(), e.clientX, e.clientY);
+}
+
+// A coloured nick mention inside message text (emitted by RenderSegments). The
+// mentioned user isn't the message author, so there's no userhost to recover
+// from the row — pass the nick alone and let onNickMenu resolve a live member
+// (or fall back to a bare-nick menu).
+function onMentionMenu(nick: string, e: MouseEvent): void {
+  onNickMenu(e, nick);
 }
 
 const smartFilterEnabled = computed(() => !!settings.effective('chat.smart_filter'));

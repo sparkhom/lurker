@@ -5,6 +5,7 @@ import type { ComputedRef } from 'vue';
 import { computed } from 'vue';
 import { useNetworksStore } from '../stores/networks.js';
 import { useBuffersStore } from '../stores/buffers.js';
+import { prefixOf } from '../utils/memberPrefix.js';
 
 export interface SelfLabelState {
   promptLabel: ComputedRef<string>;
@@ -18,9 +19,6 @@ export interface SelfLabelState {
 //
 // The channel-prefix is the user's own op/voice marker derived from the
 // active channel's member list. For DMs / server buffers it's empty.
-const PROMPT_PREFIX: Record<string, string> = { o: '@', h: '%', v: '+', a: '&', q: '~' };
-const PROMPT_PREFIX_RANK = ['q', 'a', 'o', 'h', 'v'];
-
 export function useSelfLabel(): SelfLabelState {
   const networks = useNetworksStore();
   const buffers = useBuffersStore();
@@ -35,11 +33,7 @@ export function useSelfLabel(): SelfLabelState {
     if (!nick) return '';
     const lc = nick.toLowerCase();
     const me = buf.members.find((m) => m.nick.toLowerCase() === lc);
-    const modes = me?.modes ?? [];
-    for (const letter of PROMPT_PREFIX_RANK) {
-      if (modes.includes(letter)) return PROMPT_PREFIX[letter];
-    }
-    return '';
+    return prefixOf(me?.modes ?? []);
   });
 
   // Identity without the trailing user-mode parens. Feeds the mobile input

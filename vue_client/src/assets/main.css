@@ -239,6 +239,15 @@ a {
   border-radius: 2px;
 }
 
+/* Coloured nick mentions inside message text. Clickable to open the member
+   menu (Reply, whois, DM, …), the same affordance as the nicklist. The nick
+   keeps its inline colour; a pointer cursor is the only added cue — no hover
+   underline, to match the author and event-line nicks. Left selectable so the
+   message text stays copyable. */
+.msg-nick {
+  cursor: pointer;
+}
+
 /* Button language (#355): accent = actionable, gray = disabled. Buttons carry
    the accent color, brighten to --fg on hover (no gray fill), and drop to the
    muted gray on :disabled — so "gray" unambiguously means "you can't click

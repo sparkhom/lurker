@@ -4,7 +4,10 @@
 -->
 
 <template>
-  <span class="nick-ref" :style="style">{{ nick }}</span>
+  <span class="nick-ref" :class="{ interactive }" :style="style"
+    ><span v-if="glyph" class="mode-glyph" :class="glyphClass">{{ glyph }}</span
+    >{{ nick }}</span
+  >
 </template>
 
 <script setup lang="ts">
@@ -12,14 +15,26 @@ import { computed } from 'vue';
 import { useNetworksStore } from '../stores/networks.js';
 import { useBuffersStore } from '../stores/buffers.js';
 import { useNickColors } from '../composables/useNickColors.js';
+import { prefixOf } from '../utils/memberPrefix.js';
 
 const props = defineProps<{
   nick: string;
+  // Channel user-mode glyph (#376). Both must be supplied for the glyph to
+  // render; callers that aren't a channel speaker just omit them.
+  modes?: string[];
+  showPrefix?: boolean;
+  // Pointer affordance for clickable nicks (#238). The click/contextmenu
+  // handlers are attached by the consumer and reach the root span via Vue's
+  // attribute fallthrough — this prop only drives the cursor styling.
+  interactive?: boolean;
 }>();
 
 const networks = useNetworksStore();
 const buffers = useBuffersStore();
 const nicks = useNickColors();
+
+const glyph = computed(() => (props.showPrefix ? prefixOf(props.modes) : ''));
+const glyphClass = computed(() => `mode-${glyph.value}`);
 
 const selfLower = computed(() => {
   const key = networks.activeKey;
@@ -44,5 +59,30 @@ const style = computed(() => {
 <style scoped>
 .nick-ref {
   color: inherit;
+}
+.nick-ref.interactive {
+  cursor: pointer;
+  /* Right-clicking to open the menu otherwise selects the word under the
+     cursor (the selection happens on pointer-down, before @contextmenu.prevent
+     can fire), which reads as a glitch. Matches the member list, where rows are
+     likewise unselectable. */
+  user-select: none;
+}
+/* The mode glyph reuses the nicklist's per-mode colors so it reads as a status
+   marker rather than part of the (separately-colored) nick. */
+.mode-glyph.mode-\~ {
+  color: var(--member-owner);
+}
+.mode-glyph.mode-\& {
+  color: var(--member-admin);
+}
+.mode-glyph.mode-\@ {
+  color: var(--member-op);
+}
+.mode-glyph.mode-\% {
+  color: var(--member-halfop);
+}
+.mode-glyph.mode-\+ {
+  color: var(--member-voice);
 }
 </style>
