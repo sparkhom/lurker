@@ -18,6 +18,9 @@ export const CTCP_TAG = 'RPEE2E';
 /** Handshake protocol version (the `v=` field). */
 export const PROTO_VERSION = 1;
 
+/** Length of a message id, in bytes. */
+export const MSGID_LEN = 8;
+
 /** Max chunks per logical message (hard cap for the sender). */
 export const MAX_CHUNKS = 16;
 

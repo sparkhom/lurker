@@ -7,14 +7,18 @@
 // immediately, with no reassembly state. The nonce and ciphertext use STANDARD
 // base64 (with padding) — NOTE this differs from the handshake messages, which
 // use URL-safe-no-pad. `msgid` is 8 random bytes, lowercase-hex on the wire.
+//
+// Rust gets length/range invariants for free from its fixed-size array types
+// (`[u8;8]`, `[u8;24]`); this port re-establishes them with explicit guards so
+// malformed/oversize input is rejected as `E2eError` rather than producing a
+// silently-malformed line or escaping as a raw RangeError.
 
 import { randomBytes } from 'node:crypto';
 
-import { MAX_CHUNKS, WIRE_PREFIX } from './constants.js';
-import { wireError } from './errors.js';
-
-export const MSGID_LEN = 8;
-const NONCE_LEN = 24;
+import { NONCE_LEN } from './aead.js';
+import { MAX_CHUNKS, MSGID_LEN, WIRE_PREFIX } from './constants.js';
+import { parseUintStrict, tryDecodeStdBase64 } from './encoding.js';
+import { chunkLimitError, wireError } from './errors.js';
 
 export interface WireChunk {
   /** 8-byte message id, shared across all chunks of one logical message. */
@@ -34,12 +38,17 @@ export interface WireChunk {
 /** Serialize a chunk into a single IRC-safe line (no trailing newline). */
 export function encodeChunk(chunk: WireChunk): string {
   const { msgid, ts, part, total, nonce, ciphertext } = chunk;
-  if (total === 0 || total > MAX_CHUNKS) {
-    throw wireError(`invalid total: ${total}`);
+  if (msgid.length !== MSGID_LEN) {
+    throw wireError(`msgid must be ${MSGID_LEN} bytes, got ${msgid.length}`);
   }
-  if (part === 0 || part > total) {
-    throw wireError(`invalid part/total: ${part}/${total}`);
+  if (nonce.length !== NONCE_LEN) {
+    throw wireError(`nonce must be ${NONCE_LEN} bytes, got ${nonce.length}`);
   }
+  // total out of range is a chunk-limit condition (matches repartee's
+  // ChunkLimit), distinct from an invalid part/total relationship.
+  if (total === 0 || total > MAX_CHUNKS) throw chunkLimitError(total);
+  if (part === 0 || part > total) throw wireError(`invalid part/total: ${part}/${total}`);
+
   const msgidHex = Buffer.from(msgid).toString('hex');
   const nonceB64 = Buffer.from(nonce).toString('base64');
   const ctB64 = Buffer.from(ciphertext).toString('base64');
@@ -64,16 +73,19 @@ export function parseChunk(line: string): WireChunk | null {
   }
   const msgid = new Uint8Array(Buffer.from(msgidHex, 'hex'));
 
+  // i64 on the wire; reject anything we can't represent exactly (a >2^53 ts
+  // would silently lose precision and break the reconstructed AAD).
   if (!/^-?\d+$/.test(tsStr)) throw wireError(`bad ts: ${tsStr}`);
   const ts = Number(tsStr);
+  if (!Number.isSafeInteger(ts)) throw wireError(`ts out of range: ${tsStr}`);
 
   const slash = partTot.indexOf('/');
   if (slash < 0) throw wireError('part/total missing slash');
-  const part = Number(partTot.slice(0, slash));
-  const total = Number(partTot.slice(slash + 1));
+  const part = parseUintStrict(partTot.slice(0, slash));
+  const total = parseUintStrict(partTot.slice(slash + 1));
   if (
-    !Number.isInteger(part) ||
-    !Number.isInteger(total) ||
+    part === null ||
+    total === null ||
     total === 0 ||
     total > MAX_CHUNKS ||
     part === 0 ||
@@ -84,11 +96,12 @@ export function parseChunk(line: string): WireChunk | null {
 
   const colon = body.indexOf(':');
   if (colon < 0) throw wireError('missing nonce:ct separator');
-  const nonce = new Uint8Array(Buffer.from(body.slice(0, colon), 'base64'));
-  if (nonce.length !== NONCE_LEN) {
-    throw wireError(`nonce must be 24 bytes, got ${nonce.length}`);
+  const nonce = tryDecodeStdBase64(body.slice(0, colon));
+  if (!nonce || nonce.length !== NONCE_LEN) {
+    throw wireError(`nonce must be ${NONCE_LEN} bytes, got ${nonce?.length ?? 'invalid base64'}`);
   }
-  const ciphertext = new Uint8Array(Buffer.from(body.slice(colon + 1), 'base64'));
+  const ciphertext = tryDecodeStdBase64(body.slice(colon + 1));
+  if (!ciphertext) throw wireError('invalid ciphertext base64');
 
   return { msgid, ts, part, total, nonce, ciphertext };
 }

@@ -37,7 +37,14 @@ export function identityFromSeed(seed: Uint8Array): Identity {
 
 /** Sign `message` with an identity's secret key. Returns a 64-byte signature. */
 export function sign(secretKey: Uint8Array, message: Uint8Array): Uint8Array {
-  return ed25519.sign(message, secretKey);
+  if (secretKey.length !== SECRET_LEN) {
+    throw cryptoError(`secret key must be ${SECRET_LEN} bytes, got ${secretKey.length}`);
+  }
+  try {
+    return ed25519.sign(message, secretKey);
+  } catch (err) {
+    throw cryptoError(`sign: ${(err as Error).message}`);
+  }
 }
 
 /** Verify a 64-byte Ed25519 signature. Returns false on any failure. */

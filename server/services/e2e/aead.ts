@@ -25,9 +25,14 @@ export interface Sealed {
  * per call. Returns the nonce and the ciphertext (which includes the tag).
  */
 export function encrypt(key: Uint8Array, aad: Uint8Array, plaintext: Uint8Array): Sealed {
+  if (key.length !== KEY_LEN) throw cryptoError(`key must be ${KEY_LEN} bytes, got ${key.length}`);
   const nonce = new Uint8Array(randomBytes(NONCE_LEN));
-  const ciphertext = xchacha20poly1305(key, nonce, aad).encrypt(plaintext);
-  return { nonce, ciphertext };
+  try {
+    const ciphertext = xchacha20poly1305(key, nonce, aad).encrypt(plaintext);
+    return { nonce, ciphertext };
+  } catch (err) {
+    throw cryptoError(`aead encrypt: ${(err as Error).message}`);
+  }
 }
 
 /**
@@ -40,6 +45,10 @@ export function decrypt(
   aad: Uint8Array,
   ciphertext: Uint8Array,
 ): Uint8Array {
+  if (key.length !== KEY_LEN) throw cryptoError(`key must be ${KEY_LEN} bytes, got ${key.length}`);
+  if (nonce.length !== NONCE_LEN) {
+    throw cryptoError(`nonce must be ${NONCE_LEN} bytes, got ${nonce.length}`);
+  }
   try {
     return xchacha20poly1305(key, nonce, aad).decrypt(ciphertext);
   } catch (err) {

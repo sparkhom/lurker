@@ -4,6 +4,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { decrypt, encrypt, generateSessionKey, KEY_LEN, NONCE_LEN } from './aead.js';
+import { E2eError } from './errors.js';
 
 const enc = new TextEncoder();
 
@@ -44,5 +45,23 @@ describe('aead (XChaCha20-Poly1305)', () => {
     const { nonce, ciphertext } = encrypt(key, aad, enc.encode('secret message'));
     ciphertext[0] ^= 0x01;
     expect(() => decrypt(key, nonce, aad, ciphertext)).toThrow(/aead decrypt/);
+  });
+
+  it('surfaces a wrong-length key/nonce as a crypto E2eError, not a raw RangeError', () => {
+    const aad = enc.encode('ctx');
+    let caught: unknown;
+    try {
+      encrypt(new Uint8Array(16), aad, enc.encode('x'));
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(E2eError);
+    expect((caught as E2eError).kind).toBe('crypto');
+    expect(() =>
+      decrypt(new Uint8Array(16), new Uint8Array(NONCE_LEN), aad, new Uint8Array(20)),
+    ).toThrow(/key must be/);
+    expect(() =>
+      decrypt(new Uint8Array(KEY_LEN), new Uint8Array(10), aad, new Uint8Array(20)),
+    ).toThrow(/nonce must be/);
   });
 });

@@ -15,9 +15,16 @@
 // the sender's long-term Ed25519 identity; `e` is an ephemeral X25519 public.
 // The ephemeral is bound into the signature so a MitM cannot swap it without
 // breaking the Ed25519 signature.
+//
+// NOTE: repartee's handshake rate limiter (handshake.rs §5.4 — 3 incoming
+// KEYREQ/min then a 5-minute backoff, 30s outgoing gap) is intentionally NOT
+// here. It is stateful manager-layer policy; this module is the pure wire codec
+// per index.ts. It MUST be implemented in the manager layer before E2E goes
+// live, since it gates the expensive Ed25519 verify against KEYREQ floods.
 
 import { NONCE_LEN } from './aead.js';
 import { CTCP_TAG, PROTO_VERSION } from './constants.js';
+import { parseUintStrict, tryDecodeUrlBase64, utf8 } from './encoding.js';
 import { handshakeError, wireError } from './errors.js';
 
 export interface KeyReq {
@@ -55,11 +62,16 @@ export type HandshakeMsg =
 
 // ─── canonical signed payloads ───────────────────────────────────────────────
 
-const utf8 = new TextEncoder();
 const COLON = Uint8Array.of(0x3a);
 
-function joinBytes(parts: Uint8Array[]): Uint8Array {
-  return Uint8Array.from(Buffer.concat(parts));
+// `<LABEL>:` || channel || (':' || part) for each part. One builder for all
+// three message types — the KEYRSP and REKEY layouts are byte-identical but for
+// the label, so a single source keeps them from silently drifting apart from
+// the reference (and thus producing signatures that no longer verify).
+function buildSigPayload(label: string, channel: string, ...parts: Uint8Array[]): Uint8Array {
+  const chunks: Uint8Array[] = [utf8.encode(`${label}:`), utf8.encode(channel)];
+  for (const p of parts) chunks.push(COLON, p);
+  return Buffer.concat(chunks);
 }
 
 /** `"KEYREQ:" || channel || ':' || pubkey || ':' || eph_x25519 || ':' || nonce` */
@@ -69,16 +81,7 @@ export function sigPayloadKeyReq(
   ephX25519: Uint8Array,
   nonce: Uint8Array,
 ): Uint8Array {
-  return joinBytes([
-    utf8.encode('KEYREQ:'),
-    utf8.encode(channel),
-    COLON,
-    pubkey,
-    COLON,
-    ephX25519,
-    COLON,
-    nonce,
-  ]);
+  return buildSigPayload('KEYREQ', channel, pubkey, ephX25519, nonce);
 }
 
 /** `"KEYRSP:" || channel || ':' || pubkey || ':' || eph_pub || ':' || wrap_nonce || ':' || wrap_ct || ':' || nonce` */
@@ -90,20 +93,7 @@ export function sigPayloadKeyRsp(
   wrapCt: Uint8Array,
   nonce: Uint8Array,
 ): Uint8Array {
-  return joinBytes([
-    utf8.encode('KEYRSP:'),
-    utf8.encode(channel),
-    COLON,
-    pubkey,
-    COLON,
-    ephPub,
-    COLON,
-    wrapNonce,
-    COLON,
-    wrapCt,
-    COLON,
-    nonce,
-  ]);
+  return buildSigPayload('KEYRSP', channel, pubkey, ephPub, wrapNonce, wrapCt, nonce);
 }
 
 /** `"REKEY:" || channel || ':' || pubkey || ':' || eph_pub || ':' || wrap_nonce || ':' || wrap_ct || ':' || nonce` */
@@ -115,20 +105,7 @@ export function sigPayloadKeyRekey(
   wrapCt: Uint8Array,
   nonce: Uint8Array,
 ): Uint8Array {
-  return joinBytes([
-    utf8.encode('REKEY:'),
-    utf8.encode(channel),
-    COLON,
-    pubkey,
-    COLON,
-    ephPub,
-    COLON,
-    wrapNonce,
-    COLON,
-    wrapCt,
-    COLON,
-    nonce,
-  ]);
+  return buildSigPayload('REKEY', channel, pubkey, ephPub, wrapNonce, wrapCt, nonce);
 }
 
 // ─── base64url helpers ───────────────────────────────────────────────────────
@@ -137,12 +114,14 @@ function b64(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('base64url');
 }
 
-function b64Decode(s: string): Uint8Array {
-  return new Uint8Array(Buffer.from(s, 'base64url'));
+function b64Decode(s: string, field: string): Uint8Array {
+  const raw = tryDecodeUrlBase64(s);
+  if (!raw) throw handshakeError(`${field}: invalid base64`);
+  return raw;
 }
 
 function b64Fixed(s: string, n: number, field: string): Uint8Array {
-  const raw = b64Decode(s);
+  const raw = b64Decode(s, field);
   if (raw.length !== n) {
     throw handshakeError(`${field}: expected ${n} bytes, got ${raw.length}`);
   }
@@ -194,8 +173,8 @@ export function parseHandshake(body: string): HandshakeMsg | null {
 
   const vStr = kv.get('v');
   if (vStr === undefined) throw handshakeError('missing v');
-  const v = Number(vStr);
-  if (!Number.isInteger(v)) throw handshakeError(`bad v: ${vStr}`);
+  const v = parseUintStrict(vStr);
+  if (v === null) throw handshakeError(`bad v: ${vStr}`);
   if (v !== PROTO_VERSION) throw handshakeError(`unsupported version ${v}`);
 
   const get = (key: string): string => {
@@ -224,7 +203,7 @@ export function parseHandshake(body: string): HandshakeMsg | null {
           pubkey: b64Fixed(get('p'), 32, 'p'),
           ephemeralPub: b64Fixed(get('e'), 32, 'e'),
           wrapNonce: b64Fixed(get('wn'), NONCE_LEN, 'wn'),
-          wrapCt: b64Decode(get('w')),
+          wrapCt: b64Decode(get('w'), 'w'),
           nonce: b64Fixed(get('n'), 16, 'n'),
           sig: b64Fixed(get('s'), 64, 's'),
         },
@@ -237,7 +216,7 @@ export function parseHandshake(body: string): HandshakeMsg | null {
           pubkey: b64Fixed(get('p'), 32, 'p'),
           ephPub: b64Fixed(get('e'), 32, 'e'),
           wrapNonce: b64Fixed(get('wn'), NONCE_LEN, 'wn'),
-          wrapCt: b64Decode(get('w')),
+          wrapCt: b64Decode(get('w'), 'w'),
           nonce: b64Fixed(get('n'), 16, 'n'),
           sig: b64Fixed(get('s'), 64, 's'),
         },

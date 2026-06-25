@@ -23,14 +23,27 @@
 // own ident@host before encrypting. This mirrors repartee exactly; the golden
 // vector in aad.test.ts pins the byte sequence for interop.
 
-import { PROTO } from './constants.js';
+import { MSGID_LEN, PROTO } from './constants.js';
+import { utf8 } from './encoding.js';
+import { wireError } from './errors.js';
 
-const utf8 = new TextEncoder();
+const I64_MIN = -(2n ** 63n);
+const I64_MAX = 2n ** 63n - 1n;
 
 function be16(n: number): Buffer {
   const b = Buffer.alloc(2);
   b.writeUInt16BE(n);
   return b;
+}
+
+/** Validate `ts` is an exact integer within the i64 range and return it as a bigint. */
+function toI64(ts: number | bigint): bigint {
+  if (typeof ts === 'number') {
+    if (!Number.isSafeInteger(ts)) throw wireError(`ts must be an integer, got ${ts}`);
+    return BigInt(ts);
+  }
+  if (ts < I64_MIN || ts > I64_MAX) throw wireError(`ts out of i64 range: ${ts}`);
+  return ts;
 }
 
 /**
@@ -44,13 +57,18 @@ export function buildAad(
   part: number,
   total: number,
 ): Uint8Array {
-  const chan = utf8.encode(channel);
+  if (msgid.length !== MSGID_LEN) {
+    throw wireError(`msgid must be ${MSGID_LEN} bytes, got ${msgid.length}`);
+  }
   const tsBuf = Buffer.alloc(8);
-  tsBuf.writeBigInt64BE(BigInt(ts));
+  tsBuf.writeBigInt64BE(toI64(ts));
 
+  const chan = utf8.encode(channel);
   return Buffer.concat([
     utf8.encode(PROTO), // "RPE2E01" (7 bytes, not length-prefixed)
-    be16(chan.length),
+    // Clamp the length prefix to u16::MAX as repartee does; the full channel
+    // bytes still follow, so honest peers agree byte-for-byte even past 65535.
+    be16(Math.min(chan.length, 0xffff)),
     chan,
     be16(8),
     Buffer.from(msgid),

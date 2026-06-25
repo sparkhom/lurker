@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest';
 
 import { encodeChunk, freshMsgid, parseChunk, type WireChunk } from './wire.js';
 import { WIRE_PREFIX } from './constants.js';
+import { E2eError } from './errors.js';
 
 function sampleChunk(): WireChunk {
   return {
@@ -33,11 +34,31 @@ describe('wire format', () => {
     expect(parseChunk('')).toBeNull();
   });
 
-  it('rejects invalid part/total on encode', () => {
-    expect(() => encodeChunk({ ...sampleChunk(), total: 0 })).toThrow(/invalid total/);
-    expect(() => encodeChunk({ ...sampleChunk(), total: 17 })).toThrow(/invalid total/);
+  it('rejects an out-of-range total as a chunk-limit error (encode)', () => {
+    for (const total of [0, 17]) {
+      let caught: unknown;
+      try {
+        encodeChunk({ ...sampleChunk(), total });
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(E2eError);
+      expect((caught as E2eError).kind).toBe('chunk-limit');
+    }
+  });
+
+  it('rejects an invalid part/total relationship (encode)', () => {
     expect(() => encodeChunk({ ...sampleChunk(), total: 3, part: 4 })).toThrow(
       /invalid part\/total/,
+    );
+  });
+
+  it('rejects a wrong-length msgid or nonce (encode)', () => {
+    expect(() => encodeChunk({ ...sampleChunk(), msgid: new Uint8Array(5) })).toThrow(
+      /msgid must be/,
+    );
+    expect(() => encodeChunk({ ...sampleChunk(), nonce: new Uint8Array(20) })).toThrow(
+      /nonce must be/,
     );
   });
 
@@ -51,6 +72,25 @@ describe('wire format', () => {
   it('rejects extra fields', () => {
     const line = encodeChunk(sampleChunk()) + ' extra';
     expect(() => parseChunk(line)).toThrow(/extra fields/);
+  });
+
+  it('rejects a ts that cannot be represented exactly (>2^53)', () => {
+    // Number('9007199254740993') silently rounds to ...992 — reject instead of
+    // round-tripping a ts that would break the reconstructed AAD.
+    const line = encodeChunk(sampleChunk()).replace(' 1712000000 ', ' 9007199254740993 ');
+    expect(() => parseChunk(line)).toThrow(/ts out of range/);
+  });
+
+  it('rejects non-canonical part/total that Number() would accept', () => {
+    const line = encodeChunk(sampleChunk()).replace(' 1/1 ', ' 0x1/0x1 ');
+    expect(() => parseChunk(line)).toThrow(/bad part\/total/);
+  });
+
+  it('rejects invalid base64 in the ciphertext field', () => {
+    const line = encodeChunk(sampleChunk());
+    expect(() => parseChunk(line.replace(/:[^:]*$/, ':not*valid*b64'))).toThrow(
+      /invalid ciphertext base64/,
+    );
   });
 
   it('uses standard base64 (padded) on the wire', () => {

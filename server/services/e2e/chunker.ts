@@ -7,9 +7,8 @@
 // reassembles (architecture spec section 6).
 
 import { MAX_CHUNKS, MAX_PLAINTEXT_PER_CHUNK } from './constants.js';
+import { utf8 } from './encoding.js';
 import { chunkLimitError, wireError } from './errors.js';
-
-const utf8 = new TextEncoder();
 
 /** True if `byte` is a UTF-8 continuation byte (0b10xxxxxx). */
 function isContinuation(byte: number): boolean {

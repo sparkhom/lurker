@@ -93,6 +93,20 @@ describe('handshake codec', () => {
     expect(() => parseHandshake(line)).toThrow(/unsupported version/);
   });
 
+  it('rejects a non-canonical version that Number() would accept (1.0)', () => {
+    const line =
+      `RPEE2E KEYREQ v=1.0 c=#x p=${b64(fill(32, 0))} e=${b64(fill(32, 0))} ` +
+      `n=${b64(fill(16, 0))} s=${b64(fill(64, 0))}`;
+    expect(() => parseHandshake(line)).toThrow(/bad v/);
+  });
+
+  it('rejects invalid base64 in a field', () => {
+    const line =
+      `RPEE2E KEYREQ v=1 c=#x p=not*valid*b64 e=${b64(fill(32, 0))} ` +
+      `n=${b64(fill(16, 0))} s=${b64(fill(64, 0))}`;
+    expect(() => parseHandshake(line)).toThrow(/invalid base64/);
+  });
+
   it('binds the ephemeral X25519 into the KEYREQ signed payload', () => {
     const p1 = sigPayloadKeyReq('#x', fill(32, 1), fill(32, 9), fill(16, 2));
     const p2 = sigPayloadKeyReq('#x', fill(32, 1), fill(32, 8), fill(16, 2));

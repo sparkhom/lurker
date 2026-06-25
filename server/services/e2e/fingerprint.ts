@@ -15,10 +15,9 @@ import { entropyToMnemonic } from '@scure/bip39';
 import { wordlist as englishWordlist } from '@scure/bip39/wordlists/english.js';
 
 import { FP_PREFIX } from './constants.js';
+import { utf8 } from './encoding.js';
 
 export const FP_LEN = 16;
-
-const utf8 = new TextEncoder();
 
 /** 16-byte truncated, domain-separated SHA-256 of an Ed25519 public key. */
 export function fingerprint(pubkey: Uint8Array): Uint8Array {

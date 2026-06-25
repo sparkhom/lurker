@@ -17,10 +17,11 @@ import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 
 import { HKDF_WRAP_SALT } from './constants.js';
+import { utf8 } from './encoding.js';
+import { cryptoError } from './errors.js';
 
 export const WRAP_KEY_LEN = 32;
 
-const utf8 = new TextEncoder();
 const WRAP_SALT = utf8.encode(HKDF_WRAP_SALT);
 
 export interface EphemeralKeypair {
@@ -46,16 +47,31 @@ export function deriveWrapKey(
   peerPublic: Uint8Array,
   info: Uint8Array,
 ): Uint8Array {
-  const shared = x25519.getSharedSecret(mySecret, peerPublic);
-  return hkdf(sha256, shared, WRAP_SALT, info, WRAP_KEY_LEN);
+  try {
+    // noble rejects an all-zero / small-order peer public (x25519-dalek would
+    // instead return a degenerate shared secret). Keeping the reject is safer;
+    // we just surface it as E2eError so callers can branch on `kind`.
+    const shared = x25519.getSharedSecret(mySecret, peerPublic);
+    return hkdf(sha256, shared, WRAP_SALT, info, WRAP_KEY_LEN);
+  } catch (err) {
+    throw cryptoError(`derive wrap key: ${(err as Error).message}`);
+  }
 }
 
 /** Convert an Ed25519 public key to its X25519 (Montgomery) counterpart. */
 export function ed25519PubToX25519(edPub: Uint8Array): Uint8Array {
-  return ed25519.utils.toMontgomery(edPub);
+  try {
+    return ed25519.utils.toMontgomery(edPub);
+  } catch (err) {
+    throw cryptoError(`invalid ed25519 pub: ${(err as Error).message}`);
+  }
 }
 
 /** Convert an Ed25519 secret seed to its X25519 scalar. */
 export function ed25519SeedToX25519(edSeed: Uint8Array): Uint8Array {
-  return ed25519.utils.toMontgomerySecret(edSeed);
+  try {
+    return ed25519.utils.toMontgomerySecret(edSeed);
+  } catch (err) {
+    throw cryptoError(`invalid ed25519 seed: ${(err as Error).message}`);
+  }
 }

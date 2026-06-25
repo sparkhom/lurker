@@ -34,6 +34,17 @@ describe('ecdh wrap-key derivation', () => {
     const k2 = deriveWrapKey(alice.secretKey, bob.publicKey, enc.encode('ctx-2'));
     expect(k1).not.toEqual(k2);
   });
+
+  it('surfaces an invalid (all-zero / small-order) peer public as an E2eError', () => {
+    const me = generateEphemeral();
+    expect(() => deriveWrapKey(me.secretKey, new Uint8Array(32), enc.encode('ctx'))).toThrow(
+      /derive wrap key/,
+    );
+  });
+
+  it('surfaces an invalid Ed25519 point as an E2eError', () => {
+    expect(() => ed25519PubToX25519(new Uint8Array(32).fill(0xff))).toThrow(/invalid ed25519 pub/);
+  });
 });
 
 // RFC 8032 section 7.1 seeds, also used by ed25519-dalek's tests and by

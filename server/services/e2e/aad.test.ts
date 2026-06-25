@@ -25,18 +25,21 @@ describe('buildAad', () => {
   // wire.rs::build_aad_golden_vector. The weechat/Perl scripts produce the
   // same 40 bytes for these inputs — if this changes, interop breaks.
   it('matches the cross-client golden byte sequence', () => {
+    const expected =
+      '52504532453031' + // "RPE2E01"
+      '0005' +
+      '236368616e' + // be16(5) || "#chan"
+      '0008' +
+      '0101010101010101' + // be16(8) || msgid (8x 0x01)
+      '0008' +
+      '0000000000000064' + // be16(8) || ts=100 (i64 be)
+      '0001' +
+      '01' + // be16(1) || part=1
+      '0001' +
+      '03'; // be16(1) || total=3
     const got = buildAad('#chan', msgid(1), 100, 1, 3);
-    // prettier-ignore
-    const expected = [
-      0x52, 0x50, 0x45, 0x32, 0x45, 0x30, 0x31, // "RPE2E01"
-      0x00, 0x05, 0x23, 0x63, 0x68, 0x61, 0x6e, // be16(5) || "#chan"
-      0x00, 0x08, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, // be16(8) || msgid
-      0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x64, // be16(8) || ts=100 be64
-      0x00, 0x01, 0x01, // be16(1) || part=1
-      0x00, 0x01, 0x03, // be16(1) || total=3
-    ];
     expect(got.length).toBe(40);
-    expect(Array.from(got)).toEqual(expected);
+    expect(Buffer.from(got).toString('hex')).toBe(expected);
   });
 
   // The length-prefixed layout keeps a channel containing ':' distinct from
@@ -46,5 +49,19 @@ describe('buildAad', () => {
     const b = buildAad('#a', msgid(1), 100, 1, 3);
     expect(a).not.toEqual(b);
     expect(a.length).not.toBe(b.length);
+  });
+
+  it('rejects a fractional ts instead of throwing a raw BigInt error', () => {
+    expect(() => buildAad('#chan', msgid(1), 100.5, 1, 3)).toThrow(/ts must be an integer/);
+  });
+
+  it('rejects a wrong-length msgid', () => {
+    expect(() => buildAad('#chan', new Uint8Array(5), 100, 1, 3)).toThrow(/msgid must be/);
+  });
+
+  // Rust clamps the u16 length prefix to 0xFFFF and appends the full channel;
+  // a >65535-byte channel must not throw a RangeError from writeUInt16BE.
+  it('clamps an over-long channel length prefix instead of throwing', () => {
+    expect(() => buildAad('#' + 'a'.repeat(70000), msgid(1), 100, 1, 3)).not.toThrow();
   });
 });
