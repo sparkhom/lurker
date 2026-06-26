@@ -106,13 +106,6 @@
             /></span>
           </div>
           <span class="body" :class="bodyClass(row.m)">
-            <i
-              v-if="isE2e(row.m)"
-              class="fa-solid fa-lock e2e-lock"
-              role="img"
-              aria-label="End-to-end encrypted"
-              title="End-to-end encrypted"
-            />
             <RenderSegments
               :segments="textSegments(row.m)"
               :self-color="selfColor"
@@ -140,13 +133,6 @@
             ><template v-else>{{ row.continuationAuthor ? '' : prefixText(row.m) }}</template></span
           >
           <span class="body" :class="bodyClass(row.m)">
-            <i
-              v-if="isE2e(row.m)"
-              class="fa-solid fa-lock e2e-lock"
-              role="img"
-              aria-label="End-to-end encrypted"
-              title="End-to-end encrypted"
-            />
             <RenderSegments
               v-if="hasInlineText(row.m)"
               :segments="textSegments(row.m)"
@@ -342,7 +328,8 @@ interface ChatMessage {
   // System-buffer lines (#355): the network this line is about, when any. The
   // prefix column resolves the network's current name from it.
   originNetworkId?: number | null;
-  // RPE2E (#382): this line was end-to-end encrypted on the wire — render a 🔒.
+  // RPE2E (#382): this line rode the wire encrypted. Carried through from the
+  // server (extra JSON) for a future indicator — not rendered right now.
   e2e?: boolean;
   // Severity for `type: 'e2e'` status lines — drives the tag color.
   level?: 'info' | 'warn';
@@ -1131,11 +1118,6 @@ function hasInlineText(m: ChatMessage | undefined): boolean {
   return m?.type === 'message' || m?.type === 'notice' || m?.type === 'action';
 }
 
-// RPE2E (#382): show the 🔒 lock on a line that rode the wire encrypted.
-function isE2e(m: ChatMessage | undefined): boolean {
-  return !!m?.e2e;
-}
-
 function textSegments(m: ChatMessage | undefined): RenderSegment[] {
   if (!m) return [];
   if (m.type === 'action') {
@@ -1851,22 +1833,6 @@ watch(
 }
 .body.italic {
   font-style: italic;
-}
-/* RPE2E lock (#382): a subtle marker that a line rode the wire encrypted. Floated
-   to the far-right gutter of the row (the .body cell is position:relative and
-   fills the last grid column, so right:0 there is the right edge of the list)
-   and kept faint so it reads as a quiet status dot, not a glyph competing with
-   the text. Yields to the hover action bar, which shares that corner. */
-.e2e-lock {
-  position: absolute;
-  right: var(--space-2);
-  top: 0;
-  color: var(--fg-muted);
-  opacity: 0.4;
-  pointer-events: none;
-}
-.line:hover .e2e-lock {
-  opacity: 0;
 }
 /* .msg-link styling lives in src/assets/main.css (shared with the topic bar). */
 

@@ -53,6 +53,8 @@ const PENDING_TTL_MS = 10 * 60_000; // outbound handshakes expire if unanswered
 const PENDING_MAX = 4096;
 const PENDING_INBOUND_TTL_MS = 30 * 60_000; // normal-mode prompts await /e2e accept
 const PENDING_INBOUND_MAX = 4096;
+const KEYCHANGE_TTL_MS = 30 * 60_000; // a remembered key/handle change awaits /e2e reverify
+const KEYCHANGE_MAX = 4096;
 
 const eqLower = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
@@ -80,6 +82,19 @@ export interface PeerListEntry {
 export interface SessionListEntry extends PeerListEntry {
   channel: string;
 }
+
+/** The result of `/e2e reverify`. `applied` = a remembered key/handle change was
+ *  accepted in place (re-pinned trusted, no re-handshake); `cleared` = no change
+ *  was pending so we did a clean forget instead. */
+export type ReverifyOutcome =
+  | {
+      kind: 'applied';
+      change: 'fingerprint-changed' | 'handle-changed';
+      oldFpHex: string;
+      newFpHex: string;
+    }
+  | { kind: 'cleared'; cleared: number }
+  | { kind: 'not-found' };
 
 /** The result of handling an inbound handshake body: bodies to NOTICE back to
  *  the sender, and an optional user-facing notice for the buffer. */
@@ -124,6 +139,17 @@ interface PendingInbound {
   createdAt: number;
 }
 
+/** A TOFU-blocked key/handle change we remember so `/e2e reverify <handle>` can
+ *  accept it in place. `newPubkey` is signature-verified (the block happens after
+ *  verify), so re-pinning it on the user's explicit out-of-band confirmation is
+ *  safe. Keyed by the NEW handle the change appeared under. */
+interface PendingKeyChange {
+  kind: 'fingerprint-changed' | 'handle-changed';
+  newPubkey: Uint8Array;
+  channel: string;
+  createdAt: number;
+}
+
 type ClassifyResult = 'new' | 'known' | 'handle-changed' | 'fingerprint-changed' | 'revoked';
 
 function isTofuBlock(c: ClassifyResult): boolean {
@@ -142,6 +168,7 @@ export class E2eManager {
   private readonly identities = new Map<number, Identity>();
   private readonly pending = new Map<string, PendingHandshake>();
   private readonly pendingInbound = new Map<string, PendingInbound>();
+  private readonly pendingKeyChange = new Map<string, PendingKeyChange>();
   private readonly rateLimiter: RateLimiter;
   private readonly replay: ReplayCache;
 
@@ -394,8 +421,10 @@ export class E2eManager {
 
     const fp = fingerprint(req.pubkey);
     const change = this.classifyPeerChange(userId, networkId, fp, senderHandle);
-    if (isTofuBlock(change))
+    if (isTofuBlock(change)) {
+      this.stashKeyChange(userId, networkId, senderHandle, change, req.pubkey, req.channel);
       return { replies: [], notice: this.tofuWarning(senderHandle, change), channel: req.channel };
+    }
     this.upsertSeenPeer(userId, networkId, fp, req.pubkey, senderHandle, senderNick);
 
     const alreadyTrusted = this.hasTrustedIncoming(userId, networkId, senderHandle, req.channel);
@@ -443,8 +472,10 @@ export class E2eManager {
 
     const fp = fingerprint(rsp.pubkey);
     const change = this.classifyPeerChange(userId, networkId, fp, senderHandle);
-    if (isTofuBlock(change))
+    if (isTofuBlock(change)) {
+      this.stashKeyChange(userId, networkId, senderHandle, change, rsp.pubkey, rsp.channel);
       return { replies: [], notice: this.tofuWarning(senderHandle, change), channel: rsp.channel };
+    }
 
     // We initiated, so receiving the response is our consent → trust the peer.
     const now = this.nowUnix();
@@ -839,6 +870,7 @@ export class E2eManager {
       cleared += keyring.deleteIncomingSessionsForHandle(userId, networkId, handle);
       cleared += keyring.deleteOutgoingRecipientsForHandle(userId, networkId, handle);
       cleared += this.clearPendingForHandle(userId, networkId, handle);
+      this.clearKeyChange(userId, networkId, handle);
       return cleared;
     } catch (err) {
       console.warn(`e2e forget ${handle}: ${(err as Error).message}`);
@@ -862,10 +894,111 @@ export class E2eManager {
     }
   }
 
-  /** TOFU reset — currently the same full delete as forget (a smarter
-   *  accept-the-changed-key-in-place reverify is a follow-up). */
-  reverifyPeer(userId: number, networkId: number, handle: string): number {
-    return this.forgetPeer(userId, networkId, handle);
+  /** Accept a TOFU-blocked key/handle change for `handle` after the user verified
+   *  it out-of-band. If we remembered the change (it appeared since the last
+   *  handshake), re-pin the new key/handle as trusted IN PLACE — no re-handshake,
+   *  no re-prompt — matching repartee. If there's nothing remembered, fall back to
+   *  a clean forget so the next handshake re-pins from scratch. Never throws. */
+  reverifyPeer(userId: number, networkId: number, handle: string): ReverifyOutcome {
+    try {
+      const stash = this.pendingKeyChange.get(this.keyChangeKey(userId, networkId, handle));
+      if (stash && this.now() - stash.createdAt <= KEYCHANGE_TTL_MS) {
+        return this.applyStashedKeyChange(userId, networkId, handle, stash);
+      }
+      const cleared = this.forgetPeer(userId, networkId, handle);
+      return cleared > 0 ? { kind: 'cleared', cleared } : { kind: 'not-found' };
+    } catch (err) {
+      console.warn(`e2e reverify ${handle}: ${(err as Error).message}`);
+      return { kind: 'not-found' };
+    }
+  }
+
+  // Re-pin a remembered key/handle change as trusted. `newPubkey` was already
+  // signature-verified when the block was recorded.
+  private applyStashedKeyChange(
+    userId: number,
+    networkId: number,
+    handle: string,
+    stash: PendingKeyChange,
+  ): ReverifyOutcome {
+    const newFp = fingerprint(stash.newPubkey);
+    const now = this.nowUnix();
+    const pinNew = () => {
+      keyring.upsertPeer(userId, networkId, {
+        fingerprint: newFp,
+        pubkey: stash.newPubkey,
+        lastHandle: handle,
+        lastNick: null,
+        firstSeen: now,
+        lastSeen: now,
+        globalStatus: 'pending', // setPeerStatus is the authority
+      });
+      keyring.setPeerStatus(userId, networkId, newFp, 'trusted');
+      this.clearKeyChange(userId, networkId, handle);
+    };
+
+    if (stash.kind === 'fingerprint-changed') {
+      // Same handle, NEW key. Drop the old identity + its now-undecryptable
+      // sessions, then pin the new key. A re-handshake re-establishes sessions.
+      const old = keyring.getPeerByHandle(userId, networkId, handle);
+      const oldFpHex = old ? fingerprintHex(old.fingerprint) : '(unknown)';
+      if (old && !equalBytes(old.fingerprint, newFp)) {
+        keyring.deletePeerByFingerprint(userId, networkId, old.fingerprint);
+      }
+      keyring.deleteIncomingSessionsForHandle(userId, networkId, handle);
+      pinNew();
+      return {
+        kind: 'applied',
+        change: 'fingerprint-changed',
+        oldFpHex,
+        newFpHex: fingerprintHex(newFp),
+      };
+    }
+
+    // handle-changed: SAME key (newFp), new ident@host. Re-pin the handle and drop
+    // the stale sessions under the prior handle; the next handshake re-establishes.
+    const peer = keyring.getPeerByFingerprint(userId, networkId, newFp);
+    const oldHandle = peer?.lastHandle ?? null;
+    if (oldHandle && !eqLower(oldHandle, handle)) {
+      keyring.deleteIncomingSessionsForHandle(userId, networkId, oldHandle);
+    }
+    pinNew();
+    const fpHex = fingerprintHex(newFp);
+    return { kind: 'applied', change: 'handle-changed', oldFpHex: fpHex, newFpHex: fpHex };
+  }
+
+  private keyChangeKey(userId: number, networkId: number, handle: string): string {
+    return `${userId}:${networkId}:${handle.toLowerCase()}`;
+  }
+
+  private stashKeyChange(
+    userId: number,
+    networkId: number,
+    handle: string,
+    change: ClassifyResult,
+    pubkey: Uint8Array,
+    channel: string,
+  ): void {
+    if (change !== 'fingerprint-changed' && change !== 'handle-changed') return;
+    this.sweepKeyChanges();
+    this.pendingKeyChange.set(this.keyChangeKey(userId, networkId, handle), {
+      kind: change,
+      newPubkey: pubkey,
+      channel,
+      createdAt: this.now(),
+    });
+  }
+
+  private clearKeyChange(userId: number, networkId: number, handle: string): void {
+    this.pendingKeyChange.delete(this.keyChangeKey(userId, networkId, handle));
+  }
+
+  private sweepKeyChanges(): void {
+    const now = this.now();
+    for (const [k, c] of this.pendingKeyChange) {
+      if (now - c.createdAt > KEYCHANGE_TTL_MS) this.pendingKeyChange.delete(k);
+    }
+    this.cap(this.pendingKeyChange, KEYCHANGE_MAX);
   }
 
   // ─── listing + management (the /e2e list/mode/decline/unrevoke surface) ──────
@@ -1168,16 +1301,14 @@ export class E2eManager {
       return { level: 'warn', text: `Ignoring encrypted handshake from revoked peer ${handle}` };
     }
     if (change === 'handle-changed') {
-      // The key is pinned under a DIFFERENT (prior) handle, so forgetting by
-      // `${handle}` won't find it — point at /e2e list to locate the pinned one.
       return {
         level: 'warn',
-        text: `⚠ a known encryption key appeared under a new handle (${handle}) — verify out-of-band, then reset: /e2e list -all, /e2e forget -all <the pinned handle>, and re-handshake`,
+        text: `⚠ a known encryption key appeared under a new handle (${handle}) — verify out-of-band, then /e2e reverify ${handle} to accept it`,
       };
     }
     return {
       level: 'warn',
-      text: `⚠ encryption key changed for ${handle} — verify out-of-band, then /e2e forget -all ${handle} and re-handshake`,
+      text: `⚠ encryption key changed for ${handle} — verify out-of-band, then /e2e reverify ${handle} to accept it`,
     };
   }
 }

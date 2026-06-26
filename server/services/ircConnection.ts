@@ -2539,8 +2539,18 @@ export class IrcConnection {
       case 'reverify': {
         const r = chanNickHandle();
         if (!r) return;
-        const cleared = e2eManager.reverifyPeer(uid, nid, r.handle);
-        info(`forgot ${cleared} record(s) for ${r.nick} — the next handshake re-pins their key`);
+        const outcome = e2eManager.reverifyPeer(uid, nid, r.handle);
+        if (outcome.kind === 'applied') {
+          info(
+            outcome.change === 'fingerprint-changed'
+              ? `reverified ${r.nick}: key changed ${outcome.oldFpHex.slice(0, 16)}… → ${outcome.newFpHex.slice(0, 16)}…, now trusted`
+              : `reverified ${r.nick}: re-pinned their key under the new handle, now trusted`,
+          );
+        } else if (outcome.kind === 'cleared') {
+          info(`forgot ${outcome.cleared} record(s) for ${r.nick} — re-handshake to re-pin`);
+        } else {
+          info(`nothing to reverify for ${r.nick}`);
+        }
         return;
       }
       case 'forget': {

@@ -198,6 +198,16 @@ describe('E2eManager TOFU + replay + window', () => {
     expect(out.replies).toHaveLength(0); // refused
     expect(out.notice?.level).toBe('warn');
     expect(out.notice?.text).toMatch(/key changed/);
+
+    // The new (signature-verified) key was remembered — after out-of-band
+    // verification, /e2e reverify installs it in place, replacing the old one.
+    const before = mgr.verifyInfo(alice, aliceNet, BOB_H)!.fingerprintHex;
+    const outcome = mgr.reverifyPeer(alice, aliceNet, BOB_H);
+    expect(outcome).toMatchObject({ kind: 'applied', change: 'fingerprint-changed' });
+    const after = mgr.verifyInfo(alice, aliceNet, BOB_H)!;
+    expect(after.status).toBe('trusted');
+    expect(after.fingerprintHex).not.toBe(before); // the pinned key actually changed
+    mgr.forgetPeer(alice, aliceNet, BOB_H); // restore the shared keyring for later tests
   });
 
   it('flags a replayed chunk', () => {
@@ -245,7 +255,7 @@ describe('E2eManager identity + verify', () => {
     const line2 = encLines(alice, aliceNet, '#rv', 'post-revoke')[0];
     expect(mgr.decryptIncoming(bob, bobNet, ALICE_H, '#rv', line2).kind).toBe('rejected');
 
-    expect(mgr.reverifyPeer(bob, bobNet, ALICE_H)).toBeGreaterThan(0);
+    expect(mgr.reverifyPeer(bob, bobNet, ALICE_H)).toMatchObject({ kind: 'cleared' });
     // After reverify the session is gone entirely.
     const line3 = encLines(alice, aliceNet, '#rv', 'after-reverify')[0];
     expect(mgr.decryptIncoming(bob, bobNet, ALICE_H, '#rv', line3)).toEqual({
@@ -288,6 +298,31 @@ describe('E2eManager review hardening', () => {
     const out = mgr.handleHandshakeBody(alice, aliceNet, NEW_BOB, 'bob', req)!;
     expect(out.replies).toHaveLength(0);
     expect(out.notice?.text).toMatch(/new handle/);
+  });
+
+  it('reverify accepts a handle change IN PLACE — re-pins the key under the new handle (1d-2)', () => {
+    fullHandshake('#hc2'); // pins Bob's fp under BOB_H, trusted
+    const NEW_BOB = '~bob@newhost2';
+    // Bob re-handshakes under a new ident@host (same identity) → handle-changed
+    // block, which now also remembers the change.
+    const req = mgr.buildKeyReq(bob, bobNet, '#hc2')!;
+    const out = mgr.handleHandshakeBody(alice, aliceNet, NEW_BOB, 'bob', req)!;
+    expect(out.notice?.text).toMatch(/new handle/);
+    expect(mgr.verifyInfo(alice, aliceNet, NEW_BOB)).toBeNull(); // not pinned under the new handle yet
+
+    // User verified out-of-band → accept in place. No re-handshake, no delete.
+    expect(mgr.reverifyPeer(alice, aliceNet, NEW_BOB)).toMatchObject({
+      kind: 'applied',
+      change: 'handle-changed',
+    });
+    expect(mgr.verifyInfo(alice, aliceNet, NEW_BOB)?.status).toBe('trusted');
+    mgr.forgetPeer(alice, aliceNet, NEW_BOB); // restore the shared keyring for later tests
+  });
+
+  it('reverify with no remembered change falls back to a clean forget', () => {
+    fullHandshake('#nochange');
+    expect(mgr.reverifyPeer(alice, aliceNet, BOB_H)).toMatchObject({ kind: 'cleared' });
+    expect(mgr.verifyInfo(alice, aliceNet, BOB_H)).toBeNull();
   });
 
   it('reverify drops the outbound pending so a stale KEYRSP cannot re-trust (#8)', () => {
