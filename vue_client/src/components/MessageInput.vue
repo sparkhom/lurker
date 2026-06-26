@@ -1189,9 +1189,7 @@ function onEmojiSelect(item: EmojiMatch): void {
   // re-sync the span via refreshPicker, but the async strip refresh leaves a
   // brief window). Mirrors the re-check maybeConvertShortcode already does;
   // on a mismatch, no-op rather than splice blind into the wrong span.
-  // allowEmpty: a desktop pick from the bare-`:` frequently-used set has an
-  // empty query, so the captured span is just the `:` — still valid.
-  const sc = emojiTokenStart >= 0 ? findActiveShortcode(value, emojiTokenEnd, true) : null;
+  const sc = emojiTokenStart >= 0 ? findActiveShortcode(value, emojiTokenEnd) : null;
   if (!sc || sc.start !== emojiTokenStart) {
     closeEmojiStrip();
     closeEmojiPicker();
@@ -1260,13 +1258,13 @@ function refreshPicker() {
 
   // An in-progress `:shortcode:` owns the suggester slot — it isn't a nick
   // token, and both emoji UIs and the nick picker/strip share one slot over the
-  // StatusBar. Desktop opens the vertical EmojiPicker (issue #348) the moment
-  // `:` is typed (empty query → a frequently-used set); mobile keeps the
-  // horizontal strip, gated at 2+ chars so a lone `:` — or an emoticon like
-  // `:)` — doesn't flash it.
+  // StatusBar. Both the desktop EmojiPicker (issue #348) and the mobile strip
+  // wait for a 2+ character query before opening, so a lone `:` or a one-char
+  // emoticon like `:D` / `:P` never pops the suggester — and Enter never
+  // silently swaps it for an emoji (issue #402).
   const emojiOnStrip = isMobile.value;
-  const shortcode = findActiveShortcode(value, cursor, !emojiOnStrip);
-  if (shortcode && (!emojiOnStrip || shortcode.name.length >= 2)) {
+  const shortcode = findActiveShortcode(value, cursor);
+  if (shortcode && shortcode.name.length >= 2) {
     closePicker();
     closeStrip();
     closeChannelPicker();
