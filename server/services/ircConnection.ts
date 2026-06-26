@@ -30,8 +30,9 @@ import { MESSAGE_MAX_BYTES, partitionMultiline, reassembleMultiline } from './me
 import type { MultilineLimits } from './messageSplit.js';
 import { e2eManager } from './e2e/manager.js';
 import type { UserNotice } from './e2e/manager.js';
-import { contextKey } from './e2e/context.js';
+import { contextKey, isChannelContext } from './e2e/context.js';
 import { CTCP_TAG, WIRE_PREFIX } from './e2e/constants.js';
+import { e2eDbg } from './e2e/debug.js';
 import { getChannelConfig as getE2eChannelConfig } from '../db/e2e.js';
 import type { ChannelMode } from '../db/e2e.js';
 import { randomBytes } from 'node:crypto';
@@ -178,13 +179,6 @@ function parseE2eMode(token: string | undefined): ChannelMode {
   }
 }
 
-// Wire-level RPE2E tracing for interop QA — set LURKER_E2E_DEBUG=1 to log every
-// inbound CTCP, decrypt outcome, and outbound handshake reply to the console.
-// Read per-call so it can be toggled without a restart. No-op otherwise.
-function e2eDbg(msg: string): void {
-  if (process.env.LURKER_E2E_DEBUG === '1') console.log(`[e2e] ${msg}`);
-}
-
 // Canonical nick!ident@hostname string used for client-side hostmask ignore
 // matching. Missing parts are left empty rather than starred — the client's
 // glob matcher handles either form, and storing the literal observed value
@@ -235,6 +229,9 @@ export class IrcConnection {
   // survives losing either role. Hydrated on 'registered' and kept live via
   // trackDmPeer/trackFriend + untrackDmPeer/untrackFriend.
   trackedPeers: Map<string, PeerWatch>;
+  // Last time we surfaced an undecryptable-E2E hint per (channel,peer,kind), to
+  // collapse a multi-chunk message's per-chunk hints into one (#382). epoch ms.
+  private readonly e2eHintAt = new Map<string, number>();
   useMonitor: boolean;
   monitorLimit: number;
   pendingMonitorSeed: boolean;
@@ -1088,10 +1085,21 @@ export class IrcConnection {
       // instead, then fall through to presence tracking only.
       let bodyText = eventMessage;
       let e2eFlag = false;
+      // Only attempt decryption on a `+RPE2E01` line for a channel we've actually
+      // enabled E2E on. Without the `isChannelEnabled` gate, ANY peer (or griefer)
+      // sending `+RPE2E01 …` on any channel would make us drop the message and
+      // render a "could not decrypt" hint — and legit cleartext that happens to
+      // start with the magic prefix would be lost (#1). Off-channel + non-enabled
+      // lines fall through and publish as ordinary cleartext.
       if (
-        targetIsChannel &&
         typeof eventMessage === 'string' &&
-        eventMessage.startsWith(WIRE_PREFIX)
+        eventMessage.startsWith(WIRE_PREFIX) &&
+        isChannelContext(eventTarget ?? '') &&
+        e2eManager.isChannelEnabled(
+          this.network.user_id,
+          this.network.id,
+          contextKey(eventTarget as string, ''),
+        )
       ) {
         const handle = buildE2eHandle(event);
         const outcome = handle
@@ -1103,7 +1111,9 @@ export class IrcConnection {
               eventMessage,
             )
           : ({ kind: 'missing-key' } as const);
-        e2eDbg(`inbound +RPE2E01 on ${eventTarget} from ${eventNick} (${handle}): ${outcome.kind}`);
+        e2eDbg(
+          () => `inbound +RPE2E01 on ${eventTarget} from ${eventNick} (${handle}): ${outcome.kind}`,
+        );
         if (outcome.kind === 'plaintext') {
           bodyText = outcome.text;
           e2eFlag = true;
@@ -1150,7 +1160,8 @@ export class IrcConnection {
     // straight back to the sender's nick (re-framed) plus an optional user notice.
     c.on('ctcp response', (event: Record<string, unknown>) => {
       e2eDbg(
-        `ctcp-response from ${event.nick}!${event.ident}@${event.hostname} type=${event.type} body=${String(event.message).slice(0, 140)}`,
+        () =>
+          `ctcp-response from ${event.nick}!${event.ident}@${event.hostname} type=${event.type} body=${String(event.message).slice(0, 140)}`,
       );
       if (event.type !== CTCP_TAG) return;
       const senderNick = (event.nick as string) || null;
@@ -1159,7 +1170,7 @@ export class IrcConnection {
       // A stable ident@host is the keyring identity, and we reply to the nick;
       // without either we can't complete a handshake, so drop quietly.
       if (!senderHandle || !senderNick || typeof body !== 'string') {
-        e2eDbg(`  dropped pre-dispatch: handle=${senderHandle} nick=${senderNick}`);
+        e2eDbg(() => `  dropped pre-dispatch: handle=${senderHandle} nick=${senderNick}`);
         return;
       }
       const outcome = e2eManager.handleHandshakeBody(
@@ -1169,7 +1180,7 @@ export class IrcConnection {
         senderNick,
         body,
       );
-      e2eDbg(
+      e2eDbg(() =>
         outcome
           ? `  outcome: replies=${outcome.replies.length} notice=${outcome.notice?.text ?? '-'} channel=${outcome.channel ?? '-'}`
           : `  outcome: null (parseHandshake returned not-RPEE2E)`,
@@ -1186,7 +1197,8 @@ export class IrcConnection {
     c.on('ctcp request', (event: Record<string, unknown>) => {
       if (event.type === CTCP_TAG) {
         e2eDbg(
-          `ctcp-REQUEST (PRIVMSG, not NOTICE!) from ${event.nick}!${event.ident}@${event.hostname} body=${String(event.message).slice(0, 140)}`,
+          () =>
+            `ctcp-REQUEST (PRIVMSG, not NOTICE!) from ${event.nick}!${event.ident}@${event.hostname} body=${String(event.message).slice(0, 140)}`,
         );
       }
     });
@@ -2264,7 +2276,7 @@ export class IrcConnection {
   // into a buffer or touches presence/idle tracking.
   sendHandshakeReply(nick: string, body: string): void {
     if (this.disposed) return;
-    e2eDbg(`→ NOTICE ${nick}: ${body.slice(0, 140)}`);
+    e2eDbg(() => `→ NOTICE ${nick}: ${body.slice(0, 140)}`);
     this.client.notice(nick, `\x01${body}\x01`);
   }
 
@@ -2283,7 +2295,10 @@ export class IrcConnection {
 
   // An inbound `+RPE2E01` chunk we couldn't read. We never persist ciphertext as
   // a message; instead drop a transient hint on the channel (silent for replays,
-  // which are just duplicates).
+  // which are just duplicates). A logical message over ~180 bytes arrives as N
+  // chunks, each its own undecryptable event — collapse the burst to ONE hint
+  // per (channel,peer,kind) within a short window so a long message can't spam N
+  // identical lines (#382, review #3).
   surfaceE2eDecryptIssue(
     channel: string,
     nick: string | undefined,
@@ -2291,6 +2306,12 @@ export class IrcConnection {
   ): void {
     if (kind === 'replay' || kind === 'cleartext') return;
     const who = nick || 'peer';
+    const key = `${channel.toLowerCase()}:${who.toLowerCase()}:${kind}`;
+    const now = Date.now();
+    if (now - (this.e2eHintAt.get(key) ?? 0) < 5000) return;
+    // Bound the map (a churn of distinct peers shouldn't grow it forever).
+    if (this.e2eHintAt.size > 500) this.e2eHintAt.clear();
+    this.e2eHintAt.set(key, now);
     const text =
       kind === 'missing-key'
         ? `🔒 encrypted message from ${who} — no session key yet (try /e2e handshake ${who})`
@@ -2331,7 +2352,9 @@ export class IrcConnection {
       .split(/\s+/)
       .filter((t) => t.length > 0);
     const sub = (tokens.shift() || 'status').toLowerCase();
-    const channelToken = tokens.find((t) => t.startsWith('#'));
+    // A channel arg must be more than a bare prefix — `/e2e on #` would otherwise
+    // persist a junk config row keyed on '#' (#382, review #6).
+    const channelToken = tokens.find((t) => t.startsWith('#') && t.length > 1);
     const nonChannel = tokens.filter((t) => !t.startsWith('#'));
     // The channel an op targets: an explicit #arg wins, else the issuing buffer
     // if it's a channel. null when neither is a channel.
@@ -2356,6 +2379,19 @@ export class IrcConnection {
       if (!handle)
         info(`🔒 couldn't resolve ${nick} on ${chan} — are they in the channel?`, 'warn');
       return handle;
+    };
+    // The accept/verify/revoke/reverify subcommands all need the same triple:
+    // a channel, a peer nick, and that nick resolved to its keyring handle. One
+    // helper collapses the repeated needChannel→needPeer→resolveOrWarn ladder
+    // (#382, review #12) — each warns + returns null on the first missing piece.
+    const chanNickHandle = (): { chan: string; nick: string; handle: string } | null => {
+      const chan = needChannel();
+      if (!chan) return null;
+      const nick = needPeer();
+      if (!nick) return null;
+      const handle = resolveOrWarn(chan, nick);
+      if (!handle) return null;
+      return { chan, nick, handle };
     };
 
     switch (sub) {
@@ -2403,16 +2439,12 @@ export class IrcConnection {
         return;
       }
       case 'accept': {
-        const chan = needChannel();
-        if (!chan) return;
-        const nick = needPeer();
-        if (!nick) return;
-        const handle = resolveOrWarn(chan, nick);
-        if (!handle) return;
-        const outcome = e2eManager.acceptPending(uid, nid, handle, chan);
-        for (const reply of outcome.replies) this.sendHandshakeReply(nick, reply);
+        const r = chanNickHandle();
+        if (!r) return;
+        const outcome = e2eManager.acceptPending(uid, nid, r.handle, r.chan);
+        for (const reply of outcome.replies) this.sendHandshakeReply(r.nick, reply);
         if (outcome.notice) info(outcome.notice.text, outcome.notice.level);
-        else info(`🔒 accepted ${nick} — encrypted session set up on ${chan}`);
+        else info(`🔒 accepted ${r.nick} — encrypted session set up on ${r.chan}`);
         return;
       }
       case 'fingerprint':
@@ -2427,45 +2459,33 @@ export class IrcConnection {
         return;
       }
       case 'verify': {
-        const chan = needChannel();
-        if (!chan) return;
-        const nick = needPeer();
-        if (!nick) return;
-        const handle = resolveOrWarn(chan, nick);
-        if (!handle) return;
-        const v = e2eManager.verifyInfo(uid, nid, handle);
+        const r = chanNickHandle();
+        if (!r) return;
+        const v = e2eManager.verifyInfo(uid, nid, r.handle);
         if (!v) {
-          info(`🔒 no known encryption key for ${nick}`, 'warn');
+          info(`🔒 no known encryption key for ${r.nick}`, 'warn');
           return;
         }
-        info(`🔒 ${nick} fingerprint: ${v.fingerprintHex} (${v.status})`);
+        info(`🔒 ${r.nick} fingerprint: ${v.fingerprintHex} (${v.status})`);
         info(`   verify words: ${v.sas}`);
         return;
       }
       case 'revoke': {
-        const chan = needChannel();
-        if (!chan) return;
-        const nick = needPeer();
-        if (!nick) return;
-        const handle = resolveOrWarn(chan, nick);
-        if (!handle) return;
-        const ok = e2eManager.revokePeer(uid, nid, handle);
+        const r = chanNickHandle();
+        if (!r) return;
+        const ok = e2eManager.revokePeer(uid, nid, r.handle);
         info(
           ok
-            ? `🔒 revoked ${nick} — they can't read your future messages`
-            : `🔒 nothing to revoke for ${nick}`,
+            ? `🔒 revoked ${r.nick} — they can't read your future messages`
+            : `🔒 nothing to revoke for ${r.nick}`,
         );
         return;
       }
       case 'reverify': {
-        const chan = needChannel();
-        if (!chan) return;
-        const nick = needPeer();
-        if (!nick) return;
-        const handle = resolveOrWarn(chan, nick);
-        if (!handle) return;
-        const cleared = e2eManager.reverifyPeer(uid, nid, handle);
-        info(`🔒 forgot ${cleared} record(s) for ${nick} — the next handshake re-pins their key`);
+        const r = chanNickHandle();
+        if (!r) return;
+        const cleared = e2eManager.reverifyPeer(uid, nid, r.handle);
+        info(`🔒 forgot ${cleared} record(s) for ${r.nick} — the next handshake re-pins their key`);
         return;
       }
       case 'status': {

@@ -39,16 +39,13 @@ import {
 import type { ContactRecord } from '../db/contacts.js';
 import { splitSay, splitAction, hasInteriorNewline } from './messageSplit.js';
 import { e2eManager } from './e2e/manager.js';
-import { contextKey } from './e2e/context.js';
+import { contextKey, isChannelContext } from './e2e/context.js';
+import { e2eDbg } from './e2e/debug.js';
 import db from '../db/index.js';
 
 // RPE2E is wired for real IRC channels only in this phase (#382). DM
 // pseudochannels (`@ident@host`) need the peer's server-stamped handle resolved
 // at send time, which the outbound path doesn't have yet — they're a fast-follow.
-const E2E_CHANNEL_PREFIXES = ['#', '&', '!', '+'];
-function isE2eChannel(target: string): boolean {
-  return E2E_CHANNEL_PREFIXES.some((p) => target.startsWith(p));
-}
 
 // User away state row shape from userAwayState.ts (that file isn't typed yet).
 interface AwayStateRow {
@@ -289,21 +286,25 @@ class IrcManager extends EventEmitter {
     // flag). encryptOutgoing handles its own chunking, so this path bypasses the
     // multiline/splitSay plumbing entirely. 'disabled' falls through to plaintext;
     // 'error' must NOT fall through (that would leak cleartext on an E2E channel).
-    if (isE2eChannel(target)) {
+    if (isChannelContext(target)) {
       const outcome = e2eManager.encryptOutgoing(userId, networkId, contextKey(target, ''), text);
-      if (process.env.LURKER_E2E_DEBUG === '1') {
-        console.log(
-          `[e2e] outbound ${target}: ${outcome.kind}` +
-            (outcome.kind === 'encrypted' ? ` (${outcome.lines.length} line(s))` : ''),
-        );
-      }
+      e2eDbg(
+        () =>
+          `outbound ${target}: ${outcome.kind}` +
+          (outcome.kind === 'encrypted' ? ` (${outcome.lines.length} line(s))` : ''),
+      );
       if (outcome.kind === 'error') {
         conn.publishEphemeral({
           type: 'error',
           target,
           text: `🔒 not sent — encryption failed: ${outcome.reason}`,
         });
-        return true; // surfaced inline; don't fall through to a cleartext send
+        // Return false so the composer surfaces a send-failure toast and KEEPS
+        // the text (vs clearing it), instead of relying only on the easily-missed
+        // ephemeral line. This is leak-safe: the early return — not the boolean —
+        // is what prevents a cleartext fallthrough, and the client never retries
+        // a failed send as plaintext.
+        return false;
       }
       if (outcome.kind === 'encrypted') {
         for (const line of outcome.lines) conn.say(target, line);
@@ -351,9 +352,32 @@ class IrcManager extends EventEmitter {
     return true;
   }
 
+  // On an E2E-enabled channel, /me actions and notices have no interoperable
+  // encrypted form: the RPE2E wire format carries only encrypted PRIVMSG bodies,
+  // and repartee likewise can't decrypt an encrypted ACTION/NOTICE. Rather than
+  // silently leak cleartext on a channel the user believes is encrypted, refuse
+  // the send and say so inline. Encrypted actions are a future protocol feature.
+  private refuseCleartextOnE2eChannel(
+    conn: IrcConnection,
+    userId: number,
+    networkId: number,
+    target: string,
+    kind: 'action' | 'notice',
+  ): boolean {
+    if (!isChannelContext(target)) return false;
+    if (!e2eManager.isChannelEnabled(userId, networkId, contextKey(target, ''))) return false;
+    conn.publishEphemeral({
+      type: 'error',
+      target,
+      text: `🔒 ${kind === 'action' ? '/me actions' : 'notices'} aren't encrypted yet — not sent on this E2E channel`,
+    });
+    return true;
+  }
+
   action(userId: number, networkId: number, target: string, text: string): boolean {
     const conn = this.getConnection(userId, networkId);
     if (!conn) return false;
+    if (this.refuseCleartextOnE2eChannel(conn, userId, networkId, target, 'action')) return true;
     const chunks = splitAction(text);
     for (const chunk of chunks) {
       conn.action(target, chunk);
@@ -375,6 +399,7 @@ class IrcManager extends EventEmitter {
   notice(userId: number, networkId: number, target: string, text: string): boolean {
     const conn = this.getConnection(userId, networkId);
     if (!conn) return false;
+    if (this.refuseCleartextOnE2eChannel(conn, userId, networkId, target, 'notice')) return true;
     const chunks = splitSay(text);
     for (const chunk of chunks) {
       conn.notice(target, chunk);

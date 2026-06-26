@@ -225,6 +225,18 @@ export class E2eManager {
     }
   }
 
+  /** Whether E2E is enabled for `channel`. The IRC layer's single egress/ingress
+   *  gate: encrypt outgoing messages, refuse cleartext actions/notices, and
+   *  attempt inbound decryption only on an enabled channel. Never throws. */
+  isChannelEnabled(userId: number, networkId: number, channel: string): boolean {
+    try {
+      return keyring.getChannelConfig(userId, networkId, channel)?.enabled === true;
+    } catch (err) {
+      console.warn(`e2e isChannelEnabled ${channel}: ${(err as Error).message}`);
+      return false;
+    }
+  }
+
   // ─── outbound handshake ──────────────────────────────────────────────────────
 
   /** Build a KEYREQ to initiate (or extend) an encrypted session on `channel`,

@@ -123,6 +123,7 @@ const PAUSED_BLOCKED_TYPES = new Set([
   'away',
   'back',
   'typing',
+  'e2e',
 ]);
 
 // Options bag for fanOut.
@@ -1471,9 +1472,14 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
         // publishes its own ephemeral status to the issuing buffer; we only need
         // to tell the user when the network isn't connected (no connection = no
         // place for that status to come from).
-        const networkId = Number(msg.networkId);
         const target = typeof msg.target === 'string' ? msg.target : '';
         const args = typeof msg.args === 'string' ? msg.args : '';
+        // The system buffer carries networkId null; Number(null) → 0 would miss
+        // every connection and fan a frame out with networkId 0 that the client
+        // can't route (the client already gates /e2e on an active network, so
+        // this is defensive). Require a real network id (#382, review #7).
+        const networkId = msg.networkId == null ? NaN : Number(msg.networkId);
+        if (!Number.isFinite(networkId) || networkId <= 0) break;
         const ok = ircManager.e2eCommand(userId, networkId, target, args);
         if (!ok) {
           const evt = {

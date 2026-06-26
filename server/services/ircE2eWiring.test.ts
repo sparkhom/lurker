@@ -120,6 +120,12 @@ describe('outbound encrypt (ircManager.send)', () => {
 });
 
 describe('inbound decrypt (c.on message)', () => {
+  // The decrypt path only fires on a channel with E2E enabled (#1) — enable #in
+  // for the tests that exercise the decrypt branch.
+  beforeAll(() => {
+    e2eManager.setChannelConfig(1, 1, '#in', true, 'normal');
+  });
+
   it('renders a decrypted chunk as plaintext with the e2e flag', () => {
     const conn = makeConn();
     const publish = vi.fn<(event: unknown) => void>();
@@ -188,6 +194,112 @@ describe('inbound decrypt (c.on message)', () => {
       expect.objectContaining({ target: '#in', text: 'just a normal line' }),
     );
     expect(publish.mock.calls[0][0]).not.toHaveProperty('e2e', true);
+    vi.restoreAllMocks();
+  });
+
+  it('does NOT attempt decryption on a channel without E2E enabled — passes it through (#1)', () => {
+    const conn = makeConn();
+    const publish = vi.fn<(event: unknown) => void>();
+    conn.publish = publish;
+    const spy = vi.spyOn(e2eManager, 'decryptIncoming');
+    const line = `${WIRE} 00112233aabbccdd 0 1/1 nonce:ct`;
+
+    conn.client.emit('message', {
+      nick: 'bob',
+      ident: 'b',
+      hostname: 'h',
+      target: '#notenabled', // never configured for E2E
+      type: 'privmsg',
+      message: line,
+    });
+
+    // The griefer line is rendered as ordinary cleartext, NOT dropped or decrypted.
+    expect(spy).not.toHaveBeenCalled();
+    expect(publish).toHaveBeenCalledWith(
+      expect.objectContaining({ target: '#notenabled', text: line }),
+    );
+    expect(publish.mock.calls[0][0]).not.toHaveProperty('e2e', true);
+    vi.restoreAllMocks();
+  });
+
+  it('collapses a multi-chunk undecryptable burst into a single hint (#3)', () => {
+    e2eManager.setChannelConfig(1, 1, '#burst', true, 'normal');
+    const conn = makeConn();
+    conn.publish = vi.fn<(event: unknown) => void>();
+    const publishEphemeral = vi.fn<(event: unknown) => void>();
+    conn.publishEphemeral = publishEphemeral;
+    vi.spyOn(e2eManager, 'decryptIncoming').mockReturnValue({ kind: 'missing-key' });
+    const emit = (part: number) =>
+      conn.client.emit('message', {
+        nick: 'bob',
+        ident: 'b',
+        hostname: 'h',
+        target: '#burst',
+        type: 'privmsg',
+        message: `${WIRE} 00112233aabbccdd 0 ${part}/3 nonce:ct`,
+      });
+
+    emit(1);
+    emit(2);
+    emit(3);
+
+    expect(publishEphemeral).toHaveBeenCalledTimes(1);
+    vi.restoreAllMocks();
+  });
+});
+
+describe('egress refuses cleartext actions/notices on an E2E channel (#2)', () => {
+  function fakeConn() {
+    const action = vi.fn<(target: string, text: string) => void>();
+    const notice = vi.fn<(target: string, text: string) => void>();
+    const publish = vi.fn<(event: unknown) => void>();
+    const publishEphemeral = vi.fn<(event: unknown) => void>();
+    const conn = {
+      action,
+      notice,
+      publish,
+      publishEphemeral,
+      client: { user: { nick: 'alice' } },
+    } as unknown as IrcConnection;
+    return { conn, action, notice, publishEphemeral };
+  }
+
+  it('blocks /me on an E2E-enabled channel without putting cleartext on the wire', () => {
+    e2eManager.setChannelConfig(1, 1, '#secret', true, 'normal');
+    const { conn, action, publishEphemeral } = fakeConn();
+    vi.spyOn(ircManager, 'getConnection').mockReturnValue(conn);
+
+    const ok = ircManager.action(1, 1, '#secret', 'waves');
+
+    expect(ok).toBe(true);
+    expect(action).not.toHaveBeenCalled(); // never reached the wire
+    expect(publishEphemeral).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'error', target: '#secret' }),
+    );
+    vi.restoreAllMocks();
+  });
+
+  it('blocks /notice on an E2E-enabled channel', () => {
+    e2eManager.setChannelConfig(1, 1, '#secret', true, 'normal');
+    const { conn, notice, publishEphemeral } = fakeConn();
+    vi.spyOn(ircManager, 'getConnection').mockReturnValue(conn);
+
+    ircManager.notice(1, 1, '#secret', 'psst');
+
+    expect(notice).not.toHaveBeenCalled();
+    expect(publishEphemeral).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'error', target: '#secret' }),
+    );
+    vi.restoreAllMocks();
+  });
+
+  it('still sends /me normally on a non-E2E channel', () => {
+    const { conn, action } = fakeConn();
+    vi.spyOn(ircManager, 'getConnection').mockReturnValue(conn);
+
+    ircManager.action(1, 1, '#plainchan', 'waves');
+
+    expect(action).toHaveBeenCalledWith('#plainchan', 'waves');
     vi.restoreAllMocks();
   });
 });
