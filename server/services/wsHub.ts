@@ -11,6 +11,7 @@ import { WebSocketServer } from 'ws';
 import cookie from 'cookie';
 import cookieParser from 'cookie-parser';
 import ircManager from './ircManager.js';
+import { e2eManager } from './e2e/manager.js';
 import settingsService from './settingsService.js';
 import highlightRulesService from './highlightRulesService.js';
 import draftsService from './draftsService.js';
@@ -1493,6 +1494,44 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
           } as unknown as MessageEvent;
           fanOut(userId, { ...decorateMessage(userId, evt), kind: 'irc' });
         }
+        break;
+      }
+      case 'e2e-export': {
+        // Keyring portability (#382 follow-up). DB-backed via e2eManager — no live
+        // connection needed (unlike `case 'e2e'`). Reply to THIS socket only: the
+        // requesting tab turns the JSON into a file download, so a broadcast would
+        // make every open tab download. networkId ownership is enforced at the
+        // boundary above; reject the system-buffer (null/0) case here.
+        const networkId = msg.networkId == null ? NaN : Number(msg.networkId);
+        if (!Number.isFinite(networkId) || networkId <= 0) {
+          send(ws, {
+            kind: 'e2eExport',
+            ok: false,
+            reason: 'run /e2e export from a network buffer',
+          });
+          break;
+        }
+        send(ws, { kind: 'e2eExport', networkId, ...e2eManager.exportKeyring(userId, networkId) });
+        break;
+      }
+      case 'e2e-import': {
+        // Replace this network's keyring from an uploaded export. Validated +
+        // applied atomically by importKeyring; reply to the requesting socket.
+        const networkId = msg.networkId == null ? NaN : Number(msg.networkId);
+        const json = typeof msg.json === 'string' ? msg.json : '';
+        if (!Number.isFinite(networkId) || networkId <= 0) {
+          send(ws, {
+            kind: 'e2eImport',
+            ok: false,
+            reason: 'run /e2e import from a network buffer',
+          });
+          break;
+        }
+        send(ws, {
+          kind: 'e2eImport',
+          networkId,
+          ...e2eManager.importKeyring(userId, networkId, json),
+        });
         break;
       }
       case 'join':

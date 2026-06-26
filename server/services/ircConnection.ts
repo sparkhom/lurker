@@ -2767,6 +2767,7 @@ export class IrcConnection {
           '   forget [-all] <nick|handle> · verify <nick> · fingerprint',
           '   status · list [-all]',
           '   autotrust <list | add <scope> <pattern> | remove <pattern>>',
+          '   export (download keyring) · import (upload + replace keyring)',
         ]) {
           info(line);
         }

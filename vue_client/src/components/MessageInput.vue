@@ -57,6 +57,13 @@
       class="file-hidden"
       @change="onFileSelected"
     />
+    <input
+      ref="e2eImportInputEl"
+      type="file"
+      accept=".json,application/json"
+      class="file-hidden"
+      @change="onE2eImportFile"
+    />
     <!-- The nick / emoji suggestion strips and the mIRC colour picker render
          inside StatusBar (they overlay it visually) — see useComposerOverlay
          for the cross-component state contract. Only the desktop @-popup
@@ -239,6 +246,8 @@ function combinedHighlights(
 const inputEl = ref<HTMLTextAreaElement | null>(null);
 const formEl = ref<HTMLElement | null>(null);
 const fileInputEl = ref<HTMLInputElement | null>(null);
+const e2eImportInputEl = ref<HTMLInputElement | null>(null);
+const e2eImportNetworkId = ref<number | null>(null);
 const dragOver = ref(false);
 const pickerOpen = ref(false);
 const pickerQuery = ref('');
@@ -1681,6 +1690,33 @@ function onFileSelected(e: Event): void {
   uploads.upload(file, file.name).catch(() => {});
 }
 
+// `/e2e import` flow: read the chosen export file, confirm (it's destructive and
+// can change the account identity), then ship the JSON for the cell to validate
+// and replace the keyring. The networkId is carried from the command invocation.
+function onE2eImportFile(e: Event): void {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  const networkId = e2eImportNetworkId.value;
+  e2eImportNetworkId.value = null;
+  if (!file || networkId == null) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const json = String(reader.result ?? '');
+    const ok = window.confirm(
+      'Import E2E keyring?\n\n' +
+        'This REPLACES this network’s encryption keyring (peers, sessions, settings) ' +
+        'and resets your account identity on ALL networks. It cannot be undone.',
+    );
+    if (!ok) return;
+    sendOrToast({ type: 'e2e-import', networkId, json }, 'e2e import');
+  };
+  reader.onerror = () => {
+    toasts.push({ kind: 'error', title: 'E2E import failed', body: 'could not read the file' });
+  };
+  reader.readAsText(file);
+}
+
 function onDragOver(e: DragEvent): void {
   if (!sendable.value) return;
   if (!Array.from(e.dataTransfer?.types || []).includes('Files')) return;
@@ -2001,7 +2037,7 @@ const COMMANDS_LINES = [
   '      handshake <nick>   ·   accept <nick>   ·   decline <nick>',
   '      revoke <nick>   ·   unrevoke <nick>   ·   reverify <nick>   ·   verify <nick>',
   '      rotate [#chan]   ·   forget [-all] <nick|handle>   ·   fingerprint   ·   status   ·   list [-all]',
-  '      autotrust <list | add <scope> <pattern> | remove <pattern>>',
+  '      autotrust <list | add <scope> <pattern> | remove <pattern>>   ·   export   ·   import',
   '  /commands              — this list',
   '  //text                 — send literal "/text" as a message (escape)',
 ];
@@ -2487,11 +2523,24 @@ function handleCommand(line: string, networkId: number | null, target: string): 
   }
 
   switch (verb) {
-    case 'e2e':
-      // RPE2E (#382). Thin pass-through: the server parses the subcommand and
-      // publishes its status/results back into this buffer. We forward the raw
-      // arg line plus the issuing buffer so the server can default the channel.
+    case 'e2e': {
+      // RPE2E (#382). `export`/`import` move keyring material across the
+      // client↔cell boundary, so they're handled here rather than via the
+      // server's buffer-oriented runE2eCommand: export downloads a file (never
+      // rendered — it holds the private key), import opens a file picker. Every
+      // other subcommand is a thin pass-through; the server parses it and
+      // publishes status back into this buffer (defaulting the channel).
+      const sub = (rest[0] || '').toLowerCase();
+      if (sub === 'export') {
+        return sendOrToast({ type: 'e2e-export', networkId }, line);
+      }
+      if (sub === 'import') {
+        e2eImportNetworkId.value = networkId;
+        e2eImportInputEl.value?.click();
+        return true;
+      }
       return sendOrToast({ type: 'e2e', networkId, target, args: argLine }, line);
+    }
     case 'me':
       return ackedSend({ type: 'action', networkId, target, text: argLine }, argLine);
     case 'msg':
