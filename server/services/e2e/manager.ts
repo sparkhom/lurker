@@ -71,6 +71,16 @@ export interface UserNotice {
   text: string;
 }
 
+/** A row in `/e2e list` — a peer/session with its trust status + short fp. */
+export interface PeerListEntry {
+  handle: string;
+  status: keyring.TrustStatus;
+  fingerprintHex: string;
+}
+export interface SessionListEntry extends PeerListEntry {
+  channel: string;
+}
+
 /** The result of handling an inbound handshake body: bodies to NOTICE back to
  *  the sender, and an optional user-facing notice for the buffer. */
 export interface HandshakeOutcome {
@@ -806,6 +816,152 @@ export class E2eManager {
       return cleared;
     } catch (err) {
       console.warn(`e2e reverify ${handle}: ${(err as Error).message}`);
+      return 0;
+    }
+  }
+
+  // ─── listing + management (the /e2e list/mode/decline/unrevoke surface) ──────
+
+  /** Trusted peers with a session on `channel`, for `/e2e list`. Never throws. */
+  listChannelPeers(userId: number, networkId: number, channel: string): PeerListEntry[] {
+    try {
+      return keyring
+        .listIncomingSessionMeta(userId, networkId, channel)
+        .filter((s) => s.status === 'trusted')
+        .map((s) => ({
+          handle: s.handle,
+          status: s.status,
+          fingerprintHex: fingerprintHex(s.fingerprint),
+        }));
+    } catch (err) {
+      console.warn(`e2e listChannelPeers ${channel}: ${(err as Error).message}`);
+      return [];
+    }
+  }
+
+  /** The whole remembered keyring (peers + sessions), for `/e2e list -all`. */
+  listKeyring(
+    userId: number,
+    networkId: number,
+  ): { peers: PeerListEntry[]; sessions: SessionListEntry[] } {
+    try {
+      const peers = keyring.listPeers(userId, networkId).map((p) => ({
+        handle: p.lastHandle ?? '(unknown)',
+        status: p.globalStatus,
+        fingerprintHex: fingerprintHex(p.fingerprint),
+      }));
+      const sessions = keyring.listIncomingSessionMeta(userId, networkId).map((s) => ({
+        handle: s.handle,
+        channel: s.channel,
+        status: s.status,
+        fingerprintHex: fingerprintHex(s.fingerprint),
+      }));
+      return { peers, sessions };
+    } catch (err) {
+      console.warn(`e2e listKeyring: ${(err as Error).message}`);
+      return { peers: [], sessions: [] };
+    }
+  }
+
+  /** Per-channel summary for `/e2e status`. Never throws. */
+  channelStatus(
+    userId: number,
+    networkId: number,
+    channel: string,
+  ): { enabled: boolean; mode: keyring.ChannelMode; peers: number } | null {
+    try {
+      const cfg = keyring.getChannelConfig(userId, networkId, channel);
+      if (!cfg) return { enabled: false, mode: 'normal', peers: 0 };
+      return {
+        enabled: cfg.enabled,
+        mode: cfg.mode,
+        peers: this.listChannelPeers(userId, networkId, channel).length,
+      };
+    } catch (err) {
+      console.warn(`e2e channelStatus ${channel}: ${(err as Error).message}`);
+      return null;
+    }
+  }
+
+  /** Change a channel's mode, preserving its enabled flag (defaulting to on when
+   *  the channel was never configured — setting a mode implies wanting E2E). */
+  setChannelMode(
+    userId: number,
+    networkId: number,
+    channel: string,
+    mode: keyring.ChannelMode,
+  ): boolean {
+    const existing = keyring.getChannelConfig(userId, networkId, channel);
+    return this.setChannelConfig(userId, networkId, channel, existing?.enabled ?? true, mode);
+  }
+
+  /** Decline a pending inbound handshake: drop the cached prompt and revoke the
+   *  peer so a re-KEYREQ won't re-prompt (mirrors repartee's `/e2e decline`).
+   *  Returns false if there was nothing to decline. */
+  declinePeer(userId: number, networkId: number, handle: string, channel: string): boolean {
+    try {
+      const hadPending = this.pendingInbound.delete(
+        this.inboundKey(userId, networkId, handle, channel),
+      );
+      const peer = keyring.getPeerByHandle(userId, networkId, handle);
+      if (peer) keyring.setPeerStatus(userId, networkId, peer.fingerprint, 'revoked');
+      keyring.updateIncomingStatus(userId, networkId, handle, channel, 'revoked');
+      return hadPending || peer !== null;
+    } catch (err) {
+      console.warn(`e2e decline ${handle}: ${(err as Error).message}`);
+      return false;
+    }
+  }
+
+  /** Restore a revoked peer to trusted (and their revoked sessions). Returns
+   *  false if the peer isn't currently revoked. */
+  unrevokePeer(userId: number, networkId: number, handle: string): boolean {
+    try {
+      const peer = keyring.getPeerByHandle(userId, networkId, handle);
+      if (!peer || peer.globalStatus !== 'revoked') return false;
+      keyring.setPeerStatus(userId, networkId, peer.fingerprint, 'trusted');
+      for (const channel of keyring.listIncomingChannelsForHandle(userId, networkId, handle)) {
+        keyring.updateIncomingStatus(userId, networkId, handle, channel, 'trusted');
+      }
+      return true;
+    } catch (err) {
+      console.warn(`e2e unrevoke ${handle}: ${(err as Error).message}`);
+      return false;
+    }
+  }
+
+  // ─── autotrust (glob rules that auto-accept matching handles) ────────────────
+
+  listAutotrust(userId: number, networkId: number): keyring.AutotrustRule[] {
+    try {
+      return keyring.listAutotrust(userId, networkId);
+    } catch (err) {
+      console.warn(`e2e listAutotrust: ${(err as Error).message}`);
+      return [];
+    }
+  }
+
+  addAutotrust(userId: number, networkId: number, scope: string, pattern: string): boolean {
+    try {
+      keyring.addAutotrust(userId, networkId, scope, pattern, this.nowUnix());
+      return true;
+    } catch (err) {
+      console.warn(`e2e addAutotrust ${scope}/${pattern}: ${(err as Error).message}`);
+      return false;
+    }
+  }
+
+  /** Remove every autotrust rule whose pattern matches (across scopes), mirroring
+   *  repartee's `/e2e autotrust remove <pattern>`. Returns how many were removed. */
+  removeAutotrust(userId: number, networkId: number, pattern: string): number {
+    try {
+      const rules = keyring
+        .listAutotrust(userId, networkId)
+        .filter((r) => r.handlePattern === pattern);
+      for (const r of rules) keyring.removeAutotrust(userId, networkId, r.scope, r.handlePattern);
+      return rules.length;
+    } catch (err) {
+      console.warn(`e2e removeAutotrust ${pattern}: ${(err as Error).message}`);
       return 0;
     }
   }

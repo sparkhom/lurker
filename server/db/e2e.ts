@@ -60,6 +60,14 @@ export interface OutgoingSession {
   pendingRotation: boolean;
 }
 
+/** Incoming-session metadata for listing (no session key). */
+export interface SessionMeta {
+  handle: string;
+  channel: string;
+  fingerprint: Uint8Array;
+  status: TrustStatus;
+}
+
 export interface ChannelConfig {
   channel: string;
   enabled: boolean;
@@ -334,6 +342,18 @@ const listIncomingStmt = db.prepare(
   `SELECT * FROM e2e_incoming_sessions WHERE user_id = ? AND network_id = ?
    ORDER BY channel ASC, handle ASC`,
 );
+// Metadata-only listing for `/e2e list` — handle/channel/status/fingerprint with
+// NO key unsealing (the fingerprint is an unsealed BLOB; only `sk` is sealed).
+// Avoids both the unseal cost and the throw-on-undecryptable-key risk of
+// listIncomingSessions when all we need is to show the user their sessions.
+const listIncomingMetaStmt = db.prepare(
+  `SELECT handle, channel, fingerprint, status FROM e2e_incoming_sessions
+   WHERE user_id = ? AND network_id = ? ORDER BY channel ASC, handle ASC`,
+);
+const listIncomingMetaForChannelStmt = db.prepare(
+  `SELECT handle, channel, fingerprint, status FROM e2e_incoming_sessions
+   WHERE user_id = ? AND network_id = ? AND channel = ? ORDER BY handle ASC`,
+);
 
 interface IncomingRow {
   handle: string;
@@ -482,6 +502,26 @@ export function listTrustedSessionsForChannel(
 
 export function listIncomingSessions(userId: number, networkId: number): IncomingSession[] {
   return (listIncomingStmt.all(userId, networkId) as IncomingRow[]).map(mapIncoming);
+}
+
+/** Session metadata (no key unsealing) for `/e2e list`. Pass `channel` to scope
+ *  to one channel, or omit for every session. */
+export function listIncomingSessionMeta(
+  userId: number,
+  networkId: number,
+  channel?: string,
+): SessionMeta[] {
+  const rows = (
+    channel === undefined
+      ? listIncomingMetaStmt.all(userId, networkId)
+      : listIncomingMetaForChannelStmt.all(userId, networkId, channel)
+  ) as Array<{ handle: string; channel: string; fingerprint: Buffer; status: string }>;
+  return rows.map((r) => ({
+    handle: r.handle,
+    channel: r.channel,
+    fingerprint: fromBlob(r.fingerprint, 16),
+    status: parseTrustStatus(r.status),
+  }));
 }
 
 // ─── outgoing sessions (our key, per channel) ────────────────────────────────

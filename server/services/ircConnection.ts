@@ -2351,7 +2351,7 @@ export class IrcConnection {
       .trim()
       .split(/\s+/)
       .filter((t) => t.length > 0);
-    const sub = (tokens.shift() || 'status').toLowerCase();
+    const sub = (tokens.shift() || 'help').toLowerCase();
     // `#`-prefixed channels only — INCLUDING double-hash names like `##anime`
     // (the `length > 1` guard rejects only a bare lone `#`, which would otherwise
     // persist a junk config row; #382 review #6). This is intentionally narrower
@@ -2466,13 +2466,18 @@ export class IrcConnection {
       case 'verify': {
         const r = chanNickHandle();
         if (!r) return;
+        const me = e2eManager.getIdentity(uid);
         const v = e2eManager.verifyInfo(uid, nid, r.handle);
         if (!v) {
           info(`🔒 no known encryption key for ${r.nick}`, 'warn');
           return;
         }
-        info(`🔒 ${r.nick} fingerprint: ${v.fingerprintHex} (${v.status})`);
-        info(`   verify words: ${v.sas}`);
+        // Side-by-side so the user can read both out-of-band and compare, with the
+        // MitM remediation spelled out (mirrors repartee's verify block).
+        info(`🔒 verify ${r.nick} — compare BOTH out-of-band (call/Signal), then trust:`);
+        if (me) info(`   you:  ${me.fingerprintHex.slice(0, 16)}…  ${me.sas}`);
+        info(`   ${r.nick}:  ${v.fingerprintHex.slice(0, 16)}…  ${v.sas}  (${v.status})`);
+        info(`   if they DON'T match, a MitM may be in progress — /e2e revoke ${r.nick}`, 'warn');
         return;
       }
       case 'revoke': {
@@ -2486,6 +2491,20 @@ export class IrcConnection {
         );
         return;
       }
+      case 'unrevoke': {
+        const r = chanNickHandle();
+        if (!r) return;
+        const ok = e2eManager.unrevokePeer(uid, nid, r.handle);
+        info(ok ? `🔒 unrevoked ${r.nick} — trust restored` : `🔒 ${r.nick} isn't revoked`);
+        return;
+      }
+      case 'decline': {
+        const r = chanNickHandle();
+        if (!r) return;
+        const ok = e2eManager.declinePeer(uid, nid, r.handle, r.chan);
+        info(ok ? `🔒 declined ${r.nick} on ${r.chan}` : `🔒 nothing pending from ${r.nick}`);
+        return;
+      }
       case 'reverify': {
         const r = chanNickHandle();
         if (!r) return;
@@ -2493,24 +2512,125 @@ export class IrcConnection {
         info(`🔒 forgot ${cleared} record(s) for ${r.nick} — the next handshake re-pins their key`);
         return;
       }
+      case 'mode': {
+        const chan = needChannel();
+        if (!chan) return;
+        const token = (nonChannel[0] || '').toLowerCase();
+        if (!['auto', 'auto-accept', 'normal', 'quiet'].includes(token)) {
+          info(`🔒 /e2e mode <auto|normal|quiet>`, 'warn');
+          return;
+        }
+        const mode = parseE2eMode(token);
+        info(
+          e2eManager.setChannelMode(uid, nid, chan, mode)
+            ? `🔒 ${chan} mode set to ${mode}`
+            : `🔒 failed to set mode on ${chan}`,
+          'info',
+        );
+        return;
+      }
+      case 'list': {
+        if (nonChannel.some((t) => t.toLowerCase() === '-all')) {
+          const { peers, sessions } = e2eManager.listKeyring(uid, nid);
+          info(`🔒 E2E keyring — ${peers.length} peer(s), ${sessions.length} session(s)`);
+          if (!peers.length) info('   (no remembered peers)');
+          for (const p of peers) {
+            info(`   ${p.handle}  [${p.status}]  ${p.fingerprintHex.slice(0, 16)}…`);
+          }
+          for (const s of sessions) info(`   ${s.channel}  ${s.handle}  [${s.status}]`);
+          return;
+        }
+        const chan = needChannel();
+        if (!chan) return;
+        const peers = e2eManager.listChannelPeers(uid, nid, chan);
+        if (!peers.length) {
+          info(`🔒 ${chan}: no trusted peers yet — /e2e accept <nick> after a handshake`);
+          return;
+        }
+        info(`🔒 ${chan}: ${peers.length} trusted peer(s)`);
+        for (const p of peers) {
+          info(`   ${p.handle}  [${p.status}]  ${p.fingerprintHex.slice(0, 16)}…`);
+        }
+        return;
+      }
+      case 'autotrust': {
+        const op = (tokens[0] || '').toLowerCase();
+        if (op === 'list') {
+          const rules = e2eManager.listAutotrust(uid, nid);
+          if (!rules.length) {
+            info('🔒 no autotrust rules');
+            return;
+          }
+          info(`🔒 autotrust rules (${rules.length}):`);
+          for (const ru of rules) info(`   ${ru.scope}  ${ru.handlePattern}`);
+          return;
+        }
+        if (op === 'add') {
+          const scope = tokens[1];
+          const pattern = tokens[2];
+          if (!scope || !pattern) {
+            info('🔒 /e2e autotrust add <scope> <pattern>  (scope = global or #chan)', 'warn');
+            return;
+          }
+          info(
+            e2eManager.addAutotrust(uid, nid, scope, pattern)
+              ? `🔒 autotrust added: ${scope} ${pattern}`
+              : '🔒 failed to add autotrust rule',
+            'info',
+          );
+          return;
+        }
+        if (op === 'remove') {
+          const pattern = tokens[1];
+          if (!pattern) {
+            info('🔒 /e2e autotrust remove <pattern>', 'warn');
+            return;
+          }
+          const removed = e2eManager.removeAutotrust(uid, nid, pattern);
+          info(
+            removed > 0
+              ? `🔒 removed ${removed} autotrust rule(s) matching ${pattern}`
+              : `🔒 no autotrust rule matching ${pattern}`,
+          );
+          return;
+        }
+        info('🔒 /e2e autotrust <list|add|remove>', 'warn');
+        return;
+      }
       case 'status': {
         const id = e2eManager.getIdentity(uid);
-        info(
-          id ? `🔒 your fingerprint: ${id.fingerprintHex}` : '🔒 encryption identity unavailable',
-          id ? 'info' : 'warn',
-        );
+        if (id) {
+          info(`🔒 your fingerprint: ${id.fingerprintHex}`);
+          info(`   verify words: ${id.sas}`);
+        } else {
+          info('🔒 encryption identity unavailable', 'warn');
+        }
         if (channel) {
-          const cfg = getE2eChannelConfig(uid, nid, channel);
+          const st = e2eManager.channelStatus(uid, nid, channel);
           info(
-            cfg?.enabled
-              ? `🔒 ${channel}: encryption ON (mode: ${cfg.mode})`
+            st?.enabled
+              ? `🔒 ${channel}: encryption ON (mode: ${st.mode}, peers: ${st.peers})`
               : `🔓 ${channel}: encryption off`,
           );
         }
         return;
       }
+      case 'help':
+      case '?': {
+        for (const line of [
+          '🔒 /e2e commands:',
+          '   on [#chan] [auto|normal|quiet] · off [#chan] · mode <auto|normal|quiet>',
+          '   handshake <nick> · accept <nick> · decline <nick>',
+          '   revoke <nick> · unrevoke <nick> · reverify <nick>',
+          '   verify <nick> · fingerprint · status · list [-all]',
+          '   autotrust <list | add <scope> <pattern> | remove <pattern>>',
+        ]) {
+          info(line);
+        }
+        return;
+      }
       default:
-        info(`🔒 /e2e: on|off|handshake|accept|verify|revoke|reverify|fingerprint|status`, 'warn');
+        info(`🔒 /e2e: unknown subcommand '${sub}' — try /e2e help`, 'warn');
     }
   }
 

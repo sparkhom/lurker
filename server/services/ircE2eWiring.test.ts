@@ -405,3 +405,116 @@ describe('/e2e command dispatch (runE2eCommand)', () => {
     expect(publishEphemeral).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }));
   });
 });
+
+// ─── Phase 1d: the expanded /e2e command surface (repartee parity) ───────────
+
+describe('/e2e command surface — 1d', () => {
+  const texts = (m: ReturnType<typeof vi.fn>) =>
+    m.mock.calls.map((c) => (c[0] as { text: string }).text);
+
+  it('mode changes a channel mode while preserving enabled', () => {
+    const conn = makeConn();
+    conn.publishEphemeral = vi.fn<(event: unknown) => void>();
+    conn.runE2eCommand('#mode1', 'on #mode1 normal');
+    conn.runE2eCommand('#mode1', 'mode auto');
+    expect(keyring.getChannelConfig(1, 1, '#mode1')?.mode).toBe('auto-accept');
+    expect(keyring.getChannelConfig(1, 1, '#mode1')?.enabled).toBe(true);
+  });
+
+  it('mode rejects an unknown mode', () => {
+    const conn = makeConn();
+    const pe = vi.fn<(event: unknown) => void>();
+    conn.publishEphemeral = pe;
+    conn.runE2eCommand('#mode2', 'mode bogus');
+    expect(pe).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }));
+  });
+
+  it('list reports no trusted peers on a fresh channel', () => {
+    const conn = makeConn();
+    const pe = vi.fn<(event: unknown) => void>();
+    conn.publishEphemeral = pe;
+    conn.runE2eCommand('#list1', 'list');
+    expect(texts(pe).some((t) => t.includes('no trusted peers'))).toBe(true);
+  });
+
+  it('autotrust add / list / remove round-trips through the keyring', () => {
+    const conn = makeConn();
+    conn.publishEphemeral = vi.fn<(event: unknown) => void>();
+    conn.runE2eCommand(':server:1', 'autotrust add global *@trusted.example');
+    expect(
+      e2eManager.listAutotrust(1, 1).some((r) => r.handlePattern === '*@trusted.example'),
+    ).toBe(true);
+    conn.runE2eCommand(':server:1', 'autotrust remove *@trusted.example');
+    expect(
+      e2eManager.listAutotrust(1, 1).some((r) => r.handlePattern === '*@trusted.example'),
+    ).toBe(false);
+  });
+
+  it('help lists the command surface', () => {
+    const conn = makeConn();
+    const pe = vi.fn<(event: unknown) => void>();
+    conn.publishEphemeral = pe;
+    conn.runE2eCommand(':server:1', 'help');
+    const joined = texts(pe).join('\n');
+    expect(joined).toContain('/e2e commands');
+    expect(joined).toContain('autotrust');
+  });
+
+  it('an empty /e2e shows help, an unknown sub warns', () => {
+    const conn = makeConn();
+    const pe = vi.fn<(event: unknown) => void>();
+    conn.publishEphemeral = pe;
+    conn.runE2eCommand(':server:1', '');
+    expect(texts(pe).join('\n')).toContain('/e2e commands');
+    pe.mockClear();
+    conn.runE2eCommand(':server:1', 'frobnicate');
+    expect(pe).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }));
+  });
+});
+
+describe('E2eManager 1d management methods', () => {
+  it('decline revokes a peer; unrevoke restores it', () => {
+    const fp = new Uint8Array(16).fill(7);
+    const pub = new Uint8Array(32).fill(9);
+    keyring.upsertPeer(1, 1, {
+      fingerprint: fp,
+      pubkey: pub,
+      lastHandle: '~zed@h',
+      lastNick: 'zed',
+      firstSeen: 1,
+      lastSeen: 1,
+      globalStatus: 'pending',
+    });
+    expect(e2eManager.declinePeer(1, 1, '~zed@h', '#dz')).toBe(true);
+    expect(keyring.getPeerByHandle(1, 1, '~zed@h')?.globalStatus).toBe('revoked');
+    expect(e2eManager.unrevokePeer(1, 1, '~zed@h')).toBe(true);
+    expect(keyring.getPeerByHandle(1, 1, '~zed@h')?.globalStatus).toBe('trusted');
+    // unrevoke on a non-revoked peer is a no-op
+    expect(e2eManager.unrevokePeer(1, 1, '~zed@h')).toBe(false);
+  });
+
+  it('channelStatus reports enabled, mode, and peer count', () => {
+    e2eManager.setChannelConfig(1, 1, '#cs', true, 'quiet');
+    expect(e2eManager.channelStatus(1, 1, '#cs')).toMatchObject({
+      enabled: true,
+      mode: 'quiet',
+      peers: 0,
+    });
+  });
+
+  it('listKeyring returns remembered peers without unsealing keys', () => {
+    const fp = new Uint8Array(16).fill(3);
+    const pub = new Uint8Array(32).fill(4);
+    keyring.upsertPeer(1, 1, {
+      fingerprint: fp,
+      pubkey: pub,
+      lastHandle: '~kit@h',
+      lastNick: 'kit',
+      firstSeen: 1,
+      lastSeen: 1,
+      globalStatus: 'trusted',
+    });
+    const { peers } = e2eManager.listKeyring(1, 1);
+    expect(peers.some((p) => p.handle === '~kit@h' && p.status === 'trusted')).toBe(true);
+  });
+});
