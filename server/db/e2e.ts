@@ -805,6 +805,62 @@ export function deleteOutgoingRecipientsForHandle(
   return deleteRecipientsForHandleStmt.run(userId, networkId, handle).changes;
 }
 
+// ─── bulk replace (portable import) ──────────────────────────────────────────
+
+const deleteAllPeersStmt = db.prepare(`DELETE FROM e2e_peers WHERE user_id = ? AND network_id = ?`);
+const deleteAllIncomingStmt = db.prepare(
+  `DELETE FROM e2e_incoming_sessions WHERE user_id = ? AND network_id = ?`,
+);
+const deleteAllOutgoingStmt = db.prepare(
+  `DELETE FROM e2e_outgoing_sessions WHERE user_id = ? AND network_id = ?`,
+);
+const deleteAllChannelConfigStmt = db.prepare(
+  `DELETE FROM e2e_channel_config WHERE user_id = ? AND network_id = ?`,
+);
+const deleteAllAutotrustStmt = db.prepare(
+  `DELETE FROM e2e_autotrust WHERE user_id = ? AND network_id = ?`,
+);
+const deleteAllRecipientsStmt = db.prepare(
+  `DELETE FROM e2e_outgoing_recipients WHERE user_id = ? AND network_id = ?`,
+);
+
+export interface ImportData {
+  identity: IdentityInput;
+  peers: PeerRecord[];
+  incoming: IncomingSession[];
+  outgoing: OutgoingSession[];
+  channels: ChannelConfig[];
+  autotrust: AutotrustRule[];
+}
+
+/** Atomically REPLACE this `(user, network)`'s keyring from a validated import,
+ *  and (re)set the account identity. Mirrors repartee's `replace_all_for_import`:
+ *  a full-snapshot swap in one transaction, so a failure can't leave a
+ *  half-populated keyring. Outgoing recipients (derived rotation state) are
+ *  cleared — they re-record on the next handshake. `now` stamps autotrust rows.
+ *  Caller MUST have validated `data` (byte lengths, enums) before calling. */
+export const replaceKeyringForImport = db.transaction(
+  (userId: number, networkId: number, data: ImportData, now: number) => {
+    saveIdentity(userId, data.identity);
+
+    deleteAllPeersStmt.run(userId, networkId);
+    deleteAllIncomingStmt.run(userId, networkId);
+    deleteAllOutgoingStmt.run(userId, networkId);
+    deleteAllChannelConfigStmt.run(userId, networkId);
+    deleteAllAutotrustStmt.run(userId, networkId);
+    deleteAllRecipientsStmt.run(userId, networkId);
+
+    for (const p of data.peers) upsertPeer(userId, networkId, p);
+    for (const s of data.incoming) setIncomingSession(userId, networkId, s);
+    for (const o of data.outgoing) {
+      setOutgoingSession(userId, networkId, o.channel, o.sk, o.createdAt);
+      if (o.pendingRotation) markOutgoingPendingRotation(userId, networkId, o.channel);
+    }
+    for (const c of data.channels) setChannelConfig(userId, networkId, c);
+    for (const a of data.autotrust) addAutotrust(userId, networkId, a.scope, a.handlePattern, now);
+  },
+);
+
 // ─── at-rest backfill ────────────────────────────────────────────────────────
 
 // (table, secret-column) pairs holding sealed key material. All are rowid

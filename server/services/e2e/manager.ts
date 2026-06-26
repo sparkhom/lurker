@@ -47,6 +47,13 @@ import {
   sigPayloadKeyRsp,
 } from './handshake.js';
 import { generateIdentity, type Identity, identityFromSeed, sign, verify } from './identity.js';
+import {
+  buildPortable,
+  countsOf,
+  parseAndValidate,
+  type PortableCounts,
+  serializePortable,
+} from './portable.js';
 import { encodeChunk, freshMsgid, parseChunk } from './wire.js';
 import * as keyring from '../../db/e2e.js';
 import { RateLimiter } from './rateLimiter.js';
@@ -137,6 +144,17 @@ export interface PendingRekeySend {
   targetHandle: string;
   body: string;
 }
+
+/** Result of `exportKeyring` — the serialized JSON + row counts, or a reason. */
+export type ExportResult =
+  | { ok: true; json: string; counts: PortableCounts }
+  | { ok: false; reason: string };
+
+/** Result of `importKeyring`. `identityChanged` = the imported identity differs
+ *  from the current account identity (now applies to ALL networks). */
+export type ImportResult =
+  | { ok: true; counts: PortableCounts; identityChanged: boolean; fingerprintHex: string }
+  | { ok: false; reason: string };
 
 export type DecryptOutcome =
   | { kind: 'plaintext'; text: string }
@@ -1282,6 +1300,67 @@ export class E2eManager {
     } catch (err) {
       console.warn(`e2e takePendingRekeySends: ${(err as Error).message}`);
       return [];
+    }
+  }
+
+  // ─── keyring portability (export / import) ───────────────────────────────────
+
+  /** Serialize this account's identity + this network's peers/sessions/configs/
+   *  autotrust to a repartee-compatible portable JSON document (`/e2e export`).
+   *  WARNING: contains the identity private key + session keys in plaintext hex —
+   *  the caller must treat it like a password. `ok:false` if there's no identity
+   *  yet. Never throws (singleton). */
+  exportKeyring(userId: number, networkId: number): ExportResult {
+    try {
+      const identity = keyring.loadIdentity(userId);
+      if (!identity) return { ok: false, reason: 'no encryption identity yet — nothing to export' };
+      const doc = buildPortable({
+        identity,
+        peers: keyring.listPeers(userId, networkId),
+        incoming: keyring.listIncomingSessions(userId, networkId),
+        outgoing: keyring.listOutgoingSessions(userId, networkId),
+        channels: keyring.listChannelConfigs(userId, networkId),
+        autotrust: keyring.listAutotrust(userId, networkId),
+        exportedAt: this.nowUnix(),
+      });
+      return { ok: true, json: serializePortable(doc), counts: countsOf(doc) };
+    } catch (err) {
+      console.warn(`e2e export: ${(err as Error).message}`);
+      return { ok: false, reason: (err as Error).message };
+    }
+  }
+
+  /** Validate a portable JSON document and, if it's well-formed, REPLACE this
+   *  network's keyring + (re)set the account identity (`/e2e import`). Validation
+   *  is complete before any write, so a malformed import changes nothing.
+   *  `identityChanged` flags when the imported identity differs from the current
+   *  one (it becomes the account identity on ALL networks — the caller should
+   *  warn). Never throws (singleton). */
+  importKeyring(userId: number, networkId: number, json: string): ImportResult {
+    try {
+      const data = parseAndValidate(json);
+      const current = keyring.loadIdentity(userId);
+      const identityChanged =
+        !current || !equalBytes(current.fingerprint, data.identity.fingerprint);
+      keyring.replaceKeyringForImport(userId, networkId, data, this.nowUnix());
+      // The cached identity may now be stale (import can change it) — drop it so
+      // the next load re-reads the imported key.
+      this.identities.delete(userId);
+      return {
+        ok: true,
+        counts: {
+          peers: data.peers.length,
+          incoming: data.incoming.length,
+          outgoing: data.outgoing.length,
+          channels: data.channels.length,
+          autotrust: data.autotrust.length,
+        },
+        identityChanged,
+        fingerprintHex: fingerprintHex(data.identity.fingerprint),
+      };
+    } catch (err) {
+      console.warn(`e2e import: ${(err as Error).message}`);
+      return { ok: false, reason: (err as Error).message };
     }
   }
 

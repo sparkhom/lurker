@@ -494,3 +494,94 @@ describe('E2eManager key rotation (Phase 2)', () => {
     });
   });
 });
+
+// ─── keyring portability: /e2e export · import ───────────────────────────────
+describe('E2eManager keyring export/import', () => {
+  let dave: number;
+  let daveNet: number;
+
+  beforeAll(() => {
+    dave = createUser('mgr-dave').id;
+    daveNet = createNetwork(dave, {
+      name: 'libera',
+      host: 'h',
+      port: 6697,
+      tls: true,
+      nick: 'n',
+    })!.id;
+  });
+
+  const strip = (json: string): Record<string, unknown> => {
+    const o = JSON.parse(json) as Record<string, unknown>;
+    delete o.exportedAt; // export time, not keyring content
+    return o;
+  };
+
+  it('round-trips a full keyring losslessly through the DB (export → import → export)', () => {
+    const ch = '#exp';
+    fullHandshake(ch); // alice gets an identity, a bob peer pin, sessions, a channel config
+    mgr.addAutotrust(alice, aliceNet, 'global', '*@trusted.host');
+
+    const e1 = mgr.exportKeyring(alice, aliceNet);
+    expect(e1.ok).toBe(true);
+    if (!e1.ok) return;
+    // Earlier tests share alice's keyring, so assert relationships, not absolutes.
+    expect(e1.counts.peers).toBeGreaterThanOrEqual(1);
+    expect(e1.counts.autotrust).toBeGreaterThanOrEqual(1);
+
+    // Import into a DIFFERENT account+network — a clean migration target.
+    const imp = mgr.importKeyring(dave, daveNet, e1.json);
+    expect(imp.ok).toBe(true);
+    if (!imp.ok) return;
+    expect(imp.identityChanged).toBe(true); // dave had no identity
+    expect(imp.counts).toEqual(e1.counts); // every row imported
+
+    // Re-exporting the imported keyring reproduces the same document (modulo the
+    // export timestamp) — proves the seal/unseal + replace path is lossless.
+    const e2 = mgr.exportKeyring(dave, daveNet);
+    expect(e2.ok).toBe(true);
+    if (!e2.ok) return;
+    expect(strip(e2.json)).toEqual(strip(e1.json));
+
+    // Dave now holds Alice's identity fingerprint.
+    expect(mgr.getIdentity(dave)?.fingerprintHex).toBe(mgr.getIdentity(alice)?.fingerprintHex);
+  });
+
+  it('reports identityChanged=false when re-importing the same identity', () => {
+    fullHandshake('#exp2');
+    const e = mgr.exportKeyring(alice, aliceNet);
+    expect(e.ok).toBe(true);
+    if (!e.ok) return;
+    mgr.importKeyring(dave, daveNet, e.json); // first import sets dave's identity
+    const again = mgr.importKeyring(dave, daveNet, e.json); // same identity again
+    expect(again.ok).toBe(true);
+    if (!again.ok) return;
+    expect(again.identityChanged).toBe(false);
+  });
+
+  it('rejects malformed input without touching the keyring', () => {
+    fullHandshake('#exp3');
+    const before = mgr.exportKeyring(alice, aliceNet);
+    expect(before.ok).toBe(true);
+    const bad = mgr.importKeyring(alice, aliceNet, '{ not valid json');
+    expect(bad.ok).toBe(false);
+    // Alice's keyring is unchanged (import validated-then-replaced; nothing ran).
+    const after = mgr.exportKeyring(alice, aliceNet);
+    expect(after.ok).toBe(true);
+    if (!before.ok || !after.ok) return;
+    expect(strip(after.json)).toEqual(strip(before.json));
+  });
+
+  it('exports ok:false when there is no identity yet', () => {
+    const fresh = createUser('mgr-noident').id;
+    const freshNet = createNetwork(fresh, {
+      name: 'libera',
+      host: 'h',
+      port: 6697,
+      tls: true,
+      nick: 'n',
+    })!.id;
+    const e = mgr.exportKeyring(fresh, freshNet);
+    expect(e.ok).toBe(false);
+  });
+});
