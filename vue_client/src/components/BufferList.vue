@@ -773,10 +773,10 @@ function scrollToUnread(dir: 'up' | 'down'): void {
 
 // Keep a "scrolloff" zone of context around the active buffer when it changes
 // from outside the list — Alt+arrow, quick switcher, jump-to-message, etc. Like
-// vim's `scrolloff` or weechat's buffer list, we keep SCROLLOFF_ROWS buffers
-// visible on whichever side you're heading toward (and on both sides once you
-// reverse), so single-step nav always previews what's coming instead of jamming
-// the selection flush against an edge.
+// vim's `scrolloff` or weechat's buffer list, we keep SCROLLOFF_ROWS buffers of
+// context visible both above and below the active row — a symmetric margin, no
+// notion of travel direction — so single-step nav always previews what's coming
+// instead of jamming the selection flush against an edge.
 //
 // We compute the target scrollTop explicitly rather than leaning on
 // scrollIntoView({ block: 'nearest' }) + a CSS scroll-margin (the old #182
@@ -806,6 +806,13 @@ function scrollActiveIntoZone(behavior: ScrollBehavior): void {
   // much the row actually overlaps the top, and clamps to 0 once it scrolls off.
   const sticky = sc.querySelector<HTMLElement>('.system-net');
   const topInset = sticky ? Math.max(0, sticky.getBoundingClientRect().bottom - scRect.top) : 0;
+  // When the active row IS the sticky LURKER row and it's pinned at the top
+  // (topInset > 0), it's already fully visible, so selecting the system buffer
+  // must not move the list. Without this the math below treats the pinned header
+  // as sitting above the zone and yanks the list back to the top. On mobile the
+  // row is inline and can scroll off (topInset === 0), so we fall through and
+  // reveal it normally.
+  if (sticky && topInset > 0 && sticky.contains(el)) return;
   const topEdge = scRect.top + topInset;
   const bottomEdge = scRect.bottom;
   // Never demand more room than centering would, so a viewport too short for the
