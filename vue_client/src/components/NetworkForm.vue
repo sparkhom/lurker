@@ -59,14 +59,23 @@
             />
           </label>
           <label class="grow">
-            <span>SASL password{{ saslRequired ? '' : ' (optional)' }}</span>
+            <span class="field-label">
+              <span>SASL password{{ saslRequired ? '' : ' (optional)' }}</span>
+              <button
+                v-if="isEdit && props.network?.has_sasl_password"
+                type="button"
+                class="clear-link"
+                @click="toggleClearSasl"
+              >
+                {{ clearSaslPassword ? 'keep' : 'clear' }}
+              </button>
+            </span>
             <input
               v-model="form.sasl_password"
               type="password"
               autocomplete="off"
-              :placeholder="
-                isEdit && props.network?.has_sasl_password ? '(saved — type to replace)' : ''
-              "
+              :disabled="clearSaslPassword"
+              :placeholder="saslPasswordPlaceholder"
             />
           </label>
         </div>
@@ -75,14 +84,23 @@
         </button>
         <div v-if="showAdvanced" class="advanced">
           <label>
-            <span>Server password (optional)</span>
+            <span class="field-label">
+              <span>Server password (optional)</span>
+              <button
+                v-if="isEdit && props.network?.has_password"
+                type="button"
+                class="clear-link"
+                @click="toggleClearServer"
+              >
+                {{ clearServerPassword ? 'keep' : 'clear' }}
+              </button>
+            </span>
             <input
               v-model="form.server_password"
               type="password"
               autocomplete="off"
-              :placeholder="
-                isEdit && props.network?.has_password ? '(saved — type to replace)' : ''
-              "
+              :disabled="clearServerPassword"
+              :placeholder="serverPasswordPlaceholder"
             />
           </label>
           <label v-if="!isEdit">
@@ -242,6 +260,43 @@ const channelPlaceholder = computed(() =>
   picked.value && !picked.value.tags.includes(LURKER_TAG) ? '#chat' : '#lurker',
 );
 
+// Passwords are write-only as far as the client is concerned: the API returns
+// only has_password / has_sasl_password booleans, never the secret, so the
+// fields start blank and a blank field means "keep the saved value". That
+// overload left no way to *remove* a saved password (#363). These flags add an
+// explicit "clear" intent — when set, submit() sends an empty string, which the
+// server stores verbatim (clearing the column). Typing a replacement still just
+// overwrites it as before. Only reachable when editing a row that has a saved
+// secret, so the toggle is hidden otherwise.
+const clearServerPassword = ref(false);
+const clearSaslPassword = ref(false);
+
+function toggleClearServer(): void {
+  clearServerPassword.value = !clearServerPassword.value;
+  // Blank the field when arming clear so a previously-typed value can't win the
+  // truthiness check in submit() and silently override the clear.
+  if (clearServerPassword.value) form.server_password = '';
+}
+function toggleClearSasl(): void {
+  clearSaslPassword.value = !clearSaslPassword.value;
+  if (clearSaslPassword.value) form.sasl_password = '';
+}
+
+const serverPasswordPlaceholder = computed(() =>
+  clearServerPassword.value
+    ? '(will be cleared)'
+    : isEdit.value && props.network?.has_password
+      ? '(saved — type to replace)'
+      : '',
+);
+const saslPasswordPlaceholder = computed(() =>
+  clearSaslPassword.value
+    ? '(will be cleared)'
+    : isEdit.value && props.network?.has_sasl_password
+      ? '(saved — type to replace)'
+      : '',
+);
+
 const loading = ref(false);
 const error = ref<string | null>(null);
 
@@ -262,8 +317,13 @@ async function submit(): Promise<void> {
         autoconnect: form.autoconnect,
         connect_commands: form.connect_commands,
       };
+      // A typed value replaces; an explicit clear sends '' to wipe the saved
+      // secret; a blank field with no clear intent is omitted so the existing
+      // value is preserved.
       if (form.server_password) patch.server_password = form.server_password;
+      else if (clearServerPassword.value) patch.server_password = '';
       if (form.sasl_password) patch.sasl_password = form.sasl_password;
+      else if (clearSaslPassword.value) patch.sasl_password = '';
       // Saving only persists the row — it never cycles the live connection.
       // Connection-relevant edits (host/port/nick/credentials) take effect on
       // the next connect; the explicit "Reconnect" button below applies them
@@ -354,6 +414,27 @@ label small {
   margin-top: var(--space-1);
   text-transform: none;
   letter-spacing: normal;
+}
+/* Field title sharing its row with an inline "clear" affordance (saved
+   passwords, #363). The inner <span> keeps the uppercase label styling; the
+   button overrides it to read as a lowercase accent link. */
+.field-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.clear-link {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  text-transform: lowercase;
+  letter-spacing: normal;
+}
+.clear-link:hover {
+  text-decoration: underline;
 }
 .advanced-toggle,
 .back-link {
