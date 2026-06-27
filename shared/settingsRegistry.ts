@@ -869,6 +869,23 @@ export const REGISTRY: readonly SettingOption[] = Object.freeze([
       'per-type reply templates below apply only while this is on.',
   },
   {
+    key: 'ctcp.msgbuffer',
+    label: 'Where CTCP notices appear',
+    category: 'chat',
+    group: 'ctcp',
+    type: 'enum',
+    choices: ['server', 'system', 'private'],
+    default: 'server',
+    description:
+      'Which buffer shows incoming CTCP notices — a "X requested CTCP …" probe, ' +
+      'or an unsolicited CTCP reply. Modeled on WeeChat irc.msgbuffer.ctcp. ' +
+      '"server" (default) = the network\'s server buffer; "system" = the ' +
+      'app-wide system buffer (these lines persist there, like other log ' +
+      'lines); "private" = a DM with the sender (or the channel, for a ' +
+      'channel-targeted CTCP). A reply to a /ctcp YOU sent always returns to ' +
+      'the buffer you ran it from, regardless of this.',
+  },
+  {
     key: 'ctcp.version',
     label: 'CTCP VERSION reply',
     category: 'chat',

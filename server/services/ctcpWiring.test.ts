@@ -358,3 +358,66 @@ describe('inbound CTCP request — settings gating', () => {
     expect(ctcpResponse).not.toHaveBeenCalled();
   });
 });
+
+describe('inbound CTCP request — msgbuffer routing (ctcp.msgbuffer)', () => {
+  afterEach(() => settingsService.reset(1, 'ctcp.msgbuffer'));
+
+  it('defaults to the server buffer', () => {
+    const { conn, ctcpLines } = harness();
+    conn.client.emit('ctcp request', {
+      nick: 'bob',
+      ident: 'b',
+      hostname: 'h',
+      target: 'alice',
+      type: 'VERSION',
+      message: 'VERSION',
+    });
+    expect(ctcpLines()[0].target).toBe(':server:1');
+  });
+
+  it('private: a direct CTCP routes to a DM with the sender', () => {
+    settingsService.update(1, { 'ctcp.msgbuffer': 'private' });
+    const { conn, ctcpLines } = harness();
+    conn.client.emit('ctcp request', {
+      nick: 'bob',
+      ident: 'b',
+      hostname: 'h',
+      target: 'alice', // sent to our nick → private
+      type: 'VERSION',
+      message: 'VERSION',
+    });
+    expect(ctcpLines()[0].target).toBe('bob');
+  });
+
+  it('private: a channel-targeted CTCP routes to that channel', () => {
+    settingsService.update(1, { 'ctcp.msgbuffer': 'private' });
+    const { conn, ctcpLines } = harness();
+    conn.client.emit('ctcp request', {
+      nick: 'bob',
+      ident: 'b',
+      hostname: 'h',
+      target: '#chan',
+      type: 'VERSION',
+      message: 'VERSION',
+    });
+    expect(ctcpLines()[0].target).toBe('#chan');
+  });
+
+  it('system: routes to the durable system buffer, not an ephemeral ctcp line', () => {
+    settingsService.update(1, { 'ctcp.msgbuffer': 'system' });
+    const { conn, publishEphemeral, ctcpLines } = harness();
+    const logNet = vi.spyOn(conn, 'logNet').mockImplementation(() => {});
+    conn.client.emit('ctcp request', {
+      nick: 'bob',
+      ident: 'b',
+      hostname: 'h',
+      target: 'alice',
+      type: 'VERSION',
+      message: 'VERSION',
+    });
+    expect(logNet).toHaveBeenCalledWith('bob requested CTCP VERSION');
+    expect(ctcpLines()).toHaveLength(0); // no ephemeral ctcp line in system mode
+    expect(publishEphemeral).not.toHaveBeenCalled();
+    logNet.mockRestore();
+  });
+});
