@@ -905,9 +905,9 @@ export const REGISTRY: readonly SettingOption[] = Object.freeze([
     type: 'string',
     default: '${time}',
     description:
-      'Reply sent for a CTCP TIME query (default is the current server time). ' +
-      'Same placeholders as the VERSION reply. Leave EMPTY to withhold it — ' +
-      'answering reveals your timezone and that you are connected.',
+      'Reply sent for a CTCP TIME query (default is the current server time, ' +
+      'sent as UTC). Same placeholders as the VERSION reply. Leave EMPTY to ' +
+      'withhold it — answering tells the asker you are connected.',
   },
   {
     key: 'ctcp.source',

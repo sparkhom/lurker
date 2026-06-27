@@ -94,8 +94,12 @@ describe('buildCtcpReply', () => {
     ).toBe('hi from me on Lurker');
   });
 
-  it('strips CR/LF so a template cannot inject a second wire line', () => {
+  it('strips CR/LF/NUL and the 0x01 CTCP frame byte so a template cannot inject', () => {
+    // CR/LF would split the IRC line; \x01 would split the reply into extra CTCP
+    // segments for the peer.
     expect(buildCtcpReply('VERSION', '', cfg({ version: 'a\r\nQUIT b' }), VARS)).toBe('aQUIT b');
+    const dirty = `a${String.fromCharCode(1)}b${String.fromCharCode(0)}c`;
+    expect(buildCtcpReply('VERSION', '', cfg({ version: dirty }), VARS)).toBe('abc');
   });
 });
 

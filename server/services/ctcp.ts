@@ -94,16 +94,19 @@ const PING_MAX_PAYLOAD = 100;
 // instead of a nonsense latency.
 const PING_MAX_PLAUSIBLE_MS = 3_600_000;
 
-// A CTCP reply is a single IRC line — strip anything that could split it (CR/LF)
-// or NUL, so a crafted template can't smuggle a second wire command. Done by
-// char code (no control chars in source, which keeps the linter + grep happy).
+// A CTCP reply is a single IRC line framed by 0x01 — strip anything that would
+// break that: CR/LF/NUL (split the IRC line) and 0x01 itself (an embedded one
+// would split the reply into extra CTCP segments for the peer). A crafted/
+// rebranded template therefore can't smuggle a second wire command. Filtered by
+// char code (no control chars in source, keeping the linter + grep happy) and
+// in one pass (no O(n²) concat on long templates).
 function stripCtcpControlChars(s: string): string {
-  let out = '';
-  for (let i = 0; i < s.length; i++) {
-    const c = s.charCodeAt(i);
-    if (c !== 0x00 && c !== 0x0a && c !== 0x0d) out += s[i];
-  }
-  return out;
+  return [...s]
+    .filter((ch) => {
+      const c = ch.charCodeAt(0);
+      return c !== 0x00 && c !== 0x01 && c !== 0x0a && c !== 0x0d;
+    })
+    .join('');
 }
 
 /** Split a CTCP inner body (`"VERSION"` / `"PING 1719500000000"`) into an
@@ -134,14 +137,17 @@ function ctcpTemplateFor(type: string, config: CtcpReplyConfig): string | undefi
  * Build the auto-reply for an inbound CTCP request, or null when we don't answer
  * it (master off, unsupported type, or an empty/disabled template). The returned
  * value is the params AFTER the type; the caller frames it as
- * `ctcpResponse(nick, type, reply)`. `vars` supplies the `${...}` values for
- * template expansion; omit `config`/`vars` for the all-on defaults.
+ * `ctcpResponse(nick, type, reply)`. `config` is the user's reply config and
+ * `vars` supplies the live `${...}` values for template expansion — both
+ * required (the templates are inert without their values; see
+ * CTCP_DEFAULT_CONFIG for the default templates and CTCP_TEMPLATE_VARS for the
+ * placeholder set the caller must populate).
  */
 export function buildCtcpReply(
   type: string,
   args: string,
-  config: CtcpReplyConfig = CTCP_DEFAULT_CONFIG,
-  vars: Record<string, string> = {},
+  config: CtcpReplyConfig,
+  vars: Record<string, string>,
 ): string | null {
   // Master switch off → publish nothing, not even a PING echo.
   if (!config.enabled) return null;

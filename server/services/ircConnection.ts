@@ -20,7 +20,7 @@ import highlightRulesService from './highlightRulesService.js';
 import ignoreRulesService from './ignoreRulesService.js';
 import { decideStamp } from './insertDecisions.js';
 import * as systemLog from './systemLog.js';
-import { effectiveSetting } from './settingsService.js';
+import { effectiveSetting, effectiveSettings } from './settingsService.js';
 import { APP_NAME, APP_VERSION } from '../utils/userAgent.js';
 import { findUserById } from '../db/users.js';
 import { isNodeMode } from '../utils/edition.js';
@@ -2375,13 +2375,18 @@ export class IrcConnection {
   // effect immediately with no cache to invalidate. A missing key resolves to
   // the registry default (all on), so out of the box behavior is unchanged.
   private ctcpReplyConfig(): CtcpReplyConfig {
-    const uid = this.network.user_id;
-    const tmpl = (key: string): string => {
-      const v = effectiveSetting(uid, key);
-      return typeof v === 'string' ? v : '';
-    };
+    // One settings read for the whole cluster (not one per key) — this runs on
+    // every inbound probe.
+    const s = effectiveSettings(this.network.user_id, [
+      'ctcp.replies',
+      'ctcp.version',
+      'ctcp.time',
+      'ctcp.source',
+      'ctcp.clientinfo',
+    ]);
+    const tmpl = (key: string): string => (typeof s[key] === 'string' ? (s[key] as string) : '');
     return {
-      enabled: effectiveSetting(uid, 'ctcp.replies') !== false,
+      enabled: s['ctcp.replies'] !== false,
       version: tmpl('ctcp.version'),
       time: tmpl('ctcp.time'),
       source: tmpl('ctcp.source'),
