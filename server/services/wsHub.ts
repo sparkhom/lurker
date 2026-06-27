@@ -59,6 +59,7 @@ import { closeBuffer, reopenBuffer, isClosed, closedKeySetForUser } from '../db/
 import {
   pinBuffer,
   unpinBuffer,
+  unpinBufferCaseInsensitive,
   reorderPins,
   listPinnedForUserNetwork,
 } from '../db/pinnedBuffers.js';
@@ -1581,10 +1582,13 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
         closeBuffer(userId, networkId, target);
         // The client renders the pinned section by intersecting pins with open
         // buffers, so a pin on a now-closed buffer is invisible — and leaving
-        // the row would diverge the client's pin set from ours, snapping the
-        // next reorder back as a mismatch (issue #112). Close implies unpin.
-        if (listPinnedForUserNetwork(userId, networkId).includes(target)) {
-          const pinned = unpinBuffer(userId, networkId, target);
+        // the row would diverge the client's pin set from ours (issue #112).
+        // Close implies unpin. Match case-insensitively: the snapshot hides
+        // closed buffers case-folded (closedKeySetForUser lowercases), so a
+        // differently-cased close would otherwise hide the buffer while leaving
+        // the exact-cased pin row stranded — an invisible orphan (issue #405).
+        const pinned = unpinBufferCaseInsensitive(userId, networkId, target);
+        if (pinned) {
           fanOut(userId, { kind: 'pins-changed', networkId, pinned });
         }
         if (target.startsWith('#')) {
