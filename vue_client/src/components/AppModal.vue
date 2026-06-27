@@ -92,12 +92,21 @@ const cardEl = ref<HTMLElement | null>(null);
 const settings = useSettingsStore();
 const { isMobile } = useViewport();
 
+// Known backdrop styles, coupled to the .overlay-* CSS rules below and to
+// look.modal.overlay's choices. Writes are validated against the registry, but
+// a stale value (a future-removed choice, a manual DB edit) would otherwise
+// render an overlay-* class with no matching CSS — so clamp reads to this set.
+const OVERLAY_STYLES = ['wordmark', 'dimmed', 'clear'] as const;
+type OverlayStyle = (typeof OVERLAY_STYLES)[number];
+
 // Backdrop style (look.modal.overlay): wordmark | dimmed | clear. Desktop-only —
 // on mobile every modal is a full-frame opaque sheet, so we always render the
 // wordmark wallpaper there regardless of the stored setting.
-const overlayStyle = computed(() =>
-  isMobile.value ? 'wordmark' : String(settings.effective('look.modal.overlay') || 'wordmark'),
-);
+const overlayStyle = computed<OverlayStyle>(() => {
+  if (isMobile.value) return 'wordmark';
+  const raw = String(settings.effective('look.modal.overlay') || '');
+  return (OVERLAY_STYLES as readonly string[]).includes(raw) ? (raw as OverlayStyle) : 'wordmark';
+});
 
 // Fall back to the title when the caller didn't supply an explicit word,
 // so the wallpaper always says *something* even for one-off modals.
