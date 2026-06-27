@@ -270,9 +270,16 @@ export function decorateMessage(userId: number, event: MessageEvent): DecoratedE
   const dm = isDirect(event) && !event.self;
   const target = event.target || '';
   const isChannel = target.startsWith('#');
+  // CTCP request/reply/echo lines are status, not conversation — never notify,
+  // even when routed to a notify-always channel (otherwise running /ctcp from
+  // such a channel would self-notify on your own echo). (#263)
+  const isStatus = event.type === 'ctcp';
   const notifyAlways =
-    isChannel && !event.self && getChannelNotifyAlways(userId, event.networkId, target);
-  const notify = matched || dm || notifyAlways;
+    !isStatus &&
+    isChannel &&
+    !event.self &&
+    getChannelNotifyAlways(userId, event.networkId, target);
+  const notify = !isStatus && (matched || dm || notifyAlways);
   return {
     ...event,
     matched,

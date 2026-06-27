@@ -2580,9 +2580,11 @@ function handleCommand(line: string, networkId: number | null, target: string): 
     }
     case 'ping': {
       // /ping [nick] — CTCP PING for round-trip latency (#263). Defaults to the
-      // current DM peer when no nick is given.
-      const who =
-        rest[0] || (target && !target.startsWith('#') && !target.startsWith(':') ? target : '');
+      // current DM peer when no nick is given — i.e. the active buffer is not a
+      // channel (any prefix #&!+, matching the server's isChannelContext) and not
+      // a pseudo-buffer (`:server:`/system), so /ping in an `&local` channel
+      // doesn't ping the whole channel.
+      const who = rest[0] || (target && !/^[#&!+:]/.test(target) ? target : '');
       if (!who) {
         localInfo(networkId, target, 'usage: /ping <nick> (a nick is only optional inside a DM)');
         return true;

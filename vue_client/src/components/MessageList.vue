@@ -1074,6 +1074,9 @@ function prefixClass(m: ChatMessage | undefined) {
     // A warn-level E2E line (TOFU warning, refused send) colors its tag like an
     // error; info-level stays the calm E2E color.
     'e2e-warn': m?.type === 'e2e' && m?.level === 'warn',
+    // A warn-level CTCP line (e.g. "/ctcp: this network isn't connected") reads
+    // as an error too; info-level stays muted (#263).
+    'ctcp-warn': m?.type === 'ctcp' && m?.level === 'warn',
     [`p-${m?.type}`]: true,
   };
 }
@@ -1807,6 +1810,10 @@ watch(
 .prefix.p-ctcp,
 .prefix.p-cons {
   color: var(--fg-muted);
+}
+/* …except a warn-level CTCP line (failed send) colors its tag like an error. */
+.prefix.p-ctcp.ctcp-warn {
+  color: var(--bad);
 }
 /* "System" lines (#355) read as the full-strength foreground, not muted — the
    app speaking in its own voice. A network-tied system line overrides this with

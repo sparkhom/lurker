@@ -114,25 +114,65 @@ describe('inbound CTCP request (auto-reply + surface)', () => {
     expect(publishEphemeral).not.toHaveBeenCalled();
   });
 
-  it('rate-limits a flood of requests to the burst budget', () => {
+  it('rate-limits a flood of requests from one peer (per-peer limiter)', () => {
     const { conn, ctcpResponse } = harness();
     for (let i = 0; i < 10; i++) {
-      conn.client.emit('ctcp request', { nick: 'bob', type: 'VERSION', message: 'VERSION' });
+      conn.client.emit('ctcp request', {
+        nick: 'bob',
+        ident: 'b',
+        hostname: 'h',
+        type: 'VERSION',
+        message: 'VERSION',
+      });
     }
-    // CTCP_REPLY_BURST = 5; all fire within the same ms so no token refills.
-    expect(ctcpResponse).toHaveBeenCalledTimes(5);
+    // The shared e2e RateLimiter allows 3 per peer per 60s window, then backoff.
+    expect(ctcpResponse).toHaveBeenCalledTimes(3);
   });
 
-  it('a malformed (empty) CTCP does not drain the reply budget', () => {
+  it('one peer flooding does not suppress replies to a different peer', () => {
     const { conn, ctcpResponse } = harness();
-    // Empty-body CTCPs (\x01\x01) parse to no type — they must be rejected
-    // BEFORE a token is taken, or a peer could starve real replies.
+    for (let i = 0; i < 10; i++) {
+      conn.client.emit('ctcp request', {
+        nick: 'flood',
+        ident: 'f',
+        hostname: 'h',
+        type: 'VERSION',
+        message: 'VERSION',
+      });
+    }
+    conn.client.emit('ctcp request', {
+      nick: 'carol',
+      ident: 'c',
+      hostname: 'h',
+      type: 'VERSION',
+      message: 'VERSION',
+    });
+    // carol's bucket is independent of flood's — she still gets answered.
+    expect(ctcpResponse).toHaveBeenCalledWith('carol', 'VERSION', IRC_VERSION);
+  });
+
+  it('a malformed (empty) CTCP does not consume a peer rate-limit slot', () => {
+    const { conn, ctcpResponse } = harness();
+    // Empty-body CTCPs (\x01\x01) parse to no type — rejected BEFORE the limiter
+    // records the peer, so they can't burn the budget and starve real probes.
     for (let i = 0; i < 20; i++) {
-      conn.client.emit('ctcp request', { nick: 'bob', type: '', message: '' });
+      conn.client.emit('ctcp request', {
+        nick: 'bob',
+        ident: 'b',
+        hostname: 'h',
+        type: '',
+        message: '',
+      });
     }
     expect(ctcpResponse).not.toHaveBeenCalled();
     // A real VERSION afterward is still answered — the budget is intact.
-    conn.client.emit('ctcp request', { nick: 'bob', type: 'VERSION', message: 'VERSION' });
+    conn.client.emit('ctcp request', {
+      nick: 'bob',
+      ident: 'b',
+      hostname: 'h',
+      type: 'VERSION',
+      message: 'VERSION',
+    });
     expect(ctcpResponse).toHaveBeenCalledWith('bob', 'VERSION', IRC_VERSION);
   });
 });
@@ -198,5 +238,61 @@ describe('inbound CTCP reply (route + latency)', () => {
     });
     const reply = ctcpLines().find((l) => l.text.includes('reply'));
     expect(reply?.target).toBe(':server:1');
+  });
+
+  it('FIFO-routes concurrent same-type replies to the buffers in order (#11)', () => {
+    const { conn, ctcpLines } = harness();
+    conn.sendCtcpRequest('#chan1', 'bob', 'VERSION', '');
+    conn.sendCtcpRequest('#chan2', 'bob', 'VERSION', '');
+    conn.client.emit('ctcp response', { nick: 'bob', type: 'VERSION', message: 'VERSION first' });
+    conn.client.emit('ctcp response', { nick: 'bob', type: 'VERSION', message: 'VERSION second' });
+    const replies = ctcpLines().filter((l) => l.text.includes('reply'));
+    expect(replies.map((r) => r.target)).toEqual(['#chan1', '#chan2']);
+  });
+
+  it('rate-limits an UNSOLICITED reply flood but never a solicited reply', () => {
+    const { conn, ctcpLines } = harness();
+    // Unsolicited (no outstanding request): per-peer limiter caps at 3/window.
+    for (let i = 0; i < 10; i++) {
+      conn.client.emit('ctcp response', {
+        nick: 'mal',
+        ident: 'm',
+        hostname: 'h',
+        type: 'VERSION',
+        message: 'VERSION x',
+      });
+    }
+    expect(ctcpLines().filter((l) => l.text.includes('reply'))).toHaveLength(3);
+
+    // Solicited replies (matching outstanding /ctcp) bypass the limiter entirely,
+    // so a burst of our own queries to one peer all surface.
+    const { conn: conn2, ctcpLines: lines2 } = harness();
+    for (let i = 0; i < 6; i++) conn2.sendCtcpRequest('#chan', 'bob', 'VERSION', '');
+    for (let i = 0; i < 6; i++) {
+      conn2.client.emit('ctcp response', { nick: 'bob', type: 'VERSION', message: 'VERSION ok' });
+    }
+    expect(lines2().filter((l) => l.text.includes('reply'))).toHaveLength(6);
+  });
+
+  it('does not surface a lowercase rpee2e NOTICE as a CTCP reply (#13)', () => {
+    const { conn, ctcpLines } = harness();
+    // Response types are raw-case; a lowercase rpee2e must route to the E2E path
+    // (which won't parse it), not surface a bogus "CTCP rpee2e reply" line.
+    conn.client.emit('ctcp response', {
+      nick: 'bob',
+      ident: 'b',
+      hostname: 'h',
+      type: 'rpee2e',
+      message: 'rpee2e KEYREQ v=1 c=#x',
+    });
+    expect(ctcpLines()).toHaveLength(0);
+  });
+
+  it('clears CTCP routing/limit state on socket close (#8)', () => {
+    const { conn } = harness();
+    conn.sendCtcpRequest('#chan', 'bob', 'VERSION', '');
+    expect(conn.ctcpOutstanding.size).toBe(1);
+    conn.client.emit('close');
+    expect(conn.ctcpOutstanding.size).toBe(0);
   });
 });
