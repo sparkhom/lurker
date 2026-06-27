@@ -2465,7 +2465,7 @@ export class IrcConnection {
     const config = this.ctcpReplyConfig();
     const reply = buildCtcpReply(type, args, config, this.ctcpTemplateVars(config));
     if (reply !== null) this.client.ctcpResponse(nick, type, reply);
-    this.routeCtcpStatus(event, formatCtcpRequestLine(nick, type, reply !== null));
+    this.routeCtcpStatus(event, formatCtcpRequestLine(nick, type, reply));
   }
 
   // Surface an inbound CTCP reply (a peer answered a query we sent), routed back

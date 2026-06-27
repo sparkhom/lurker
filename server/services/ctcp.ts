@@ -203,8 +203,12 @@ export function formatCtcpReplyLine(
   return `CTCP ${t} reply from ${nick}${tail}`;
 }
 
-/** Display line for an inbound CTCP *request* (someone probed us). */
-export function formatCtcpRequestLine(nick: string, type: string, answered: boolean): string {
-  const suffix = answered ? '' : ' (no reply)';
-  return `${nick} requested CTCP ${type.toUpperCase()}${suffix}`;
+/** Display line for an inbound CTCP *request* (someone probed us), showing what
+ *  we disclosed back: `reply` is the answer we sent, or null when we declined
+ *  (unsupported type / disabled). WeeChat shows the sent reply on its own line
+ *  (irc.look.display_ctcp_reply); we fold it into the one probe line to keep the
+ *  buffer quiet while still surfacing exactly what was disclosed. */
+export function formatCtcpRequestLine(nick: string, type: string, reply: string | null): string {
+  const base = `${nick} requested CTCP ${type.toUpperCase()}`;
+  return reply === null ? `${base} (no reply)` : `${base} (replied: ${reply})`;
 }

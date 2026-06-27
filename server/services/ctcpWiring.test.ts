@@ -84,7 +84,7 @@ describe('inbound CTCP request (auto-reply + surface)', () => {
     const lines = ctcpLines();
     expect(lines).toHaveLength(1);
     expect(lines[0].target).toBe(':server:1'); // probes land in the server buffer
-    expect(lines[0].text).toBe('bob requested CTCP VERSION');
+    expect(lines[0].text).toBe(`bob requested CTCP VERSION (replied: ${DEFAULT_VERSION_REPLY})`);
   });
 
   it('echoes a PING payload back verbatim', () => {
@@ -415,7 +415,9 @@ describe('inbound CTCP request — msgbuffer routing (ctcp.msgbuffer)', () => {
       type: 'VERSION',
       message: 'VERSION',
     });
-    expect(logNet).toHaveBeenCalledWith('bob requested CTCP VERSION');
+    expect(logNet).toHaveBeenCalledWith(
+      `bob requested CTCP VERSION (replied: ${DEFAULT_VERSION_REPLY})`,
+    );
     expect(ctcpLines()).toHaveLength(0); // no ephemeral ctcp line in system mode
     expect(publishEphemeral).not.toHaveBeenCalled();
     logNet.mockRestore();

@@ -194,12 +194,14 @@ describe('formatCtcpReplyLine', () => {
 });
 
 describe('formatCtcpRequestLine', () => {
-  it('notes an answered probe', () => {
-    expect(formatCtcpRequestLine('bob', 'version', true)).toBe('bob requested CTCP VERSION');
+  it('shows what we disclosed back on an answered probe', () => {
+    expect(formatCtcpRequestLine('bob', 'version', 'Lurker 1.2.3')).toBe(
+      'bob requested CTCP VERSION (replied: Lurker 1.2.3)',
+    );
   });
 
-  it('flags an unanswered probe', () => {
-    expect(formatCtcpRequestLine('bob', 'finger', false)).toBe(
+  it('flags an unanswered probe (null reply)', () => {
+    expect(formatCtcpRequestLine('bob', 'finger', null)).toBe(
       'bob requested CTCP FINGER (no reply)',
     );
   });
