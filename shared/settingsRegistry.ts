@@ -847,11 +847,14 @@ export const REGISTRY: readonly SettingOption[] = Object.freeze([
   },
 
   // ─── CTCP auto-replies (what we disclose to the network on a CTCP query) ──
-  // Lurker answers a few standard CTCP queries cell-side (so they work even
-  // with no tab open). These let a privacy-conscious user trim or fully silence
-  // what gets published. Defaults preserve current behavior (all on). PING has
-  // no toggle — it only echoes back what the asker sent (no info disclosed) —
-  // but the master switch silences it too.
+  // Lurker answers a few standard CTCP queries cell-side (so they work even with
+  // no tab open). The per-type values are WeeChat-style reply TEMPLATES: the
+  // text sent back, with ${...} placeholders expanded. An EMPTY template
+  // disables that reply. Placeholders: ${name} (Lurker), ${version}, ${source}
+  // (project URL), ${time} (server time), ${clientinfo} (the types still
+  // answered), ${nick} (your nick). Defaults reproduce the standard replies.
+  // PING isn't templated — it only echoes the asker's token — but the master
+  // switch silences it too.
   {
     key: 'ctcp.replies',
     label: 'Answer CTCP queries',
@@ -863,49 +866,54 @@ export const REGISTRY: readonly SettingOption[] = Object.freeze([
       'Master switch for replying to CTCP queries from other users (VERSION, ' +
       'TIME, SOURCE, CLIENTINFO, PING). Turn off to publish nothing — Lurker ' +
       'stays completely silent to CTCP, like a client with CTCP disabled. The ' +
-      'per-type toggles below apply only while this is on.',
+      'per-type reply templates below apply only while this is on.',
   },
   {
     key: 'ctcp.version',
-    label: 'Reply to CTCP VERSION',
+    label: 'CTCP VERSION reply',
     category: 'chat',
     group: 'ctcp',
-    type: 'bool',
-    default: true,
+    type: 'string',
+    default: '${name} ${version}',
     description:
-      'Answer CTCP VERSION with the Lurker name and version. Disclosing your ' +
-      'exact client/version aids fingerprinting; turn off to stay quiet.',
+      'Reply sent for a CTCP VERSION query. Placeholders: ${name}, ${version}, ' +
+      '${source}, ${time}, ${clientinfo}, ${nick}. Leave EMPTY to not answer ' +
+      'VERSION at all — disclosing your exact client/version aids fingerprinting.',
   },
   {
     key: 'ctcp.time',
-    label: 'Reply to CTCP TIME',
+    label: 'CTCP TIME reply',
     category: 'chat',
     group: 'ctcp',
-    type: 'bool',
-    default: true,
+    type: 'string',
+    default: '${time}',
     description:
-      'Answer CTCP TIME with the current server time. This reveals your ' +
-      'timezone and that you are connected; turn off to withhold it.',
+      'Reply sent for a CTCP TIME query (default is the current server time). ' +
+      'Same placeholders as the VERSION reply. Leave EMPTY to withhold it — ' +
+      'answering reveals your timezone and that you are connected.',
   },
   {
     key: 'ctcp.source',
-    label: 'Reply to CTCP SOURCE',
+    label: 'CTCP SOURCE reply',
     category: 'chat',
     group: 'ctcp',
-    type: 'bool',
-    default: true,
-    description: 'Answer CTCP SOURCE with the Lurker project URL.',
+    type: 'string',
+    default: '${source}',
+    description:
+      'Reply sent for a CTCP SOURCE query (default is the Lurker project URL). ' +
+      'Same placeholders as the VERSION reply. Leave EMPTY to not answer.',
   },
   {
     key: 'ctcp.clientinfo',
-    label: 'Reply to CTCP CLIENTINFO',
+    label: 'CTCP CLIENTINFO reply',
     category: 'chat',
     group: 'ctcp',
-    type: 'bool',
-    default: true,
+    type: 'string',
+    default: '${clientinfo}',
     description:
-      'Answer CTCP CLIENTINFO with the list of CTCP types Lurker responds to. ' +
-      'The list reflects whichever of the toggles above are enabled.',
+      'Reply sent for a CTCP CLIENTINFO query. The default ${clientinfo} ' +
+      'expands to the list of CTCP types you currently answer. Same ' +
+      'placeholders as the VERSION reply. Leave EMPTY to not answer.',
   },
 
   // ─── Auto-away (sets you AWAY when no client is connected) ────────────

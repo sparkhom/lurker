@@ -6,17 +6,25 @@ import { describe, expect, it } from 'vitest';
 import {
   buildCtcpReply,
   CTCP_DEFAULT_CONFIG,
-  CTCP_SOURCE,
-  CTCP_SUPPORTED,
   type CtcpReplyConfig,
+  enabledCtcpTypes,
+  expandCtcpTemplate,
   formatCtcpReplyLine,
   formatCtcpRequestLine,
   formatLatency,
   parseCtcp,
   pingReplyLatencyMs,
 } from './ctcp.js';
-import { IRC_VERSION } from '../utils/userAgent.js';
 
+// Representative ${...} values, as ircConnection.ctcpTemplateVars would supply.
+const VARS: Record<string, string> = {
+  name: 'Lurker',
+  version: '1.2.3',
+  source: 'https://example.test/src',
+  clientinfo: 'ACTION CLIENTINFO PING SOURCE TIME VERSION',
+  time: 'Sat, 27 Jun 2026 14:03:11 GMT',
+  nick: 'me',
+};
 const cfg = (over: Partial<CtcpReplyConfig> = {}): CtcpReplyConfig => ({
   ...CTCP_DEFAULT_CONFIG,
   ...over,
@@ -38,84 +46,98 @@ describe('parseCtcp', () => {
   });
 });
 
-describe('buildCtcpReply', () => {
-  const now = new Date('2026-06-27T14:03:11Z');
-
-  it('answers VERSION with the Lurker user-agent', () => {
-    expect(buildCtcpReply('VERSION', '', now)).toBe(IRC_VERSION);
+describe('expandCtcpTemplate', () => {
+  it('expands known ${...} placeholders', () => {
+    expect(expandCtcpTemplate('${name} ${version}', VARS)).toBe('Lurker 1.2.3');
   });
 
-  it('answers SOURCE with the repo URL', () => {
-    expect(buildCtcpReply('SOURCE', '', now)).toBe(CTCP_SOURCE);
+  it('leaves unknown placeholders literal (so a typo is visible)', () => {
+    expect(expandCtcpTemplate('${bogus} ${name}', VARS)).toBe('${bogus} Lurker');
   });
 
-  it('answers CLIENTINFO with the supported set', () => {
-    expect(buildCtcpReply('CLIENTINFO', '', now)).toBe(CTCP_SUPPORTED.join(' '));
-  });
-
-  it('answers TIME with a UTC string', () => {
-    expect(buildCtcpReply('TIME', '', now)).toBe(now.toUTCString());
-  });
-
-  it('echoes a PING payload verbatim', () => {
-    expect(buildCtcpReply('PING', '1719500000000', now)).toBe('1719500000000');
-  });
-
-  it('refuses an oversized PING payload (flood-amp guard)', () => {
-    expect(buildCtcpReply('PING', 'x'.repeat(101), now)).toBeNull();
-  });
-
-  it('is case-insensitive on the type', () => {
-    expect(buildCtcpReply('version', '', now)).toBe(IRC_VERSION);
-  });
-
-  it('returns null for an unsupported type (e.g. USERINFO/FINGER)', () => {
-    expect(buildCtcpReply('USERINFO', '', now)).toBeNull();
-    expect(buildCtcpReply('FINGER', '', now)).toBeNull();
-    expect(buildCtcpReply('DCC', 'SEND foo', now)).toBeNull();
-  });
-
-  it('advertises exactly the types it can answer (CLIENTINFO ⊇ answerable)', () => {
-    // ACTION is in the set for completeness (we send/receive it) but isn't a
-    // query; every OTHER advertised type must produce a non-null reply.
-    for (const t of CTCP_SUPPORTED) {
-      if (t === 'ACTION') continue;
-      expect(buildCtcpReply(t, '', now), `expected a reply for ${t}`).not.toBeNull();
-    }
+  it('returns a plain template unchanged', () => {
+    expect(expandCtcpTemplate('hello there', VARS)).toBe('hello there');
   });
 });
 
-describe('buildCtcpReply — config gating', () => {
-  const now = new Date('2026-06-27T14:03:11Z');
-
-  it('master replies:false silences everything, including PING', () => {
-    const off = cfg({ replies: false });
-    expect(buildCtcpReply('VERSION', '', now, off)).toBeNull();
-    expect(buildCtcpReply('TIME', '', now, off)).toBeNull();
-    expect(buildCtcpReply('SOURCE', '', now, off)).toBeNull();
-    expect(buildCtcpReply('CLIENTINFO', '', now, off)).toBeNull();
-    expect(buildCtcpReply('PING', '123', now, off)).toBeNull();
+describe('buildCtcpReply', () => {
+  it('expands the default templates against the supplied vars', () => {
+    expect(buildCtcpReply('VERSION', '', CTCP_DEFAULT_CONFIG, VARS)).toBe('Lurker 1.2.3');
+    expect(buildCtcpReply('TIME', '', CTCP_DEFAULT_CONFIG, VARS)).toBe(VARS.time);
+    expect(buildCtcpReply('SOURCE', '', CTCP_DEFAULT_CONFIG, VARS)).toBe(VARS.source);
+    expect(buildCtcpReply('CLIENTINFO', '', CTCP_DEFAULT_CONFIG, VARS)).toBe(VARS.clientinfo);
   });
 
-  it('a disabled per-type reply returns null while others still answer', () => {
-    const noVersion = cfg({ version: false });
-    expect(buildCtcpReply('VERSION', '', now, noVersion)).toBeNull();
-    expect(buildCtcpReply('TIME', '', now, noVersion)).toBe(now.toUTCString());
-    expect(buildCtcpReply('PING', '123', now, noVersion)).toBe('123'); // PING has no toggle
-  });
-
-  it('CLIENTINFO advertises only the enabled types (+ ACTION/PING)', () => {
-    expect(buildCtcpReply('CLIENTINFO', '', now, cfg({ time: false, source: false }))).toBe(
-      'ACTION CLIENTINFO PING VERSION',
+  it('echoes a PING payload verbatim', () => {
+    expect(buildCtcpReply('PING', '1719500000000', CTCP_DEFAULT_CONFIG, VARS)).toBe(
+      '1719500000000',
     );
-    expect(
-      buildCtcpReply('CLIENTINFO', '', now, cfg({ version: false, time: false, source: false })),
-    ).toBe('ACTION CLIENTINFO PING');
   });
 
-  it('defaults to all-on (current behavior) when no config is passed', () => {
-    expect(buildCtcpReply('VERSION', '', now)).toBe(IRC_VERSION);
-    expect(buildCtcpReply('CLIENTINFO', '', now)).toBe(CTCP_SUPPORTED.join(' '));
+  it('refuses an oversized PING payload (flood-amp guard)', () => {
+    expect(buildCtcpReply('PING', 'x'.repeat(101), CTCP_DEFAULT_CONFIG, VARS)).toBeNull();
+  });
+
+  it('is case-insensitive on the type', () => {
+    expect(buildCtcpReply('version', '', CTCP_DEFAULT_CONFIG, VARS)).toBe('Lurker 1.2.3');
+  });
+
+  it('returns null for an unsupported type (e.g. USERINFO/FINGER)', () => {
+    expect(buildCtcpReply('USERINFO', '', CTCP_DEFAULT_CONFIG, VARS)).toBeNull();
+    expect(buildCtcpReply('FINGER', '', CTCP_DEFAULT_CONFIG, VARS)).toBeNull();
+    expect(buildCtcpReply('DCC', 'SEND foo', CTCP_DEFAULT_CONFIG, VARS)).toBeNull();
+  });
+
+  it('honors a fully custom template', () => {
+    expect(
+      buildCtcpReply('VERSION', '', cfg({ version: 'hi from ${nick} on ${name}' }), VARS),
+    ).toBe('hi from me on Lurker');
+  });
+
+  it('strips CR/LF so a template cannot inject a second wire line', () => {
+    expect(buildCtcpReply('VERSION', '', cfg({ version: 'a\r\nQUIT b' }), VARS)).toBe('aQUIT b');
+  });
+});
+
+describe('buildCtcpReply — disabling', () => {
+  it('master enabled:false silences everything, including PING', () => {
+    const off = cfg({ enabled: false });
+    expect(buildCtcpReply('VERSION', '', off, VARS)).toBeNull();
+    expect(buildCtcpReply('TIME', '', off, VARS)).toBeNull();
+    expect(buildCtcpReply('PING', '123', off, VARS)).toBeNull();
+  });
+
+  it('an empty template disables that type while others still answer', () => {
+    const noVersion = cfg({ version: '' });
+    expect(buildCtcpReply('VERSION', '', noVersion, VARS)).toBeNull();
+    expect(buildCtcpReply('TIME', '', noVersion, VARS)).toBe(VARS.time);
+    expect(buildCtcpReply('PING', '123', noVersion, VARS)).toBe('123'); // PING isn't templated
+  });
+
+  it('a whitespace-only template counts as disabled', () => {
+    expect(buildCtcpReply('SOURCE', '', cfg({ source: '   ' }), VARS)).toBeNull();
+  });
+});
+
+describe('enabledCtcpTypes', () => {
+  it('lists ACTION/PING plus each non-empty template, sorted', () => {
+    expect(enabledCtcpTypes(CTCP_DEFAULT_CONFIG)).toEqual([
+      'ACTION',
+      'CLIENTINFO',
+      'PING',
+      'SOURCE',
+      'TIME',
+      'VERSION',
+    ]);
+  });
+
+  it('omits a type whose template is empty', () => {
+    expect(enabledCtcpTypes(cfg({ time: '', source: '' }))).toEqual([
+      'ACTION',
+      'CLIENTINFO',
+      'PING',
+      'VERSION',
+    ]);
   });
 });
 

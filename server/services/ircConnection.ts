@@ -21,7 +21,7 @@ import ignoreRulesService from './ignoreRulesService.js';
 import { decideStamp } from './insertDecisions.js';
 import * as systemLog from './systemLog.js';
 import { effectiveSetting } from './settingsService.js';
-import { APP_VERSION } from '../utils/userAgent.js';
+import { APP_NAME, APP_VERSION } from '../utils/userAgent.js';
 import { findUserById } from '../db/users.js';
 import { isNodeMode } from '../utils/edition.js';
 import { deriveIdent } from '../utils/ident.js';
@@ -36,8 +36,11 @@ import { e2eDbg } from './e2e/debug.js';
 import { RateLimiter } from './e2e/rateLimiter.js';
 import {
   buildCtcpReply,
+  CTCP_SOURCE,
+  enabledCtcpTypes,
   formatCtcpReplyLine,
   formatCtcpRequestLine,
+  formatCtcpTime,
   parseCtcp,
   type CtcpReplyConfig,
 } from './ctcp.js';
@@ -2373,12 +2376,28 @@ export class IrcConnection {
   // the registry default (all on), so out of the box behavior is unchanged.
   private ctcpReplyConfig(): CtcpReplyConfig {
     const uid = this.network.user_id;
+    const tmpl = (key: string): string => {
+      const v = effectiveSetting(uid, key);
+      return typeof v === 'string' ? v : '';
+    };
     return {
-      replies: effectiveSetting(uid, 'ctcp.replies') !== false,
-      version: effectiveSetting(uid, 'ctcp.version') !== false,
-      time: effectiveSetting(uid, 'ctcp.time') !== false,
-      source: effectiveSetting(uid, 'ctcp.source') !== false,
-      clientinfo: effectiveSetting(uid, 'ctcp.clientinfo') !== false,
+      enabled: effectiveSetting(uid, 'ctcp.replies') !== false,
+      version: tmpl('ctcp.version'),
+      time: tmpl('ctcp.time'),
+      source: tmpl('ctcp.source'),
+      clientinfo: tmpl('ctcp.clientinfo'),
+    };
+  }
+
+  // Live values for the `${...}` placeholders a CTCP reply template can use.
+  private ctcpTemplateVars(config: CtcpReplyConfig): Record<string, string> {
+    return {
+      name: APP_NAME,
+      version: APP_VERSION,
+      source: CTCP_SOURCE,
+      clientinfo: enabledCtcpTypes(config).join(' '),
+      time: formatCtcpTime(new Date()),
+      nick: this.currentNick,
     };
   }
 
@@ -2417,7 +2436,8 @@ export class IrcConnection {
     // can't burn a peer's budget and suppress its legitimate probes.
     if (!type) return;
     if (!this.ctcpLimiter.allowIncoming(this.ctcpPeerKey(event))) return;
-    const reply = buildCtcpReply(type, args, new Date(), this.ctcpReplyConfig());
+    const config = this.ctcpReplyConfig();
+    const reply = buildCtcpReply(type, args, config, this.ctcpTemplateVars(config));
     if (reply !== null) this.client.ctcpResponse(nick, type, reply);
     this.surfaceCtcp(this.serverTarget(), formatCtcpRequestLine(nick, type, reply !== null));
   }
