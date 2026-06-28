@@ -176,9 +176,15 @@ function pick(row: Row) {
 // same clientX/clientY, since the mouse didn't move.
 const lastPointer = ref<{ x: number; y: number } | null>(null);
 function onPointerMove(e: MouseEvent, i: number) {
+  // Coordinate gate first (and update lastPointer regardless of the row) so a
+  // later synthetic event at the cursor's true position is still recognised as
+  // "no movement" — even when the pointer just slid within the current row.
   if (lastPointer.value && lastPointer.value.x === e.clientX && lastPointer.value.y === e.clientY)
     return;
   lastPointer.value = { x: e.clientX, y: e.clientY };
+  // Only a change of hovered row is worth acting on; skip moves within the
+  // already-selected row.
+  if (selected.value === i) return;
   selected.value = i;
 }
 
