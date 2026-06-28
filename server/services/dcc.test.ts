@@ -3,7 +3,13 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { decodeDccAddress, type DccSend, parseDcc } from './dcc.js';
+import {
+  decodeDccAddress,
+  type DccSend,
+  formatBytes,
+  formatDccOfferLine,
+  parseDcc,
+} from './dcc.js';
 
 // Convenience: assert a parse succeeded as a SEND and return it narrowed.
 function send(args: string): DccSend {
@@ -157,5 +163,31 @@ describe('parseDcc — invalid', () => {
   it('rejects a non-numeric size or token', () => {
     expect(parseDcc('SEND f 16843009 50612 big').kind).toBe('invalid');
     expect(parseDcc('SEND f 16843009 0 1024 xyz').kind).toBe('invalid');
+  });
+});
+
+describe('formatBytes', () => {
+  it('renders 1024-based sizes', () => {
+    expect(formatBytes(0)).toBe('0 B');
+    expect(formatBytes(512)).toBe('512 B');
+    expect(formatBytes(1024)).toBe('1.0 KB');
+    expect(formatBytes(1536)).toBe('1.5 KB');
+    expect(formatBytes(5 * 1024 ** 3)).toBe('5.0 GB');
+  });
+});
+
+describe('formatDccOfferLine', () => {
+  it('describes an active offer', () => {
+    const offer = parseDcc('SEND scene.mkv 3232235777 50612 5368709120') as DccSend;
+    expect(formatDccOfferLine('[EWG]MArchive', offer)).toBe(
+      '[EWG]MArchive offered "scene.mkv" (5.0 GB) via DCC SEND',
+    );
+  });
+
+  it('flags a passive offer', () => {
+    const offer = parseDcc('SEND f.bin 16843009 0 1024 7') as DccSend;
+    expect(formatDccOfferLine('bot', offer)).toBe(
+      'bot offered "f.bin" (1.0 KB) via DCC SEND (passive)',
+    );
   });
 });

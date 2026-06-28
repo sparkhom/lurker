@@ -140,3 +140,24 @@ function parseDccSend(rest: string): DccParse {
 
   return { kind: 'send', filename, host, port, size, token, passive: port === 0 };
 }
+
+/** Human-readable byte size for status lines — 1024-based, one decimal place
+ *  (whole bytes under 1 KiB). "5.0 GB", "1.5 MB", "512 B". */
+export function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  const units = ['KB', 'MB', 'GB', 'TB', 'PB'];
+  let v = n / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(1)} ${units[i]}`;
+}
+
+/** One-line description of an inbound DCC SEND offer for a status buffer, e.g.
+ *  `[EWG]MArchive offered "scene.mkv" (5.0 GB) via DCC SEND`. */
+export function formatDccOfferLine(nick: string, offer: DccSend): string {
+  const mode = offer.passive ? ' (passive)' : '';
+  return `${nick} offered "${offer.filename}" (${formatBytes(offer.size)}) via DCC SEND${mode}`;
+}

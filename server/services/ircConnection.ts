@@ -44,6 +44,9 @@ import {
   parseCtcp,
   type CtcpReplyConfig,
 } from './ctcp.js';
+import { formatDccOfferLine, parseDcc } from './dcc.js';
+import { dccEnabledForUser } from './dccConfig.js';
+import { insertDccTransfer } from '../db/dccTransfers.js';
 import { getChannelConfig as getE2eChannelConfig } from '../db/e2e.js';
 import type { ChannelMode } from '../db/e2e.js';
 import { randomBytes } from 'node:crypto';
@@ -2524,10 +2527,47 @@ export class IrcConnection {
     // can't burn a peer's budget and suppress its legitimate probes.
     if (!type) return;
     if (!this.ctcpLimiter.allowIncoming(this.ctcpPeerKey(event))) return;
+    // DCC rides CTCP but is never an auto-reply type. When DCC is enabled for
+    // this user, hand the offer to the download manager instead of the generic
+    // probe path; when disabled, fall through so it surfaces as an ordinary
+    // unsupported CTCP ("requested CTCP DCC (no reply)"), unchanged from today.
+    if (type === 'DCC' && dccEnabledForUser(this.network.user_id)) {
+      this.handleInboundDccRequest(nick, args, event);
+      return;
+    }
     const config = this.ctcpReplyConfig();
     const reply = buildCtcpReply(type, args, config, this.ctcpTemplateVars(config));
     if (reply !== null) this.client.ctcpResponse(nick, type, reply);
     this.routeCtcpStatus(event, formatCtcpRequestLine(nick, type, reply));
+  }
+
+  // Phase 0 (#270): record a detected inbound DCC SEND offer and surface a status
+  // line. No socket is opened and nothing lands on disk yet — arming/auto-accept
+  // (phase 1) and the Accept/Reject UI (phase 2) build on this row. Every
+  // detected offer is stored as `pending_approval`, the safe default until arming
+  // exists (nothing can auto-land). Non-SEND subtypes (CHAT/ACCEPT/RESUME) and
+  // malformed bodies surface the generic probe line so the user still sees that
+  // something arrived. Rate-limited upstream by the shared CTCP per-peer limiter.
+  private handleInboundDccRequest(
+    nick: string,
+    args: string,
+    event: Record<string, unknown>,
+  ): void {
+    const offer = parseDcc(args);
+    if (offer.kind !== 'send') {
+      this.routeCtcpStatus(event, formatCtcpRequestLine(nick, 'DCC', null));
+      return;
+    }
+    insertDccTransfer(this.network.user_id, {
+      network_id: this.network.id,
+      peer_nick: nick,
+      filename: offer.filename,
+      advertised_size: offer.size,
+      state: 'pending_approval',
+      passive: offer.passive,
+      token: offer.token,
+    });
+    this.routeCtcpStatus(event, formatDccOfferLine(nick, offer));
   }
 
   // Surface an inbound CTCP reply (a peer answered a query we sent), routed back
