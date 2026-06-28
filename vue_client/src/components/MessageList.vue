@@ -186,6 +186,17 @@
                 (<LinkedText :text="row.m.text" />)</template
               ></template
             >
+            <template v-else-if="row.m?.type === 'invite'"
+              ><NickRef
+                :nick="row.m.nick ?? ''"
+                interactive
+                @click.stop.prevent="onNickMenu($event, row.m?.nick, row.m)" />
+              invited
+              <NickRef
+                :nick="row.m.invited ?? ''"
+                interactive
+                @click.stop.prevent="onNickMenu($event, row.m?.invited)"
+            /></template>
             <template v-else-if="row.m?.type === 'nick'"
               ><NickRef
                 :nick="row.m.nick ?? ''"
@@ -327,6 +338,7 @@ interface ChatMessage {
   matched?: unknown;
   newNick?: string;
   kicked?: string;
+  invited?: string;
   userhost?: string;
   // System-buffer lines (#355): the network this line is about, when any. The
   // prefix column resolves the network's current name from it.
@@ -1132,6 +1144,7 @@ function prefixText(m: ChatMessage | undefined): string {
     case 'mode':
     case 'topic':
     case 'motd':
+    case 'invite':
       return '--';
     case 'system':
       // System-buffer log lines (#355). Tied to a network → that network's

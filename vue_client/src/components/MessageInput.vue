@@ -2742,6 +2742,32 @@ function handleCommand(line: string, networkId: number | null, target: string): 
         line,
       );
     }
+    case 'invite': {
+      // /invite <nick>             (in a channel buffer → invite to it)
+      // /invite <nick> <#chan>     (anywhere)
+      // /invite <#chan> <nick>     (channel-first, mirroring /kick)
+      let channel;
+      let nick;
+      if (rest[0] && rest[0].startsWith('#')) {
+        channel = rest[0];
+        nick = rest[1];
+      } else {
+        nick = rest[0];
+        channel =
+          rest[1] && rest[1].startsWith('#') ? rest[1] : isChannelTarget(target) ? target : null;
+      }
+      if (!nick) {
+        localInfo(networkId, target, 'usage: /invite <nick> [#channel]');
+        return true;
+      }
+      if (!channel) {
+        localInfo(networkId, target, 'usage: /invite <nick> [#channel] — no channel context');
+        return true;
+      }
+      // Wire order is INVITE <nick> <channel> (note: irc-framework's own
+      // .invite() flips the args — we build the raw line directly so it can't).
+      return sendOrToast({ type: 'raw', networkId, line: `INVITE ${nick} ${channel}` }, line);
+    }
     case 'topic': {
       // /topic                        — request current topic (server buffer)
       // /topic <text>                 — set on current channel

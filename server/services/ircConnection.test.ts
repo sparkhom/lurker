@@ -1435,16 +1435,21 @@ describe('inbound INVITE handler (#261)', () => {
     expect(logNet).toHaveBeenCalledWith('alice invited you to #secret');
   });
 
-  it('ignores invite-notify echoes for someone else (not us)', () => {
+  it('does not toast for an invite-notify echo about someone else (channel line only)', () => {
     const conn = makeConn();
     conn.client.user.nick = 'me';
+    const publish = vi.fn<(event: unknown) => void>();
     const publishEphemeral = vi.fn<(event: unknown) => void>();
     const logNet = vi.fn<(text: string, level?: string) => void>();
+    conn.publish = publish;
     conn.publishEphemeral = publishEphemeral;
     conn.logNet = logNet;
 
     conn.client.emit('invite', { nick: 'alice', invited: 'bob', channel: '#secret' });
 
+    // Surfaced as a channel line (covered in detail elsewhere), never as a toast
+    // or a "you've been invited" system line — that's only for invites to us.
+    expect(publish).toHaveBeenCalledTimes(1);
     expect(publishEphemeral).not.toHaveBeenCalled();
     expect(logNet).not.toHaveBeenCalled();
   });
@@ -1471,5 +1476,95 @@ describe('inbound INVITE handler (#261)', () => {
     conn.client.emit('invite', { nick: 'alice', invited: 'me' });
 
     expect(publishEphemeral).not.toHaveBeenCalled();
+  });
+});
+
+// Outbound /invite confirmation (RPL_INVITING 341 -> 'invited') and op-visibility
+// invite-notify lines (#261). Both render a persisted "X invited Y" channel line
+// via publish(); the self-echo is deduped against the 341 line.
+describe('invite channel lines + dedup (#261)', () => {
+  function makeConn(): IrcConnection {
+    return new IrcConnection({
+      network: {
+        id: 1,
+        user_id: 1,
+        name: 'n',
+        host: 'irc.example.test',
+        port: 6697,
+        tls: 1,
+        trusted_certificates: 1,
+        nick: 'me',
+        username: null,
+        realname: null,
+        server_password: null,
+        autoconnect: 1,
+        sasl_account: null,
+        sasl_password: null,
+        connect_commands: null,
+        position: 0,
+        created_at: new Date().toISOString(),
+      },
+      onEvent: () => {},
+    });
+  }
+
+  it('renders our own /invite as a channel line from RPL_INVITING (341)', () => {
+    const conn = makeConn();
+    conn.client.user.nick = 'me';
+    const publish = vi.fn<(event: unknown) => void>();
+    conn.publish = publish;
+
+    // irc-framework emits 'invited' for 341 with { nick: invited, channel }.
+    conn.client.emit('invited', { nick: 'bob', channel: '#secret' });
+
+    expect(publish).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'invite', target: '#secret', nick: 'me', invited: 'bob' }),
+    );
+  });
+
+  it('renders a third party invite-notify as a channel line', () => {
+    const conn = makeConn();
+    conn.client.user.nick = 'me';
+    conn.upsertChannel('#secret');
+    const publish = vi.fn<(event: unknown) => void>();
+    conn.publish = publish;
+
+    conn.client.emit('invite', { nick: 'alice', invited: 'bob', channel: '#secret' });
+
+    expect(publish).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'invite', target: '#secret', nick: 'alice', invited: 'bob' }),
+    );
+  });
+
+  it('suppresses the invite-notify echo of our OWN invite (deduped against 341)', () => {
+    const conn = makeConn();
+    conn.client.user.nick = 'me';
+    const publish = vi.fn<(event: unknown) => void>();
+    const publishEphemeral = vi.fn<(event: unknown) => void>();
+    conn.publish = publish;
+    conn.publishEphemeral = publishEphemeral;
+
+    // Our own INVITE, echoed back via invite-notify (inviter === us).
+    conn.client.emit('invite', { nick: 'me', invited: 'bob', channel: '#secret' });
+
+    expect(publish).not.toHaveBeenCalled();
+    expect(publishEphemeral).not.toHaveBeenCalled();
+  });
+
+  it('still routes an invite TO us as the actionable toast, not a channel line', () => {
+    const conn = makeConn();
+    conn.client.user.nick = 'me';
+    const publish = vi.fn<(event: unknown) => void>();
+    const publishEphemeral = vi.fn<(event: unknown) => void>();
+    conn.publish = publish;
+    conn.publishEphemeral = publishEphemeral;
+    conn.logNet = vi.fn<(text: string, level?: string) => void>();
+
+    conn.client.emit('invite', { nick: 'alice', invited: 'me', channel: '#secret' });
+
+    expect(publish).not.toHaveBeenCalled(); // not a channel line
+    expect(publishEphemeral).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'invite', target: ':server:1', channel: '#secret' }),
+    );
   });
 });
