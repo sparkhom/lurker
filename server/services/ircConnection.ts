@@ -162,6 +162,11 @@ function extractExtras(event: IrcEvent): Record<string, unknown> | null {
     case 'kick':
       extras = { kicked: event.kicked };
       break;
+    case 'invite':
+      // The invited nick — `nick` (the standard actor column) holds the
+      // inviter. Persisted so the "X invited Y" channel line round-trips (#261).
+      extras = { invited: event.invited };
+      break;
     case 'nick':
       extras = { newNick: event.newNick };
       break;
@@ -1380,33 +1385,54 @@ export class IrcConnection {
 
     c.on('invite', (event: Record<string, unknown>) => {
       // irc-framework parses an inbound INVITE as { nick: inviter, invited:
-      // target nick, channel }. With invite-notify we also see invites sent to
-      // *other* people in channels we're in — only the "you've been invited"
-      // case is actionable, so ignore any invite whose target isn't us. (A
-      // future enhancement could surface op-visibility invites as a quiet
-      // channel line; #261.)
+      // target nick, channel }. Three cases land here (#261):
       const inviter = event.nick as string | undefined;
       const invited = event.invited as string | undefined;
-      const channel = event.channel as string | undefined;
-      if (!inviter || !channel || !invited) return;
+      const rawChannel = event.channel as string | undefined;
+      if (!inviter || !rawChannel || !invited) return;
       const me = c.user?.nick;
-      if (!me || invited.toLowerCase() !== me.toLowerCase()) return;
-      // Route through the server pseudo-buffer, not the channel: we're not in
-      // the channel (that's the whole point of an invite), and if we'd
-      // previously closed its buffer the wsHub closed-buffer guard would drop
-      // an ephemeral targeted at it. The channel rides in its own field; the
-      // client toast reads `channel`/`from`, never `target`.
-      this.publishEphemeral({
-        type: 'invite',
-        target: this.serverTarget(),
-        channel,
-        from: inviter,
-        userhost: buildUserhost(event),
-      });
-      // Durable fallback: the toast is transient, so log the invite to the
-      // system buffer too — a missed or expired toast still leaves a record the
-      // user can act on later (#261, #355).
-      this.logNet(`${inviter} invited you to ${channel}`);
+      const meLower = me?.toLowerCase();
+      const channel = canonicalChannelTarget(rawChannel, this.channels) ?? rawChannel;
+
+      // (1) Someone invited US → actionable toast + durable system line. Routed
+      // through the server pseudo-buffer, not the channel: we're not in the
+      // channel (that's the point of an invite), and if we'd previously closed
+      // its buffer the wsHub closed-buffer guard would drop an ephemeral
+      // targeted at it. The client toast reads `channel`/`from`, never `target`.
+      if (meLower && invited.toLowerCase() === meLower) {
+        this.publishEphemeral({
+          type: 'invite',
+          target: this.serverTarget(),
+          channel,
+          from: inviter,
+          userhost: buildUserhost(event),
+        });
+        this.logNet(`${inviter} invited you to ${channel}`);
+        return;
+      }
+
+      // (2) Our OWN invite, echoed back to us via the invite-notify cap. The
+      // RPL_INVITING (341) 'invited' handler already renders the channel line,
+      // so drop the echo to avoid a duplicate.
+      if (meLower && inviter.toLowerCase() === meLower) return;
+
+      // (3) invite-notify op-visibility: a third party invited someone to a
+      // channel we're in → persisted channel line "inviter invited invited".
+      this.publish({ type: 'invite', target: channel, nick: inviter, invited });
+    });
+
+    c.on('invited', (event: Record<string, unknown>) => {
+      // RPL_INVITING (341): the server confirms OUR /invite was relayed.
+      // irc-framework gives { nick: the invited nick, channel }. Render the same
+      // persisted channel line as the op-visibility path, attributed to us — so
+      // the confirmation shows up in the channel rather than the server buffer,
+      // and the invite-notify self-echo above is deduped against it (#261).
+      const invited = event.nick as string | undefined;
+      const rawChannel = event.channel as string | undefined;
+      const me = c.user?.nick;
+      if (!invited || !rawChannel || !me) return;
+      const channel = canonicalChannelTarget(rawChannel, this.channels) ?? rawChannel;
+      this.publish({ type: 'invite', target: channel, nick: me, invited });
     });
 
     c.on('quit', (event: Record<string, unknown>) => {

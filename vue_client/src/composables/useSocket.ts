@@ -193,10 +193,17 @@ function applyEvent(event: any): void {
       });
       break;
     case 'invite': {
-      // Someone invited us to a channel we're not in. Surface it as an
-      // actionable toast with a one-click Join — the durable record lives in the
-      // system buffer (logged server-side), so a longer TTL here is just a
-      // convenience window, not the only chance to act (#261).
+      // Two shapes share this type (#261). A persisted channel line ("X invited
+      // Y", target = the channel) renders inline like a join/kick. The inbound
+      // "you've been invited" event is ephemeral, targets the server
+      // pseudo-buffer, and carries channel/from — surface it as an actionable
+      // toast with a one-click Join. The durable record for the latter lives in
+      // the system buffer (logged server-side), so the long TTL is just a
+      // convenience window, not the only chance to act.
+      if (typeof event.target === 'string' && event.target.startsWith('#')) {
+        buffers.pushMessage(event);
+        break;
+      }
       const channel = event.channel as string;
       const from = event.from as string;
       useToastsStore().push({
