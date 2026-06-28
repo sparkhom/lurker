@@ -16,7 +16,7 @@ describe('toasts store', () => {
 
   it('threads an action callback through push so the toast can offer a CTA', () => {
     const toasts = useToastsStore();
-    const onClick = vi.fn();
+    const onClick = vi.fn<() => void>();
     toasts.push({
       title: 'Invitation to #secret',
       body: 'alice invited you',
