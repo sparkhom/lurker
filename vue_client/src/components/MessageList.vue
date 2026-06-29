@@ -423,9 +423,9 @@ const actionItalic = computed(() => !!settings.effective('look.action.italic'));
 // on a message opens the action menu instead (onMessageRowClick). Always off on
 // touch via the CSS reveal media query, where tap opens the menu regardless.
 const hoverActions = computed(() => !!settings.effective('look.message.hover_actions'));
-// The message whose tap-opened action menu is open (touch only — desktop uses
-// the hover bar + native right-click menu, never ours). Gives the row a
-// `selected` background so touch users, who get no hover, can see which message
+// The message whose action menu is open — set when a tap (touch) or, with the
+// hover bar toggled off, a click (desktop) opens it (onMessageRowClick). Gives
+// the row a `selected` background so users with no hover can see which message
 // the menu targets (#392). Cleared when the menu closes.
 const selectedMessageId = ref<number | null>(null);
 const selfColor = computed<string | null>(
@@ -1878,9 +1878,10 @@ watch(
    the bar barely overlaps the top edge instead of covering the message text.
    Desktop only: the build wraps every `:hover` rule in `@media (hover: hover)`
    (#115), so on touch this reveal simply doesn't exist — the bar never shows
-   and the old sticky-:hover two-tap never fires. Touch reaches the same actions
-   by tapping a message (and desktop by right-clicking) — see onMessageMenu /
-   onMessageRowClick. The bar can also be turned off via look.message.hover_actions. */
+   and the old sticky-:hover two-tap never fires. When the bar is hidden (touch,
+   or toggled off on desktop), the same actions are reached by clicking/tapping a
+   message — see onMessageRowClick; right-click stays the native browser menu.
+   The bar can also be turned off via look.message.hover_actions. */
 .row-actions {
   position: absolute;
   /* Sit the bar fully above the row, then nudge down a few px so its bottom
