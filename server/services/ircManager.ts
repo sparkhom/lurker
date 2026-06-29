@@ -283,9 +283,17 @@ class IrcManager extends EventEmitter {
   // connection for its network, and routes the action there (the connection holds
   // the live receiver + the WS push). Accept needs a live connection (it dials the
   // bot); reject/cancel fall back to a DB-only state flip when disconnected.
-  acceptDccTransfer(userId: number, transferId: number): 'ok' | 'not-found' | 'not-connected' {
+  acceptDccTransfer(
+    userId: number,
+    transferId: number,
+  ): 'ok' | 'not-found' | 'not-connected' | 'not-pending' {
     const row = getDccTransfer(userId, transferId);
     if (!row) return 'not-found';
+    // Only an unsolicited offer still awaiting a decision can be accepted. A row
+    // that already moved on (receiving/completed/…) would be a silent no-op in
+    // acceptPendingDcc, so reject it here and let the route surface a 409 rather
+    // than a misleading 200 that looks successful to a stale client.
+    if (row.state !== 'pending_approval') return 'not-pending';
     const conn = this.getConnection(userId, row.network_id);
     if (!conn) return 'not-connected';
     conn.acceptPendingDcc(row);

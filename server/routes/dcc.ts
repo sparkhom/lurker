@@ -57,6 +57,10 @@ router.post('/:id/accept', (req: Request, res: Response) => {
     res.status(404).json({ error: 'transfer not found' });
     return;
   }
+  if (result === 'not-pending') {
+    res.status(409).json({ error: 'transfer is not awaiting approval' });
+    return;
+  }
   if (result === 'not-connected') {
     res.status(409).json({ error: 'network not connected' });
     return;

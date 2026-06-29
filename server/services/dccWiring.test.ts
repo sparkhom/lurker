@@ -531,7 +531,7 @@ describe('pending-offer actions (phase 2)', () => {
     const { conn } = harness();
     // A pending row whose peer_host/peer_port were never decoded (e.g. predates
     // the columns) — can't be dialed, so Accept must fail it, not silently no-op.
-    const id = insertDccTransfer(1, {
+    insertDccTransfer(1, {
       network_id: 1,
       peer_nick: 'bot',
       filename: 'noaddr.bin',

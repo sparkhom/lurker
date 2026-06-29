@@ -74,8 +74,12 @@ const TERMINAL_STATES: ReadonlySet<DccState> = new Set([
   'cancelled',
 ]);
 
-// True while bytes can still arrive, so the UI offers Cancel (and renders a
-// progress bar). A pending offer isn't cancellable-in-flight but can be rejected.
+// True while a transfer is non-terminal — i.e. `/dcc cancel` (or the modal's
+// Cancel button) can still act on it. This INCLUDES a pending_approval offer:
+// cancelling one declines it, same as reject. The modal surfaces Reject rather
+// than Cancel for a pending offer (its pending_approval branch takes precedence
+// over the isCancellable branch), but the predicate itself is just "not yet in a
+// terminal state", so it's true for pending too.
 export function isCancellable(t: DccTransfer): boolean {
   return ACTIVE_STATES.has(t.state);
 }
