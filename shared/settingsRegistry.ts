@@ -581,6 +581,19 @@ export const REGISTRY: readonly SettingOption[] = Object.freeze([
     description: 'Render /me action messages in italics.',
   },
   {
+    key: 'look.message.hover_actions',
+    label: 'Show hover action bar on messages',
+    category: 'appearance',
+    group: 'misc',
+    type: 'bool',
+    default: true,
+    description:
+      'Show the floating action toolbar (reply, copy, bookmark, ignore) when ' +
+      'hovering a message on desktop. The same actions are always available by ' +
+      'right-clicking (or tapping on touch devices) a message. No effect on ' +
+      'touch devices, where the bar is never shown.',
+  },
+  {
     key: 'look.buffer.time_format',
     label: 'Message timestamp format',
     category: 'appearance',

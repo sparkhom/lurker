@@ -84,7 +84,14 @@
           >
         </span>
       </div>
-      <div v-else class="line" :class="rowClass(row)" :data-msg-id="row.m?.id ?? null">
+      <div
+        v-else
+        class="line"
+        :class="rowClass(row)"
+        :data-msg-id="row.m?.id ?? null"
+        @contextmenu="onMessageMenu($event, row.m)"
+        @click="onMessageRowClick($event, row.m)"
+      >
         <template v-if="compactMode && row.m?.type === 'message'">
           <!-- Compact-mode message rows (IRCCloud-style): nick on its own
              head line above the body; body row carries the body and a
@@ -243,7 +250,7 @@
           </span>
         </template>
         <div
-          v-if="eligibleForActions(row.m)"
+          v-if="hoverActions && eligibleForActions(row.m)"
           class="row-actions"
           role="group"
           aria-label="Message actions"
@@ -410,9 +417,12 @@ const ignores = useIgnoresStore();
 const highlights = useHighlightRulesStore();
 const relayBots = useRelayBotsStore();
 const nicks = useNickColors();
-const { isMobile } = useViewport();
+const { isMobile, canHover } = useViewport();
 
 const actionItalic = computed(() => !!settings.effective('look.action.italic'));
+// Hover action bar toggle (#392). Off → the bar never renders (right-click / tap
+// menu still works). Always off on touch via the CSS reveal media query too.
+const hoverActions = computed(() => !!settings.effective('look.message.hover_actions'));
 const selfColor = computed<string | null>(
   () => (settings.effective('look.nick.self_color') as string | undefined) ?? null,
 );
@@ -630,6 +640,33 @@ function runAction(key: MessageActionKey, m: ChatMessage | undefined | null): vo
   if (!m) return;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   messageActions.run(key, m as any, actionContext);
+}
+
+// Right-click → message action menu (#392). Desktop only: on touch we leave the
+// `contextmenu` long-press to the browser's native text-callout so message text
+// stays selectable, and reach the menu via tap instead (onMessageRowClick).
+function onMessageMenu(e: MouseEvent, m: ChatMessage | undefined | null): void {
+  if (!canHover.value) return;
+  if (!eligibleForActions(m)) return;
+  // Don't hijack right-click over a link — the native menu (open in new tab,
+  // copy link) is what's wanted there.
+  if ((e.target as Element | null)?.closest('a')) return;
+  e.preventDefault();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  messageActions.openMenu(m as any, actionContext, e.clientX, e.clientY);
+}
+
+// Tap → message action menu on touch devices (#392), replacing the old
+// sticky-:hover two-tap. No-op on desktop, where a left-click shouldn't summon a
+// context menu (right-click does) — and where a tap is a real text click.
+function onMessageRowClick(e: MouseEvent, m: ChatMessage | undefined | null): void {
+  if (canHover.value) return;
+  if (!eligibleForActions(m)) return;
+  // Taps on a link follow the link; taps on a nick are handled by NickRef
+  // (which stops propagation), so they never reach here.
+  if ((e.target as Element | null)?.closest('a')) return;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  messageActions.openMenu(m as any, actionContext, e.clientX, e.clientY);
 }
 
 // ─── Nick interactivity (#238) + mode-prefix glyph (#376) ──────────────────
@@ -1814,10 +1851,11 @@ watch(
    toolbar — same card treatment as the toast stack (bg + border + drop
    shadow) — anchored to the top-right of the line, floating just above it so
    the bar barely overlaps the top edge instead of covering the message text.
-   Mobile reaches it via the same sticky-:hover path the old kebab used: iOS
-   Safari's sticky :hover makes the first tap on a row reveal the bar, and a
-   second tap hits an action. Long-press is left to the browser's native
-   text-callout so users can still select message text. */
+   Desktop only: the reveal rule lives behind `(hover: hover) and (pointer:
+   fine)` (#392), so touch devices never show the bar nor trigger the old
+   sticky-:hover two-tap. Touch reaches the same actions by tapping a message
+   (and desktop by right-clicking) — see onMessageMenu/onMessageRowClick. The
+   bar itself can also be turned off entirely via look.message.hover_actions. */
 .row-actions {
   position: absolute;
   /* Sit the bar fully above the row, then nudge down a few px so its bottom
@@ -1838,10 +1876,18 @@ watch(
   pointer-events: none;
   z-index: var(--z-base);
 }
-.line:hover .row-actions,
+/* Keyboard a11y reveal stays unconditional so focus-within works everywhere. */
 .row-actions:focus-within {
   opacity: 1;
   pointer-events: auto;
+}
+/* Pointer reveal is desktop-only: no hover on touch, and gating it here keeps
+   the sticky-:hover two-tap from ever firing on phones/tablets (#392). */
+@media (hover: hover) and (pointer: fine) {
+  .line:hover .row-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 .row-action {
   background: none;
