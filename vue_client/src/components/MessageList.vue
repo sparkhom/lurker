@@ -672,8 +672,16 @@ function onMessageRowClick(e: MouseEvent, m: ChatMessage | undefined | null): vo
   // (which stops propagation), so they never reach here.
   if ((e.target as Element | null)?.closest('a')) return;
   selectedMessageId.value = m?.id ?? null;
+  // Pass the row as the trigger so a second tap on the same message toggles its
+  // menu closed (matches the nick menu), instead of just reopening it.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  messageActions.openMenu(m as any, actionContext, e.clientX, e.clientY);
+  messageActions.openMenu(
+    m as any,
+    actionContext,
+    e.clientX,
+    e.clientY,
+    e.currentTarget as Element,
+  );
 }
 
 // ─── Nick interactivity (#238) + mode-prefix glyph (#376) ──────────────────
