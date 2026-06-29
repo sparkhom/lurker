@@ -36,11 +36,22 @@ export interface DccSend {
   passive: boolean;
 }
 
-/** Result of parsing a CTCP DCC body: a `SEND` offer, a recognised-but-unhandled
- *  subtype (CHAT/ACCEPT/RESUME/…), or a structural rejection with a reason for
- *  logging. */
+/** A parsed inbound `DCC ACCEPT` — the sender's reply to a `DCC RESUME` we sent,
+ *  confirming it will resume from `position` bytes. */
+export interface DccAccept {
+  kind: 'accept';
+  filename: string;
+  port: number;
+  position: number;
+  token: number | null;
+}
+
+/** Result of parsing a CTCP DCC body: a `SEND` offer, an `ACCEPT` (resume
+ *  confirmation), a recognised-but-unhandled subtype (CHAT/RESUME/…), or a
+ *  structural rejection with a reason for logging. */
 export type DccParse =
   | DccSend
+  | DccAccept
   | { kind: 'unsupported'; subtype: string }
   | { kind: 'invalid'; reason: string };
 
@@ -93,8 +104,46 @@ export function parseDcc(args: string): DccParse {
   const sp = body.indexOf(' ');
   const subtype = (sp === -1 ? body : body.slice(0, sp)).toUpperCase();
   const rest = sp === -1 ? '' : body.slice(sp + 1).trim();
-  if (subtype !== 'SEND') return { kind: 'unsupported', subtype };
-  return parseDccSend(rest);
+  if (subtype === 'SEND') return parseDccSend(rest);
+  if (subtype === 'ACCEPT') return parseDccAccept(rest);
+  return { kind: 'unsupported', subtype };
+}
+
+// `DCC ACCEPT <filename> <port> <position> [token]` — the sender's go-ahead for a
+// resume. Same filename grammar as SEND (quoted, else first token), then the port
+// the original offer used and the byte position it will resume from.
+function parseDccAccept(rest: string): DccParse {
+  if (rest === '') return { kind: 'invalid', reason: 'missing DCC ACCEPT parameters' };
+  let filename: string;
+  let remainder: string;
+  if (rest.startsWith('"')) {
+    const end = rest.indexOf('"', 1);
+    if (end === -1) return { kind: 'invalid', reason: 'unterminated quoted filename' };
+    filename = rest.slice(1, end);
+    remainder = rest.slice(end + 1).trim();
+  } else {
+    const fsp = rest.indexOf(' ');
+    if (fsp === -1) return { kind: 'invalid', reason: 'missing port/position' };
+    filename = rest.slice(0, fsp);
+    remainder = rest.slice(fsp + 1).trim();
+  }
+  if (filename === '') return { kind: 'invalid', reason: 'empty filename' };
+
+  const fields = remainder.split(/\s+/).filter(Boolean);
+  if (fields.length < 2 || fields.length > 3) {
+    return { kind: 'invalid', reason: 'expected <port> <position> [token]' };
+  }
+  const [portStr, posStr, tokenStr] = fields;
+  const port = parseUint(portStr);
+  if (port === null || port > 65535) return { kind: 'invalid', reason: `bad port: ${portStr}` };
+  const position = parseUint(posStr);
+  if (position === null) return { kind: 'invalid', reason: `bad position: ${posStr}` };
+  let token: number | null = null;
+  if (tokenStr !== undefined) {
+    token = parseUint(tokenStr);
+    if (token === null) return { kind: 'invalid', reason: `bad token: ${tokenStr}` };
+  }
+  return { kind: 'accept', filename, port, position, token };
 }
 
 function parseDccSend(rest: string): DccParse {

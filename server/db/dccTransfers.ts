@@ -159,16 +159,19 @@ export interface DccReceivingFields {
   token?: number | null;
   /** CRC32 parsed from the offer filename (e.g. `[A1B2C3D4]`), null when absent. */
   crc_expected?: string | null;
+  /** Bytes already on disk when resuming (so the row's progress starts there). */
+  received_bytes?: number;
 }
 
 /** Promote a transfer to `receiving` once an offer is accepted, stamping the
- *  real filename/size/destination (and any filename CRC) from the offer and
- *  clearing any prior error. */
+ *  real filename/size/destination (and any filename CRC) from the offer, the
+ *  starting byte count (non-zero on resume), and clearing any prior error. */
 export function markDccReceiving(id: number, f: DccReceivingFields): void {
   db.prepare(
     `UPDATE dcc_transfers
        SET state = 'receiving', filename = ?, advertised_size = ?, destination_path = ?,
-           passive = ?, token = ?, crc_expected = ?, error = NULL, updated_at = datetime('now')
+           passive = ?, token = ?, crc_expected = ?, received_bytes = ?, error = NULL,
+           updated_at = datetime('now')
      WHERE id = ?`,
   ).run(
     f.filename,
@@ -177,6 +180,7 @@ export function markDccReceiving(id: number, f: DccReceivingFields): void {
     f.passive ? 1 : 0,
     f.token ?? null,
     f.crc_expected ?? null,
+    f.received_bytes ?? 0,
     Number(id),
   );
 }
@@ -200,9 +204,10 @@ export function markDccFailed(id: number, received: number, error: string): void
 }
 
 /** How a completed transfer's bytes verified against the filename CRC32:
- *  matched ('ok'), didn't ('mismatch'), or the filename carried no CRC
- *  ('absent' — size match is then the only integrity signal). */
-export type DccCrcStatus = 'ok' | 'mismatch' | 'absent';
+ *  matched ('ok'), didn't ('mismatch'), the filename carried no CRC ('absent' —
+ *  size match is then the only integrity signal), or it was resumed so the full
+ *  file's CRC wasn't recomputed ('unverified'). */
+export type DccCrcStatus = 'ok' | 'mismatch' | 'absent' | 'unverified';
 
 /** Mark a transfer done, stamping the final byte count, completion time, and the
  *  computed CRC32 + how it verified. */

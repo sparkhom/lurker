@@ -119,16 +119,39 @@ describe('parseDcc — SEND (passive/reverse)', () => {
 });
 
 describe('parseDcc — non-SEND subtypes', () => {
-  it('reports CHAT/ACCEPT/RESUME as unsupported (phase 0)', () => {
+  it('reports CHAT/RESUME as unsupported (we send RESUME, never receive it)', () => {
     expect(parseDcc('CHAT chat 16843009 5000')).toEqual({ kind: 'unsupported', subtype: 'CHAT' });
-    expect(parseDcc('ACCEPT file.mkv 50612 1024')).toEqual({
-      kind: 'unsupported',
-      subtype: 'ACCEPT',
-    });
     expect(parseDcc('RESUME file.mkv 50612 1024')).toEqual({
       kind: 'unsupported',
       subtype: 'RESUME',
     });
+  });
+});
+
+describe('parseDcc — ACCEPT (resume confirmation)', () => {
+  it('parses port + position', () => {
+    expect(parseDcc('ACCEPT file.mkv 50612 1024')).toEqual({
+      kind: 'accept',
+      filename: 'file.mkv',
+      port: 50612,
+      position: 1024,
+      token: null,
+    });
+  });
+
+  it('handles a quoted filename and a passive token', () => {
+    expect(parseDcc('ACCEPT "my file.bin" 0 2048 7')).toEqual({
+      kind: 'accept',
+      filename: 'my file.bin',
+      port: 0,
+      position: 2048,
+      token: 7,
+    });
+  });
+
+  it('rejects a malformed ACCEPT', () => {
+    expect(parseDcc('ACCEPT file.mkv 50612').kind).toBe('invalid'); // missing position
+    expect(parseDcc('ACCEPT file.mkv 70000 1').kind).toBe('invalid'); // bad port
   });
 });
 

@@ -353,6 +353,57 @@ describe('arm-on-trigger + auto-accept', () => {
     expect(row.crc_status).toBe('ok');
   });
 
+  it('resumes a partial via DCC RESUME/ACCEPT and completes the file', async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lurker-dcc-resume-'));
+    process.env.LURKER_DCC_DIR = tmpDir;
+    process.env.LURKER_DCC_ALLOW_PRIVATE_HOSTS = '1';
+    enableDcc();
+
+    const full = makePayload(30_000);
+    const have = 10_000;
+    // Pre-seed a 10k partial at the destination the offer will resolve to.
+    const userDir = path.join(tmpDir, 'dcc-wire-alice');
+    fs.mkdirSync(userDir, { recursive: true });
+    fs.writeFileSync(path.join(userDir, 'show.mkv'), full.subarray(0, have));
+    // The bot resumes from `have`, so it streams only the remaining bytes.
+    const sender = await startSender(full.subarray(have));
+    activeSender = sender;
+
+    const { conn } = harness();
+    conn.client.say = vi.fn<(target: string, text: string) => void>();
+    const resumeReq = vi.fn<(target: string, type: string, ...p: string[]) => void>();
+    conn.client.ctcpRequest = resumeReq;
+
+    conn.say('bot', 'xdcc send #1');
+    // Bot offers the full file; Lurker sees the partial and asks to resume.
+    conn.client.emit('ctcp request', {
+      nick: 'bot',
+      type: 'DCC',
+      message: `DCC SEND show.mkv 2130706433 ${sender.port} ${full.length}`,
+    });
+    expect(resumeReq).toHaveBeenCalledWith(
+      'bot',
+      'DCC',
+      'RESUME',
+      'show.mkv',
+      String(sender.port),
+      String(have),
+    );
+
+    // Bot accepts the resume → Lurker connects and appends.
+    conn.client.emit('ctcp request', {
+      nick: 'bot',
+      type: 'DCC',
+      message: `DCC ACCEPT show.mkv ${sender.port} ${have}`,
+    });
+
+    await waitFor(() => listDccTransfers(1)[0]?.state === 'completed', 5000);
+    const row = listDccTransfers(1)[0];
+    expect(row.received_bytes).toBe(full.length);
+    expect(row.crc_status).toBe('unverified'); // resumed → full-file CRC not rechecked
+    expect(fs.readFileSync(path.join(userDir, 'show.mkv')).equals(full)).toBe(true);
+  });
+
   it('flags a mismatched filename CRC32', async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lurker-dcc-crc-'));
     process.env.LURKER_DCC_DIR = tmpDir;
