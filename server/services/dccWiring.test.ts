@@ -450,3 +450,62 @@ describe('arm-on-trigger + auto-accept', () => {
     expect(row.crc_status).toBe('mismatch');
   });
 });
+
+describe('pending-offer actions (phase 2)', () => {
+  it('records an unsolicited offer with its host/port and accepts it on demand', async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lurker-dcc-accept-'));
+    process.env.LURKER_DCC_DIR = tmpDir;
+    process.env.LURKER_DCC_ALLOW_PRIVATE_HOSTS = '1';
+    enableDcc();
+    const payload = makePayload(15_000);
+    const sender = await startSender(payload);
+    activeSender = sender;
+
+    const { conn } = harness();
+    // Unsolicited (no arming) → recorded as pending_approval with its host/port.
+    conn.client.emit('ctcp request', {
+      nick: 'bot',
+      type: 'DCC',
+      message: `DCC SEND show.mkv 2130706433 ${sender.port} ${payload.length}`,
+    });
+    const pending = listDccTransfers(1)[0];
+    expect(pending.state).toBe('pending_approval');
+    expect(pending.peer_host).toBe('127.0.0.1');
+    expect(pending.peer_port).toBe(sender.port);
+
+    // Accept it later → starts the download from the stored offer.
+    conn.acceptPendingDcc(pending);
+    await waitFor(() => listDccTransfers(1)[0]?.state === 'completed', 5000);
+    const row = listDccTransfers(1)[0];
+    expect(row.received_bytes).toBe(payload.length);
+    expect(fs.readFileSync(path.join(tmpDir, 'dcc-wire-alice', 'show.mkv')).equals(payload)).toBe(
+      true,
+    );
+  });
+
+  it('rejects a pending offer', () => {
+    enableDcc();
+    const { conn } = harness();
+    conn.client.emit('ctcp request', {
+      nick: 'bot',
+      type: 'DCC',
+      message: 'DCC SEND f.bin 16843009 5000 100',
+    });
+    const id = listDccTransfers(1)[0].id;
+    conn.rejectDcc(id);
+    expect(listDccTransfers(1)[0].state).toBe('rejected');
+  });
+
+  it('cancels a still-pending offer', () => {
+    enableDcc();
+    const { conn } = harness();
+    conn.client.emit('ctcp request', {
+      nick: 'bot',
+      type: 'DCC',
+      message: 'DCC SEND f.bin 16843009 5000 100',
+    });
+    const id = listDccTransfers(1)[0].id;
+    conn.cancelDcc(id);
+    expect(listDccTransfers(1)[0].state).toBe('cancelled');
+  });
+});

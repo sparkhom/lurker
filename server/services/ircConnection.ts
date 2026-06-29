@@ -59,8 +59,10 @@ import { dccAllowPrivateHosts, dccEnabledForUser, dccMaxFileBytes } from './dccC
 import { hasFreeSpaceFor, resolveDccDestination } from './dccPaths.js';
 import { DccReceiver } from './dccReceiver.js';
 import {
+  type DccTransferRow,
   findArmedRequest,
   findResumableTransfer,
+  getDccTransfer,
   insertDccTransfer,
   markDccCompleted,
   markDccFailed,
@@ -2640,8 +2642,9 @@ export class IrcConnection {
       this.acceptDccOffer(armed.id, nick, offer);
       return;
     }
-    // Unsolicited: nothing auto-lands. Record for the Accept/Reject UI (phase 2).
-    insertDccTransfer(this.network.user_id, {
+    // Unsolicited: nothing auto-lands. Record for the Accept/Reject UI, keeping
+    // the offer's host/port so the user can accept (dial it) later.
+    const id = insertDccTransfer(this.network.user_id, {
       network_id: this.network.id,
       peer_nick: nick,
       filename: offer.filename,
@@ -2649,8 +2652,11 @@ export class IrcConnection {
       state: 'pending_approval',
       passive: offer.passive,
       token: offer.token,
+      peer_host: offer.host,
+      peer_port: offer.port,
     });
     this.routeCtcpStatus(event, formatDccOfferLine(nick, offer));
+    this.publishDcc(id);
   }
 
   // Accept an armed offer and stream it to disk via the receive engine. Active
@@ -2735,6 +2741,7 @@ export class IrcConnection {
       crc_expected: expectedCrc,
       received_bytes: startOffset,
     });
+    this.publishDcc(transferId);
     if (startOffset > 0) {
       // A partial exists — ask the bot to resume from there and wait for its
       // DCC ACCEPT before connecting (handleDccAccept starts the receiver).
@@ -2779,6 +2786,7 @@ export class IrcConnection {
       this.dccPendingResume.delete(key);
       markDccFailed(transferId, startOffset, 'resume not accepted by sender');
       this.surfaceCtcp(nick, `DCC: "${offer.filename}" — sender did not accept resume`);
+      this.publishDcc(transferId);
     }, 15_000);
     this.dccPendingResume.set(key, { transferId, nick, offer, destPath, startOffset, timer });
     // Mirror the offer's filename quoting so the bot matches it.
@@ -2845,6 +2853,7 @@ export class IrcConnection {
         if (now - lastDbAt >= 3000) {
           lastDbAt = now;
           updateDccReceivedBytes(transferId, received);
+          this.publishDcc(transferId); // live progress to the Transfers view
         }
         if (offer.size > 0 && now - lastLineAt >= 8000) {
           lastLineAt = now;
@@ -2880,15 +2889,75 @@ export class IrcConnection {
           nick,
           `DCC: completed "${offer.filename}" (${formatBytes(received)}) → ${destPath}${badge}`,
         );
+        this.publishDcc(transferId);
       },
       onError: (err, received) => {
         this.dccReceivers.delete(transferId);
-        markDccFailed(transferId, received, err.message);
-        this.surfaceCtcp(nick, `DCC: failed "${offer.filename}" — ${err.message}`);
+        // A user-initiated cancel surfaces as a distinct 'cancelled' state, not a
+        // failure (cancel() settles with this exact message).
+        if (err.message === 'cancelled') {
+          updateDccTransferState(transferId, 'cancelled');
+          this.surfaceCtcp(nick, `DCC: cancelled "${offer.filename}"`);
+        } else {
+          markDccFailed(transferId, received, err.message);
+          this.surfaceCtcp(nick, `DCC: failed "${offer.filename}" — ${err.message}`);
+        }
+        this.publishDcc(transferId);
       },
     });
     this.dccReceivers.set(transferId, receiver);
     receiver.start();
+  }
+
+  // Push a transfer row to ALL the user's clients (user-scoped, not buffer-scoped)
+  // so the Transfers view updates live. wsHub forwards a type:'dcc-transfer' event
+  // as a { kind: 'dcc-transfer' } frame (#270 phase 2).
+  private publishDcc(transferId: number): void {
+    if (this.disposed) return;
+    const transfer = getDccTransfer(this.network.user_id, transferId);
+    if (!transfer) return;
+    this.onEvent({
+      type: 'dcc-transfer',
+      userId: this.network.user_id,
+      networkId: this.network.id,
+      time: new Date().toISOString(),
+      transfer,
+    } as unknown as EnrichedEvent);
+  }
+
+  // Accept a previously-recorded unsolicited offer (pending_approval): rebuild the
+  // offer from the stored row and run the normal accept path. The offer may be
+  // stale (the bot stopped listening) — that surfaces as a connect failure.
+  acceptPendingDcc(row: DccTransferRow): void {
+    if (this.disposed) return;
+    if (row.state !== 'pending_approval' || row.peer_host == null || row.peer_port == null) return;
+    this.acceptDccOffer(row.id, row.peer_nick, {
+      kind: 'send',
+      filename: row.filename,
+      host: row.peer_host,
+      port: row.peer_port,
+      size: row.advertised_size,
+      token: row.token,
+      passive: row.passive === 1,
+    });
+  }
+
+  // Reject a pending offer (no download). The row stays as a tombstone.
+  rejectDcc(transferId: number): void {
+    updateDccTransferState(transferId, 'rejected');
+    this.publishDcc(transferId);
+  }
+
+  // Cancel a transfer: abort the live receiver if one is running (its onError
+  // marks 'cancelled'), otherwise flip a pending/requested row to 'cancelled'.
+  cancelDcc(transferId: number): void {
+    const receiver = this.dccReceivers.get(transferId);
+    if (receiver) {
+      receiver.cancel();
+      return; // onError → 'cancelled' + publishDcc
+    }
+    updateDccTransferState(transferId, 'cancelled');
+    this.publishDcc(transferId);
   }
 
   // Surface an inbound CTCP reply (a peer answered a query we sent), routed back

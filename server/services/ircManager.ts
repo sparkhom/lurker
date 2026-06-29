@@ -13,6 +13,7 @@ import {
   deleteChannel,
 } from '../db/networks.js';
 import { reopenBuffer } from '../db/closedBuffers.js';
+import { getDccTransfer, updateDccTransferState } from '../db/dccTransfers.js';
 import { findUserById } from '../db/users.js';
 import { getUserAwayState, writeAwayMarker, writeBackMarker } from '../db/userAwayState.js';
 import { listPinnedForUser } from '../db/pinnedBuffers.js';
@@ -276,6 +277,37 @@ class IrcManager extends EventEmitter {
 
   forgetChannel(userId: number, networkId: number, name: string): void {
     deleteChannel(networkId, name);
+  }
+
+  // DCC transfer actions (#270 phase 2). Each loads the user-scoped row, finds the
+  // connection for its network, and routes the action there (the connection holds
+  // the live receiver + the WS push). Accept needs a live connection (it dials the
+  // bot); reject/cancel fall back to a DB-only state flip when disconnected.
+  acceptDccTransfer(userId: number, transferId: number): 'ok' | 'not-found' | 'not-connected' {
+    const row = getDccTransfer(userId, transferId);
+    if (!row) return 'not-found';
+    const conn = this.getConnection(userId, row.network_id);
+    if (!conn) return 'not-connected';
+    conn.acceptPendingDcc(row);
+    return 'ok';
+  }
+
+  rejectDccTransfer(userId: number, transferId: number): boolean {
+    const row = getDccTransfer(userId, transferId);
+    if (!row) return false;
+    const conn = this.getConnection(userId, row.network_id);
+    if (conn) conn.rejectDcc(transferId);
+    else updateDccTransferState(transferId, 'rejected');
+    return true;
+  }
+
+  cancelDccTransfer(userId: number, transferId: number): boolean {
+    const row = getDccTransfer(userId, transferId);
+    if (!row) return false;
+    const conn = this.getConnection(userId, row.network_id);
+    if (conn) conn.cancelDcc(transferId);
+    else updateDccTransferState(transferId, 'cancelled');
+    return true;
   }
 
   // Long messages need to be split: irc-framework breaks anything past ~350

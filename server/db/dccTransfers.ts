@@ -45,6 +45,8 @@ export interface DccTransferRow {
   state: DccTransferState;
   passive: number;
   token: number | null;
+  peer_host: string | null;
+  peer_port: number | null;
   trigger_text: string | null;
   crc_expected: string | null;
   crc_actual: string | null;
@@ -63,6 +65,10 @@ export interface InsertDccTransferFields {
   state: DccTransferState;
   passive?: boolean;
   token?: number | null;
+  /** The offer's decoded address + port, persisted so a pending_approval offer
+   *  can be accepted (dialed) later. */
+  peer_host?: string | null;
+  peer_port?: number | null;
   /** The XDCC trigger we sent, kept so a stalled transfer can be re-requested on
    *  manual resume. Null for an unsolicited offer. */
   trigger_text?: string | null;
@@ -73,8 +79,8 @@ export interface InsertDccTransferFields {
 const insertStmt = db.prepare(`
   INSERT INTO dcc_transfers
     (user_id, network_id, peer_nick, filename, advertised_size, state,
-     passive, token, trigger_text, crc_expected)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     passive, token, peer_host, peer_port, trigger_text, crc_expected)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 export function insertDccTransfer(userId: number, f: InsertDccTransferFields): number {
@@ -87,6 +93,8 @@ export function insertDccTransfer(userId: number, f: InsertDccTransferFields): n
     f.state,
     f.passive ? 1 : 0,
     f.token ?? null,
+    f.peer_host ?? null,
+    f.peer_port ?? null,
     f.trigger_text ?? null,
     f.crc_expected ?? null,
   );
