@@ -8,12 +8,13 @@ import { ref } from 'vue';
 // grid, so anything below ~720px gets squeezed beyond repair. 768px is a
 // conventional tablet-portrait threshold and gives a comfortable margin.
 const MOBILE_QUERY = '(max-width: 768px)';
-// Input-capability query: a device whose primary pointer can hover and is fine
-// (a mouse/trackpad), i.e. desktop. Touch devices report `hover: none` /
-// `pointer: coarse` and fail this — including iPad in landscape, which is wider
-// than the mobile breakpoint but still has no hover. Drives the desktop-vs-touch
-// split for hover affordances and the message context menu (#392).
-const HOVER_QUERY = '(hover: hover) and (pointer: fine)';
+// Input-capability query: the primary pointer can hover, i.e. a desktop
+// mouse/trackpad. Touch devices report `hover: none` and fail this — including
+// iPad in landscape, which is wider than the mobile breakpoint but still has no
+// hover. Drives the desktop-vs-touch split for the message context menu (#392),
+// and is kept identical to the `@media (hover: hover)` the build wraps every
+// hover rule in (#115) so CSS hover-visibility and JS interaction routing agree.
+const HOVER_QUERY = '(hover: hover)';
 
 // One shared MediaQueryList per query — cheaper than per-component listeners and
 // means every consumer flips at the exact same moment when the viewport crosses

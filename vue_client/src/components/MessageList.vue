@@ -1851,11 +1851,11 @@ watch(
    toolbar — same card treatment as the toast stack (bg + border + drop
    shadow) — anchored to the top-right of the line, floating just above it so
    the bar barely overlaps the top edge instead of covering the message text.
-   Desktop only: the reveal rule lives behind `(hover: hover) and (pointer:
-   fine)` (#392), so touch devices never show the bar nor trigger the old
-   sticky-:hover two-tap. Touch reaches the same actions by tapping a message
-   (and desktop by right-clicking) — see onMessageMenu/onMessageRowClick. The
-   bar itself can also be turned off entirely via look.message.hover_actions. */
+   Desktop only: the build wraps every `:hover` rule in `@media (hover: hover)`
+   (#115), so on touch this reveal simply doesn't exist — the bar never shows
+   and the old sticky-:hover two-tap never fires. Touch reaches the same actions
+   by tapping a message (and desktop by right-clicking) — see onMessageMenu /
+   onMessageRowClick. The bar can also be turned off via look.message.hover_actions. */
 .row-actions {
   position: absolute;
   /* Sit the bar fully above the row, then nudge down a few px so its bottom
@@ -1876,18 +1876,16 @@ watch(
   pointer-events: none;
   z-index: var(--z-base);
 }
-/* Keyboard a11y reveal stays unconditional so focus-within works everywhere. */
+/* Keyboard a11y reveal stays unconditional so focus-within works everywhere.
+   The hover reveal below is authored plain; the build gates it behind
+   `@media (hover: hover)` (#115) so it never fires on touch. */
 .row-actions:focus-within {
   opacity: 1;
   pointer-events: auto;
 }
-/* Pointer reveal is desktop-only: no hover on touch, and gating it here keeps
-   the sticky-:hover two-tap from ever firing on phones/tablets (#392). */
-@media (hover: hover) and (pointer: fine) {
-  .line:hover .row-actions {
-    opacity: 1;
-    pointer-events: auto;
-  }
+.line:hover .row-actions {
+  opacity: 1;
+  pointer-events: auto;
 }
 .row-action {
   background: none;
