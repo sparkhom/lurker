@@ -150,6 +150,25 @@ export function findArmedRequest(
     .get(userId, networkId, peerNick) as DccTransferRow | undefined;
 }
 
+/** The most recent INCOMPLETE transfer for a (network, filename) whose partial we
+ *  could resume — interrupted by failure, disconnect (stalled), or a restart that
+ *  left it 'receiving'. Resuming is gated on this (not just any same-named file on
+ *  disk) so an unrelated leftover can't get a bot's bytes appended onto it. */
+export function findResumableTransfer(
+  userId: number,
+  networkId: number,
+  filename: string,
+): DccTransferRow | undefined {
+  return db
+    .prepare(
+      `SELECT * FROM dcc_transfers
+       WHERE user_id = ? AND network_id = ? AND filename = ? AND destination_path IS NOT NULL
+         AND state IN ('failed', 'stalled', 'receiving')
+       ORDER BY id DESC LIMIT 1`,
+    )
+    .get(userId, networkId, filename) as DccTransferRow | undefined;
+}
+
 export interface DccReceivingFields {
   /** The real filename from the offer (the `requested` row held a placeholder). */
   filename: string;

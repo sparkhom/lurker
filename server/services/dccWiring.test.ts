@@ -21,7 +21,12 @@ import db from '../db/index.js';
 import { createNetwork } from '../db/networks.js';
 import { createUser } from '../db/users.js';
 import { CAPABILITY_DCC, setUserCapability } from '../db/userCapabilities.js';
-import { listDccTransfers } from '../db/dccTransfers.js';
+import {
+  insertDccTransfer,
+  listDccTransfers,
+  markDccReceiving,
+  updateDccTransferState,
+} from '../db/dccTransfers.js';
 import { crc32Hex, crc32Update } from './dcc.js';
 import { IrcConnection } from './ircConnection.js';
 
@@ -361,10 +366,26 @@ describe('arm-on-trigger + auto-accept', () => {
 
     const full = makePayload(30_000);
     const have = 10_000;
-    // Pre-seed a 10k partial at the destination the offer will resolve to.
+    // Pre-seed a 10k partial AND a tracked prior transfer for it (resume is gated
+    // on our own incomplete row, not a stray same-named file).
     const userDir = path.join(tmpDir, 'dcc-wire-alice');
     fs.mkdirSync(userDir, { recursive: true });
-    fs.writeFileSync(path.join(userDir, 'show.mkv'), full.subarray(0, have));
+    const partialPath = path.join(userDir, 'show.mkv');
+    fs.writeFileSync(partialPath, full.subarray(0, have));
+    const priorId = insertDccTransfer(1, {
+      network_id: 1,
+      peer_nick: 'bot',
+      filename: 'show.mkv',
+      advertised_size: full.length,
+      state: 'requested',
+    });
+    markDccReceiving(priorId, {
+      filename: 'show.mkv',
+      advertised_size: full.length,
+      destination_path: partialPath,
+      received_bytes: have,
+    });
+    updateDccTransferState(priorId, 'failed', 'interrupted');
     // The bot resumes from `have`, so it streams only the remaining bytes.
     const sender = await startSender(full.subarray(have));
     activeSender = sender;

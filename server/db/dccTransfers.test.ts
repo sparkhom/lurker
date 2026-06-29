@@ -11,9 +11,12 @@ import { createNetwork } from './networks.js';
 import { createUser } from './users.js';
 import {
   findArmedRequest,
+  findResumableTransfer,
   getDccTransfer,
   insertDccTransfer,
   listDccTransfers,
+  markDccCompleted,
+  markDccReceiving,
   updateDccTransferState,
 } from './dccTransfers.js';
 
@@ -122,5 +125,40 @@ describe('dccTransfers', () => {
       id,
     );
     expect(findArmedRequest(userId, networkId, 'QueueBot')).toBeUndefined();
+  });
+
+  it('findResumableTransfer returns an incomplete row, not a completed one', () => {
+    const id = insertDccTransfer(userId, {
+      network_id: networkId,
+      peer_nick: 'b',
+      filename: 'big.iso',
+      advertised_size: 100,
+      state: 'requested',
+    });
+    markDccReceiving(id, {
+      filename: 'big.iso',
+      advertised_size: 100,
+      destination_path: '/data/big.iso',
+      received_bytes: 40,
+    });
+    updateDccTransferState(id, 'failed', 'dropped');
+    expect(findResumableTransfer(userId, networkId, 'big.iso')?.id).toBe(id);
+
+    // A completed transfer of a different file is not resumable.
+    const done = insertDccTransfer(userId, {
+      network_id: networkId,
+      peer_nick: 'b',
+      filename: 'done.iso',
+      advertised_size: 10,
+      state: 'requested',
+    });
+    markDccReceiving(done, {
+      filename: 'done.iso',
+      advertised_size: 10,
+      destination_path: '/data/done.iso',
+      received_bytes: 10,
+    });
+    markDccCompleted(done, 10);
+    expect(findResumableTransfer(userId, networkId, 'done.iso')).toBeUndefined();
   });
 });

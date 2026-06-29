@@ -86,31 +86,6 @@ export function resolveDccDestination(username: string, rawFilename: string): st
 }
 
 /**
- * Resolve where to write, detecting a resumable partial. If a non-empty,
- * not-yet-complete file already sits at the intended `<userdir>/<name>`, return
- * it with the byte offset to resume from; otherwise return a fresh (de-collided)
- * destination at offset 0. The on-disk file is the source of truth for the resume
- * point, so this stays correct across restarts without trusting DB bookkeeping.
- */
-export function resolveDccResume(
-  username: string,
-  rawFilename: string,
-  advertisedSize: number,
-): { destPath: string; startOffset: number } {
-  const root = dccRoot();
-  if (!root) throw new Error('DCC download directory is not configured (set LURKER_DCC_DIR)');
-  const userDir = path.join(root, sanitizeDccFilename(username));
-  fs.mkdirSync(userDir, { recursive: true });
-  const intended = path.join(userDir, sanitizeDccFilename(rawFilename));
-  if (fs.existsSync(intended)) {
-    const size = fs.statSync(intended).size;
-    if (size > 0 && size < advertisedSize) return { destPath: intended, startOffset: size };
-  }
-  // No partial (or a complete/empty/oversized same-name file) → fresh, de-collided.
-  return { destPath: resolveDccDestination(username, rawFilename), startOffset: 0 };
-}
-
-/**
  * Whether `dir`'s filesystem has room for `bytes` plus a safety margin. Used to
  * refuse a transfer that would fill the cell disk (the offer's advertised size is
  * attacker-controlled, but the receiver also caps writes at it). Fails OPEN — if

@@ -34,11 +34,9 @@ export interface DccReceiveOptions {
   /** Per-chunk progress (cumulative bytes). The caller throttles DB/UI writes. */
   onProgress?: (received: number) => void;
   /** Transfer completed (received >= size, or a clean close when size unknown).
-   *  `crc` is the CRC32 of the bytes written, for filename-CRC verification. */
+   *  `crc` is the CRC32 of the bytes written this session (only the appended tail
+   *  on a resume), for filename-CRC verification on fresh transfers. */
   onDone?: (received: number, crc: number) => void;
-  /** Seed the running CRC32 (the checksum of bytes already on disk, when
-   *  resuming). Defaults to 0 for a fresh transfer. */
-  crcSeed?: number;
   /** Transfer failed (connect/socket error, timeout, or early close). Carries the
    *  byte count reached so the caller can persist it (resume/accuracy). */
   onError?: (err: Error, received: number) => void;
@@ -53,7 +51,7 @@ export class DccReceiver {
 
   constructor(private readonly opts: DccReceiveOptions) {
     this.received = opts.startOffset ?? 0;
-    this.crc = opts.crcSeed ?? 0;
+    this.crc = 0;
   }
 
   get bytesReceived(): number {
@@ -70,9 +68,18 @@ export class DccReceiver {
       // never leaves an empty file behind. 'wx' for a fresh transfer fails safe
       // if the path raced into existence since the caller resolved it (a
       // concurrent-receiver guard); 'a' appends for resume.
+      //
+      // Hold the socket paused until the file is confirmed OPEN: otherwise data
+      // could arrive and reach the advertised size (buffered into a stream whose
+      // open is still pending) before a 'wx' open-failure surfaces, completing a
+      // transfer that never actually wrote to disk.
+      sock.pause();
       const flags = (this.opts.startOffset ?? 0) > 0 ? 'a' : 'wx';
       this.out = fs.createWriteStream(this.opts.destPath, { flags });
       this.out.on('error', (e) => this.settle(e));
+      this.out.on('open', () => {
+        if (!this.settled) sock.resume();
+      });
     });
     // We never setEncoding, so chunk is always a Buffer at runtime; the event
     // type is widened to string|Buffer, so coerce defensively.
