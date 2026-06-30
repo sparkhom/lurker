@@ -2,55 +2,43 @@
 // SPDX-License-Identifier: MPL-2.0
 
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
-import { ref, nextTick } from 'vue';
-
-// Drive the badge watcher off a ref we control, without standing up the real
-// buffers store (and its networks/socket graph). The getter reads the ref, so
-// Vue tracks it reactively and the watcher fires on change. Declared before the
-// import of useAppBadge so the hoisted mock closes over it; only read at
-// call-time (inside a test), by when it's initialized.
-const total = ref(0);
-vi.mock('../stores/buffers.js', () => ({
-  useBuffersStore: () => ({
-    get totalHighlights() {
-      return total.value;
-    },
-  }),
-}));
-
-import { startAppBadge, clearAppBadgeNow } from './useAppBadge.js';
 
 let setAppBadge: Mock<(count?: number) => Promise<void>>;
 let clearAppBadge: Mock<() => Promise<void>>;
 
-// applyBadge reads the global `navigator` fresh on each call, so re-stubbing per
-// test (with fresh spies) is enough — the long-lived watcher picks up whichever
-// navigator is current when it fires. `{}` models a browser without the API.
-function stubBadging(supported: boolean): void {
+beforeEach(() => {
+  // Reset the module registry so each test gets a fresh useAppBadge with a fresh
+  // module-level effect scope — no cross-test ordering dependency.
+  vi.resetModules();
   setAppBadge = vi.fn<(count?: number) => Promise<void>>(() => Promise.resolve());
   clearAppBadge = vi.fn<() => Promise<void>>(() => Promise.resolve());
-  vi.stubGlobal('navigator', supported ? { setAppBadge, clearAppBadge } : {});
-}
+});
 
-beforeEach(() => stubBadging(true));
 afterEach(() => vi.unstubAllGlobals());
 
-describe('useAppBadge', () => {
-  // Runs first, while the module's effect scope is still unwired, so the
-  // unsupported branch of startAppBadge is exercised before any later test
-  // starts the process-lifetime watcher.
-  it('no-ops when the Badging API is unavailable', () => {
-    stubBadging(false);
-    expect(() => {
-      startAppBadge();
-      clearAppBadgeNow();
-    }).not.toThrow();
-    expect(setAppBadge).not.toHaveBeenCalled();
-    expect(clearAppBadge).not.toHaveBeenCalled();
-  });
+// Load a fresh useAppBadge wired to a ref we control. `vue` is imported AFTER the
+// module reset and the ref is created from that same fresh instance, so the
+// composable's `watch` (which imports the same post-reset `vue`) tracks it — a
+// statically-imported ref would belong to a different reactivity instance and
+// never trigger the watcher. `supported:false` models a browser without the API.
+async function load(supported = true) {
+  const { ref, nextTick } = await import('vue');
+  const total = ref(0);
+  vi.doMock('../stores/buffers.js', () => ({
+    useBuffersStore: () => ({
+      get totalHighlights() {
+        return total.value;
+      },
+    }),
+  }));
+  vi.stubGlobal('navigator', supported ? { setAppBadge, clearAppBadge } : {});
+  const mod = await import('./useAppBadge.js');
+  return { ...mod, total, nextTick };
+}
 
+describe('useAppBadge', () => {
   it('wires a watcher that sets the badge to the highlight total and clears at zero', async () => {
-    total.value = 0;
+    const { startAppBadge, total, nextTick } = await load();
     startAppBadge();
     // immediate:true fires at the current total (0) → clear, not set.
     expect(clearAppBadge).toHaveBeenCalledTimes(1);
@@ -65,18 +53,33 @@ describe('useAppBadge', () => {
     expect(clearAppBadge).toHaveBeenCalledTimes(2);
   });
 
-  it('is idempotent — a second startAppBadge does not add a second watcher', async () => {
-    startAppBadge(); // scope already wired by the previous test → no-op
+  it('is idempotent — repeated startAppBadge calls add only one watcher', async () => {
+    const { startAppBadge, total, nextTick } = await load();
+    startAppBadge();
+    startAppBadge();
+    startAppBadge();
+    setAppBadge.mockClear(); // ignore the immediate fire from wiring
     total.value = 7;
     await nextTick();
-    // Exactly one watcher, so exactly one setAppBadge for the single change.
+    // Exactly one watcher → exactly one setAppBadge for the single change.
     expect(setAppBadge).toHaveBeenCalledTimes(1);
     expect(setAppBadge).toHaveBeenLastCalledWith(7);
   });
 
-  it('clearAppBadgeNow clears the badge', () => {
+  it('clearAppBadgeNow clears the badge', async () => {
+    const { clearAppBadgeNow } = await load();
     clearAppBadgeNow();
     expect(clearAppBadge).toHaveBeenCalledTimes(1);
     expect(setAppBadge).not.toHaveBeenCalled();
+  });
+
+  it('no-ops when the Badging API is unavailable', async () => {
+    const { startAppBadge, clearAppBadgeNow, total, nextTick } = await load(false);
+    startAppBadge();
+    clearAppBadgeNow();
+    total.value = 5;
+    await nextTick();
+    expect(setAppBadge).not.toHaveBeenCalled();
+    expect(clearAppBadge).not.toHaveBeenCalled();
   });
 });

@@ -355,11 +355,12 @@ function computeUnreadFor(
 // uses getReadState (which defaults to 0) the same way. Closed buffers are
 // excluded to mirror the client dropping them from its store. :server: pseudo-
 // buffers ARE enumerated by listBufferTargets (it doesn't filter them), but
-// they contribute 0: isDmTarget excludes them, so highlights come only from
-// mention-rule matches against server-notice text — which the client's snapshot
-// counts identically, so the totals still agree. Only called on push delivery
-// (no visible client), so the per-buffer indexed counts are cheap; computeUnreadFor
-// skips the highlight query entirely when a buffer has no unread.
+// isDmTarget excludes them, so they get no DM=unread shortcut — their only
+// highlights are genuine mention-rule matches against server-notice text
+// (normally none), which the client's snapshot counts identically, so the
+// totals still agree. Only called on push delivery (no visible client), so the
+// per-buffer indexed counts are cheap; computeUnreadFor skips the highlight
+// query entirely when a buffer has no unread.
 export function computeTotalHighlights(userId: number): number {
   const closed = closedKeySetForUser(userId);
   // System buffer first — app-scoped (networkId null), uncloseable.
