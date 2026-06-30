@@ -354,10 +354,12 @@ function computeUnreadFor(
 // counts it (the snapshot computes its highlights from lastReadId 0), so this
 // uses getReadState (which defaults to 0) the same way. Closed buffers are
 // excluded to mirror the client dropping them from its store. :server: pseudo-
-// buffers aren't in listBufferTargets and carry no highlights, so they're
-// naturally skipped. Only called on push delivery (no visible client), so the
-// per-buffer indexed counts are cheap; computeUnreadFor skips the highlight
-// query entirely when a buffer has no unread.
+// buffers ARE enumerated by listBufferTargets (it doesn't filter them), but
+// they contribute 0: isDmTarget excludes them, so highlights come only from
+// mention-rule matches against server-notice text — which the client's snapshot
+// counts identically, so the totals still agree. Only called on push delivery
+// (no visible client), so the per-buffer indexed counts are cheap; computeUnreadFor
+// skips the highlight query entirely when a buffer has no unread.
 export function computeTotalHighlights(userId: number): number {
   const closed = closedKeySetForUser(userId);
   // System buffer first — app-scoped (networkId null), uncloseable.
@@ -1003,6 +1005,10 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
     if (!decorated || !decorated.notify) return;
     if (decorated.self) return;
     if (userHasVisibleClient(userId)) return;
+    // No push device subscribed → nothing to deliver, and no reason to compute
+    // the badge total below (it's an O(buffers) scan). deliver() would no-op on
+    // an empty subscription set anyway — bail before the work (#451 review).
+    if (!pushService.hasSubscriptions(userId)) return;
     // Suppress push for events the user's ignore rules would hide. This is the
     // one piece of the ignore feature that has to live server-side: push fires
     // while no client is open, so a client-side filter can't intercept. The
@@ -1060,10 +1066,10 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
         // target is the friend's nick so a notification tap opens their DM.
         target: nick,
         displayName: contact.displayName,
-        // Keep the app-icon badge in sync on this push too (#451). A friend
-        // coming online isn't itself a highlight, so this is just the current
-        // total — harmless and avoids the badge drifting on a friend_online push.
-        badge: computeTotalHighlights(userId),
+        // No `badge` here on purpose (#451 review): a friend coming online isn't
+        // a highlight, so the total can't have changed since the last message
+        // push set it. The SW no-ops when data.badge is absent, so omitting it
+        // avoids an O(buffers) scan that would only re-stamp the same number.
       })
       .catch((err) => console.warn('[push] friend-online deliver failed:', err?.message || err));
   }

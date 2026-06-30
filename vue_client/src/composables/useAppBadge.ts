@@ -15,19 +15,14 @@ function badgeSupported(): boolean {
 }
 
 // Reflect `count` on the app icon. >0 sets the badge; 0 clears it (clearAppBadge,
-// not setAppBadge(0)). The Badging API returns a promise that can reject (and a
-// few engines throw synchronously), none of which we can act on — swallow both.
+// not setAppBadge(0)). setAppBadge and clearAppBadge ship together as one
+// NavigatorBadge mixin, so badgeSupported() gates both. They reject (not throw)
+// on failure, and there's nothing useful to do about it — swallow. Mirrors
+// syncAppBadge in public/sw.js — keep the two in lockstep.
 function applyBadge(count: number): void {
   if (!badgeSupported()) return;
-  try {
-    if (count > 0) {
-      void navigator.setAppBadge(count).catch(() => {});
-    } else if ('clearAppBadge' in navigator) {
-      void navigator.clearAppBadge().catch(() => {});
-    }
-  } catch {
-    /* ignore */
-  }
+  const op = count > 0 ? navigator.setAppBadge(count) : navigator.clearAppBadge();
+  void op.catch(() => {});
 }
 
 // Mirror the app-wide unread-highlight total onto the PWA app icon (#451).

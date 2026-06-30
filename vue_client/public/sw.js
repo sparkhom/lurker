@@ -22,13 +22,12 @@ function syncAppBadge(data) {
   if (typeof data?.badge !== 'number' || !('setAppBadge' in self.navigator)) {
     return Promise.resolve();
   }
-  const p =
-    data.badge > 0
-      ? self.navigator.setAppBadge(data.badge)
-      : 'clearAppBadge' in self.navigator
-        ? self.navigator.clearAppBadge()
-        : Promise.resolve();
-  return Promise.resolve(p).catch(() => {});
+  // setAppBadge and clearAppBadge ship together (one NavigatorBadge mixin), so
+  // the single feature-detect above covers both. >0 sets the count, 0 clears.
+  // Mirrors useAppBadge.applyBadge on the page side — keep the two in lockstep.
+  const op =
+    data.badge > 0 ? self.navigator.setAppBadge(data.badge) : self.navigator.clearAppBadge();
+  return op.catch(() => {});
 }
 
 // "Amiantos came online (as nostimo · Libera)". The nick (data.target) is
