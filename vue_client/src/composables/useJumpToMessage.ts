@@ -16,7 +16,9 @@ function armScroll(pendingScrollId: Ref<number | null> | undefined, messageId: n
   if (pendingScrollId.value === messageId) {
     pendingScrollId.value = null;
     nextTick(() => {
-      pendingScrollId.value = messageId;
+      // Only re-arm if nothing claimed the slot during the tick — a different
+      // jump firing before this microtask must not be clobbered back to our id.
+      if (pendingScrollId.value === null) pendingScrollId.value = messageId;
     });
     return;
   }
@@ -106,7 +108,18 @@ export function useJumpToMessage({ pendingScrollId, afterActivate }: JumpToMessa
     // fanOut between here and the response is dropped) and returns OUR request
     // token, or null if the socket was closed so no slice will ever arrive.
     const token = buffers.loadAround(networkId, target, messageId);
-    if (token == null) return;
+    if (token == null) {
+      // Socket was closed, so the history slice can't be sent and will never
+      // arrive — the buffer is activated but we can't scroll. Say so rather than
+      // failing as a silent no-op (mirrors ChannelListModal's join feedback).
+      toasts.push({
+        kind: 'warn',
+        title: 'Not connected',
+        body: "Can't load that message while disconnected.",
+        ttlMs: 5000,
+      });
+      return;
+    }
     // Arm off the token, not loadingHistory: an in-flight older/newer pager
     // (prependHistory/appendHistory) clears loadingHistory with no token guard,
     // which would trip a loadingHistory watch, fail the membership check, and

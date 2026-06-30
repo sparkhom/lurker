@@ -99,17 +99,20 @@ describe('consumeColdStartJump', () => {
 
   it('captures (strips) the intent but defers the jump until ready', () => {
     vi.useFakeTimers();
+    let dispose: (() => void) | undefined;
     try {
       h.connected.value = false; // socket not up yet
       installWindow('?net=1&buf=%23chan&msg=42');
       const onJump = vi.fn<(payload: unknown) => void>();
 
-      consumeColdStartJump(openBuffers, onJump);
+      dispose = consumeColdStartJump(openBuffers, onJump);
 
       // Not fired yet, but the URL is already cleaned so a refresh can't double it.
       expect(onJump).not.toHaveBeenCalled();
       expect(currentSearch()).toBe('');
     } finally {
+      // Tear down the deferred watch/timer so it can't leak into other tests.
+      dispose?.();
       vi.clearAllTimers();
       vi.useRealTimers();
     }

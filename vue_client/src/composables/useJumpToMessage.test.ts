@@ -27,6 +27,7 @@ vi.mock('../stores/toasts.js', () => ({ useToastsStore: () => ({ push: h.push })
 vi.mock('./useSocket.js', () => ({ socketSend: vi.fn<() => boolean>(() => true) }));
 
 import { useBuffersStore } from '../stores/buffers.js';
+import { socketSend } from './useSocket.js';
 import { useJumpToMessage } from './useJumpToMessage.js';
 
 const NET = 1;
@@ -155,5 +156,23 @@ describe('useJumpToMessage', () => {
 
     expect(pendingScrollId.value).toBe(null);
     expect(h.push).toHaveBeenCalledWith(expect.objectContaining({ title: 'Buffer is closed' }));
+  });
+
+  it('warns "Not connected" instead of silently failing when the slice can\'t be sent', () => {
+    const store = useBuffersStore();
+    store.ensure(NET, '#chan'); // open, but target message is off-screen
+    // Socket closed: every send fails, so loadAround returns null. (Force it for
+    // the whole call — activate() also sends, which would eat a one-shot mock.)
+    (socketSend as any).mockReturnValue(false);
+    try {
+      const pendingScrollId = ref<number | null>(null);
+      const jump = useJumpToMessage({ pendingScrollId });
+      jump({ networkId: NET, target: '#chan', messageId: 100 });
+
+      expect(pendingScrollId.value).toBe(null);
+      expect(h.push).toHaveBeenCalledWith(expect.objectContaining({ title: 'Not connected' }));
+    } finally {
+      (socketSend as any).mockReturnValue(true);
+    }
   });
 });
