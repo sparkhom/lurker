@@ -115,6 +115,16 @@ const NON_PERSISTED_TYPES = new Set([
   'ctcp',
 ]);
 
+// Diagnostic: a single synchronous IRC-event handler (NAMES/WHO member-list
+// rebuild + serialize + fan-out) slower than this is logged. On a reconnect the
+// server replays NAMES/WHO for every auto-rejoined channel; on big channels each
+// is O(members), and the burst is what shows up as an [event-loop] stall with no
+// [wsHub] snapshot line. Console-only. Env-tunable / 0 disables.
+const IRC_HANDLER_WARN_MS = (() => {
+  const raw = Number(process.env.LURKER_IRC_HANDLER_WARN_MS);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 50;
+})();
+
 // Forget an outbound CTCP request we never got a reply to after a minute, so the
 // routing map can't grow unbounded.
 const CTCP_OUTSTANDING_TTL_MS = 60_000;
@@ -1805,6 +1815,7 @@ export class IrcConnection {
     });
 
     c.on('userlist', (event: Record<string, unknown>) => {
+      const tHandler = Date.now();
       const eventChannel = event.channel as string;
       const eventUsers = (event.users as Record<string, unknown>[]) || [];
       const ch = this.upsertChannel(eventChannel);
@@ -1845,9 +1856,18 @@ export class IrcConnection {
       } catch (_) {
         /* ignore */
       }
+      const ms = Date.now() - tHandler;
+      if (IRC_HANDLER_WARN_MS > 0 && ms >= IRC_HANDLER_WARN_MS) {
+        console.warn(
+          `[irc] NAMES(userlist) for ${eventChannel} took ${ms}ms (${ch.members.size} members) ` +
+            `on network ${this.network.id} — synchronous member rebuild + fan-out; a burst of ` +
+            `these across auto-rejoined channels is the reconnect [event-loop] stall`,
+        );
+      }
     });
 
     c.on('wholist', (event: Record<string, unknown>) => {
+      const tHandler = Date.now();
       const eventTarget = event.target as string | undefined;
       const targetKey = eventTarget?.toLowerCase() ?? '';
       const users = (event.users as Record<string, unknown>[]) || [];
@@ -1904,12 +1924,21 @@ export class IrcConnection {
           changed = true;
         }
       }
-      if (!changed) return;
-      this.publish({
-        type: 'names',
-        target: ch.name,
-        members: Array.from(ch.members.values()).map(memberSnapshot),
-      });
+      if (changed) {
+        this.publish({
+          type: 'names',
+          target: ch.name,
+          members: Array.from(ch.members.values()).map(memberSnapshot),
+        });
+      }
+      const ms = Date.now() - tHandler;
+      if (IRC_HANDLER_WARN_MS > 0 && ms >= IRC_HANDLER_WARN_MS) {
+        console.warn(
+          `[irc] WHO(wholist) for ${ch.name} took ${ms}ms (${ch.members.size} members) ` +
+            `on network ${this.network.id} — synchronous away/host backfill${changed ? ' + fan-out' : ''}; ` +
+            `part of the reconnect burst`,
+        );
+      }
     });
 
     // Per-user away/back. away-notify drives the non-self events; self events

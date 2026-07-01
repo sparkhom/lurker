@@ -520,6 +520,18 @@ const INPUT_HISTORY_SLICE = 50;
 // the thing that starves IRC socket I/O when it gets large.
 const SNAPSHOT_SLOW_MS = 250;
 
+// Per-phase timing of one snapshot, so a slow one says WHERE the time went
+// (member-list blob vs seeds vs the per-buffer loop vs offline frames) instead
+// of just a total. See the sendSnapshot wrapper's log.
+interface SnapshotBreakdown {
+  bufferCount: number;
+  fresh: boolean; // true = fresh connect → online loop shipped shells, not resume frames
+  networksMs: number; // ircManager.snapshotForUser (serializes channel member lists)
+  seedsMs: number; // drafts/bookmarks/system/contacts + the bulk read/cleared/closed maps
+  onlineMs: number; // the live per-buffer loop (shells: unread counts; resume: +reads/speakers)
+  offlineMs: number; // buildOfflineBacklogFrames
+}
+
 // Decide the slice a resume snapshot ships for ONE buffer.
 //
 // Normal case: ship just the gap the client missed (id > sinceId). The client
@@ -1463,18 +1475,35 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
     freshNetworkId: number | null = null,
   ): void {
     const startedAt = Date.now();
-    let bufferCount = 0;
+    let b: SnapshotBreakdown = {
+      bufferCount: 0,
+      fresh: false,
+      networksMs: 0,
+      seedsMs: 0,
+      onlineMs: 0,
+      offlineMs: 0,
+    };
+    let ok = false;
     try {
-      bufferCount = sendSnapshotInner(ws, userId, freshNetworkId);
+      b = sendSnapshotInner(ws, userId, freshNetworkId);
+      ok = true;
     } catch (err) {
-      console.error(`[wsHub] snapshot for user ${userId} failed (IRC left intact):`, err);
+      console.error(
+        `[wsHub] snapshot for user ${userId} failed after ${Date.now() - startedAt}ms ` +
+          `(IRC left intact):`,
+        err,
+      );
     }
     const ms = Date.now() - startedAt;
-    if (ms >= SNAPSHOT_SLOW_MS) {
+    // Only attribute phases on success — a throw leaves the breakdown at its
+    // zero defaults, which would mislead exactly when the log is meant to help.
+    if (ok && ms >= SNAPSHOT_SLOW_MS) {
       console.warn(
-        `[wsHub] snapshot for user ${userId} took ${ms}ms across ${bufferCount} buffers — ` +
-          `it runs synchronously on the event loop; on slow storage or a large account this ` +
-          `can starve IRC socket I/O and trip ping timeouts (see [event-loop] logs)`,
+        `[wsHub] snapshot for user ${userId} took ${ms}ms across ${b.bufferCount} buffers ` +
+          `(${b.fresh ? 'fresh/shells' : 'resume'}) — networks=${b.networksMs}ms seeds=${b.seedsMs}ms ` +
+          `online=${b.onlineMs}ms offline=${b.offlineMs}ms. Runs synchronously on the event loop; ` +
+          `on slow storage or a large account this can starve IRC socket I/O and trip ping timeouts ` +
+          `(see [event-loop] logs). networks=member-list blob, online=per-buffer unread/reads.`,
       );
     }
   }
@@ -1483,8 +1512,11 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
     ws: LurkerWebSocket,
     userId: number,
     freshNetworkId: number | null = null,
-  ): number {
+  ): SnapshotBreakdown {
+    const tNetworks = Date.now();
     const networks = ircManager.snapshotForUser(userId);
+    const networksMs = Date.now() - tNetworks;
+    const tSeeds = Date.now();
     // A fresh connect (no resume cursor yet) means an empty client with no
     // active buffer — Lurker auto-focuses nothing on load. So we ship channel/DM
     // buffers as lazy shells (no backlog) below. `cursor` hands the client the
@@ -1526,6 +1558,8 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
     const readState = listReadStateForUser(userId);
     const clearedState = listClearedStateForUser(userId);
     const closed = closedKeySetForUser(userId);
+    const seedsMs = Date.now() - tSeeds;
+    const tOnline = Date.now();
     let maxSentId = ws.sinceId || 0;
     let bufferCount = 0;
     for (const conn of ircManager.listConnections(userId)) {
@@ -1616,6 +1650,8 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
         bufferCount += 1;
       }
     }
+    const onlineMs = Date.now() - tOnline;
+    const tOffline = Date.now();
     // Offline networks (no live connection) ship their buffers as lightweight
     // SHELLS (buffer row + unread/read state, no message rows) rather than the
     // full recent slice. The client hydrates a shell's history on first open via
@@ -1630,6 +1666,7 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
       send(ws, frame);
       bufferCount += 1;
     }
+    const offlineMs = Date.now() - tOffline;
     // Advance the resume cursor past everything we just shipped, so the next
     // sendSnapshot (in-band 'snapshot' request, or another IRC-state trigger)
     // resumes from where this snapshot left off. On a fresh (shell) connect we
@@ -1637,7 +1674,7 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
     // handed the client — otherwise a later re-snapshot on this socket would
     // re-gap-fill everything the shells deliberately skipped.
     ws.sinceId = Math.max(maxSentId, cursor);
-    return bufferCount;
+    return { bufferCount, fresh: isFreshConnect, networksMs, seedsMs, onlineMs, offlineMs };
   }
 
   function handleClientMessage(ws: LurkerWebSocket, user: User, msg: WsPayload): void {
