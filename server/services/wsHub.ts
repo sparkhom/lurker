@@ -1483,13 +1483,21 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
       onlineMs: 0,
       offlineMs: 0,
     };
+    let ok = false;
     try {
       b = sendSnapshotInner(ws, userId, freshNetworkId);
+      ok = true;
     } catch (err) {
-      console.error(`[wsHub] snapshot for user ${userId} failed (IRC left intact):`, err);
+      console.error(
+        `[wsHub] snapshot for user ${userId} failed after ${Date.now() - startedAt}ms ` +
+          `(IRC left intact):`,
+        err,
+      );
     }
     const ms = Date.now() - startedAt;
-    if (ms >= SNAPSHOT_SLOW_MS) {
+    // Only attribute phases on success — a throw leaves the breakdown at its
+    // zero defaults, which would mislead exactly when the log is meant to help.
+    if (ok && ms >= SNAPSHOT_SLOW_MS) {
       console.warn(
         `[wsHub] snapshot for user ${userId} took ${ms}ms across ${b.bufferCount} buffers ` +
           `(${b.fresh ? 'fresh/shells' : 'resume'}) — networks=${b.networksMs}ms seeds=${b.seedsMs}ms ` +

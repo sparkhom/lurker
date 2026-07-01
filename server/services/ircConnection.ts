@@ -115,8 +115,6 @@ const NON_PERSISTED_TYPES = new Set([
   'ctcp',
 ]);
 
-// Forget an outbound CTCP request we never got a reply to after a minute, so the
-// routing map can't grow unbounded.
 // Diagnostic: a single synchronous IRC-event handler (NAMES/WHO member-list
 // rebuild + serialize + fan-out) slower than this is logged. On a reconnect the
 // server replays NAMES/WHO for every auto-rejoined channel; on big channels each
@@ -127,6 +125,8 @@ const IRC_HANDLER_WARN_MS = (() => {
   return Number.isFinite(raw) && raw >= 0 ? raw : 50;
 })();
 
+// Forget an outbound CTCP request we never got a reply to after a minute, so the
+// routing map can't grow unbounded.
 const CTCP_OUTSTANDING_TTL_MS = 60_000;
 // Cap distinct outstanding (nick,type) keys; evict the oldest when exceeded.
 const CTCP_OUTSTANDING_MAX_KEYS = 200;
