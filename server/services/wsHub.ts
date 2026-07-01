@@ -989,20 +989,20 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
   // maybePush additionally honors .nonotify (issue #359 — a NONOTIFY mute rule
   // freezes push without hiding the message).
   function ignoreVerdictFor(userId: number, decorated: DecoratedEvent): IgnoreVerdict {
-    if (decorated.nick) {
-      const compiled = ignoreRulesService.getCompiled(userId, decorated.networkId);
-      if (compiled.length) {
-        return evaluateIgnores(compiled, {
-          nick: decorated.nick,
-          userhost: decorated.userhost ?? null,
-          target: decorated.target,
-          text: decorated.text ?? '',
-          type: decorated.type,
-          isDm: !!decorated.dm,
-        });
-      }
-    }
-    return { hide: false, nohilight: false, nonotify: false };
+    const compiled = ignoreRulesService.getCompiled(userId, decorated.networkId);
+    if (!compiled.length) return { hide: false, nohilight: false, nonotify: false };
+    // Evaluate even for a nick-less event: a scope mute (mask null — a muted
+    // channel/network) must still veto its notification, so a nick-less line
+    // (e.g. a server notice in a notify_always channel) doesn't slip past. A
+    // sender-specific rule simply won't match a null nick.
+    return evaluateIgnores(compiled, {
+      nick: decorated.nick ?? null,
+      userhost: decorated.userhost ?? null,
+      target: decorated.target,
+      text: decorated.text ?? '',
+      type: decorated.type,
+      isDm: !!decorated.dm,
+    });
   }
 
   // True when the user's ignore rules would hide this event (a hide-level match,

@@ -101,7 +101,11 @@ function onWindowKey(e: KeyboardEvent): void {
 // menu itself (e.g. scrolling a long menu) is ignored.
 function onWindowUserScroll(e: Event): void {
   if (!state.open) return;
-  if (menuEl.value && menuEl.value.contains(e.target as Node)) return;
+  // e.target on a captured wheel/touchmove is normally the element under the
+  // pointer, but guard the non-Node case (window/document) so contains() can't
+  // throw. A non-Node target is never inside the menu, so fall through to close.
+  const t = e.target;
+  if (t instanceof Node && menuEl.value?.contains(t)) return;
   menu.close();
 }
 function onWindowResize(): void {

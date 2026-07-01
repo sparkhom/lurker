@@ -247,6 +247,24 @@ describe('NOUNREAD / NONOTIFY modifier levels (issue #359)', () => {
     expect(evalRules(rules, { nick: 'alice' }).nonotify).toBe(false);
   });
 
+  it('a scope mute (mask null) vetoes a nick-less event; a sender mute does not', () => {
+    // A nick-less notifying line (e.g. a server notice in a notify_always
+    // channel) must still be silenced by a muted channel/network.
+    expect(
+      evalRules([r({ mask: null, channels: ['#chan'], levels: ['NONOTIFY'] })], {
+        nick: null,
+        userhost: null,
+        target: '#chan',
+        type: 'notice',
+      }).nonotify,
+    ).toBe(true);
+    // …but a sender-specific mute can't match a null nick.
+    expect(
+      evalRules([r({ mask: 'bob', levels: ['NONOTIFY'] })], { nick: null, userhost: null })
+        .nonotify,
+    ).toBe(false);
+  });
+
   it('honors -except (a longer except mask un-mutes)', () => {
     const rules = [
       r({ id: 1, mask: null, channels: ['#chan'], levels: ['NONOTIFY'] }),

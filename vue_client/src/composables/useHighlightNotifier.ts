@@ -119,12 +119,14 @@ export function notifyForEvent(event: NotifyEvent | null | undefined): void {
   // (/ignore x PUBLIC, a #chan or -pattern rule) suppresses the toast for a
   // message it also hides; a NOHIGHLIGHT rule suppresses the highlight
   // toast/sound while leaving the message visible; and a NONOTIFY rule (a muted
-  // channel/network/DM — issue #359) suppresses the toast/sound outright. Push
-  // is gated server-side in wsHub.maybePush (push fires while no client is open).
+  // channel/network/DM — issue #359) suppresses the toast/sound outright. We
+  // evaluate even for a nick-less event so a scope mute (mask null) still vetoes
+  // it; a sender-specific rule just won't match a null nick. Push is gated
+  // server-side in wsHub.maybePush (push fires while no client is open).
   const ignores = useIgnoresStore();
-  if (event.nick && event.networkId && event.target) {
+  if (event.networkId && event.target) {
     const verdict = ignores.evaluate(event.networkId, {
-      nick: event.nick,
+      nick: event.nick ?? null,
       userhost: event.userhost ?? null,
       target: event.target,
       text: event.text ?? '',
