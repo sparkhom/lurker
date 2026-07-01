@@ -348,16 +348,32 @@ export function countOlder(networkId: number, target: string, beforeId: number):
 export const COUNTABLE_TYPES = new Set(['message', 'action', 'notice']);
 const COUNTABLE_TYPES_SQL = `('${[...COUNTABLE_TYPES].join("','")}')`;
 
-export function countNewer(networkId: number, target: string, afterId: number): number {
+// Unread badges cap their display at ">999" (client BufferList.unreadLabel), so
+// the exact count past that is never shown — yet an unbounded COUNT scans the
+// buffer's ENTIRE unread range (every row with id > the read pointer), which is
+// the dominant per-buffer cost of a connect snapshot on a deep buffer with a low
+// read pointer. Cap the count at UNREAD_COUNT_CAP: the inner LIMIT stops the scan
+// once that many countable rows are found, and any value >= the cap renders
+// identically (">999"). Below the cap it's still exact.
+export const UNREAD_COUNT_CAP = 1000;
+export function countNewer(
+  networkId: number,
+  target: string,
+  afterId: number,
+  cap = UNREAD_COUNT_CAP,
+): number {
   return (
     db
       .prepare(
-        `SELECT COUNT(*) AS n FROM messages
-     WHERE network_id = ? AND target = ? AND id > ?
-       AND type IN ${COUNTABLE_TYPES_SQL}
-       AND from_ignored = 0`,
+        `SELECT COUNT(*) AS n FROM (
+           SELECT 1 FROM messages
+           WHERE network_id = ? AND target = ? AND id > ?
+             AND type IN ${COUNTABLE_TYPES_SQL}
+             AND from_ignored = 0
+           LIMIT ?
+         )`,
       )
-      .get(networkId, target, afterId || 0) as { n: number }
+      .get(networkId, target, afterId || 0, cap) as { n: number }
   ).n;
 }
 
