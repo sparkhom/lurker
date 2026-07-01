@@ -421,6 +421,12 @@ function handleMessage(raw: string): void {
 
   if (payload.kind === 'snapshot') {
     applySnapshot(payload.networks, payload.globalIgnores || []);
+    // Fresh connect ships channel/DM buffers as empty shells (no message rows),
+    // so their ids never advance our cursor. The server hands us the current
+    // global max here as our "caught up to now" mark, so the next reconnect's
+    // ?since pulls only genuinely-new events rather than re-gap-filling history
+    // the shells intentionally omitted. Present on fresh connects only.
+    if (typeof payload.cursor === 'number') trackSeenId(payload.cursor);
     return;
   }
   if (payload.kind === 'backlog') {
@@ -444,6 +450,11 @@ function handleMessage(raw: string): void {
       buffers.applyAroundSlice(payload.networkId, payload.target, payload);
     } else if (mode === 'latest') {
       buffers.applyLatestReplace(payload.networkId, payload.target, payload);
+      // The 'latest' reply is also how a fresh-connect SHELL hydrates on open;
+      // it carries inputHistory so up-arrow recall is restored (shells omit it).
+      if (payload.inputHistory) {
+        useInputHistoryStore().seed(payload.networkId, payload.target, payload.inputHistory);
+      }
     } else if (mode === 'after') {
       buffers.appendHistory(
         payload.networkId,
