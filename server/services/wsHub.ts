@@ -543,7 +543,6 @@ interface SnapshotBreakdown {
   // lookups are NOT included (the loop passes precomputed values).
   unreadMs: number; // shell: buildBufferShell; resume: bufferStateFields
   sliceMs: number; // buildResumeSlice — message reads + decorate (resume path only)
-  speakersMs: number; // listSpeakers (resume path only)
 }
 
 // Decide the slice a resume snapshot ships for ONE buffer.
@@ -1498,7 +1497,6 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
       offlineMs: 0,
       unreadMs: 0,
       sliceMs: 0,
-      speakersMs: 0,
     };
     let ok = false;
     try {
@@ -1519,11 +1517,10 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
         `[wsHub] snapshot for user ${userId} took ${ms}ms across ${b.bufferCount} buffers ` +
           `(${b.fresh ? 'fresh/shells' : 'resume'}) — networks=${b.networksMs}ms seeds=${b.seedsMs}ms ` +
           `online=${b.onlineMs}ms offline=${b.offlineMs}ms [online split: unread=${b.unreadMs}ms ` +
-          `slice=${b.sliceMs}ms speakers=${b.speakersMs}ms ` +
-          `rest=${Math.max(0, b.onlineMs - b.unreadMs - b.sliceMs - b.speakersMs)}ms]. ` +
+          `slice=${b.sliceMs}ms rest=${Math.max(0, b.onlineMs - b.unreadMs - b.sliceMs)}ms]. ` +
           `Runs synchronously on the event loop; on slow storage or a large account this can starve ` +
           `IRC socket I/O and trip ping timeouts (see [event-loop] logs). networks=member-list blob; ` +
-          `unread≈computeUnreadFor(+frame assembly), slice=buildResumeSlice reads, speakers=listSpeakers, ` +
+          `unread≈computeUnreadFor(+frame assembly), slice=buildResumeSlice reads, ` +
           `rest=sends/input-history/overhead.`,
       );
     }
@@ -1585,7 +1582,6 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
     let bufferCount = 0;
     let unreadMs = 0;
     let sliceMs = 0;
-    let speakersMs = 0;
     for (const conn of ircManager.listConnections(userId)) {
       const targets = new Set(listBufferTargets(conn.network.id));
       targets.add(`:server:${conn.network.id}`);
@@ -1660,9 +1656,13 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
           target,
           INPUT_HISTORY_SLICE,
         );
-        const tSpeakers = Date.now();
-        const speakers = listSpeakers(conn.network.id, target);
-        speakersMs += Date.now() - tSpeakers;
+        // Speakers are deliberately NOT shipped on connect. The sidebar doesn't
+        // use them, and computing them per buffer here (listSpeakers scanning
+        // history × every buffer) was the snapshot's dominant cost once the other
+        // scans were fixed. Nick autocomplete seeds them when you actually OPEN a
+        // buffer (the 'history' latest reply carries them — see applyLatestReplace)
+        // and live via recordSpeaker; omitting the key here leaves the client's
+        // existing map untouched.
         const tUnread = Date.now();
         const stateFields = bufferStateFields(userId, conn.network.id, target, precomputed);
         unreadMs += Date.now() - tUnread;
@@ -1676,7 +1676,6 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
           // append, or it splices a permanent hole (issue #205).
           reset: slice.reset,
           hasMoreOlder: slice.hasMoreOlder,
-          speakers,
           joined: channelJoined(target, conn),
           ...stateFields,
           inputHistory,
@@ -1717,7 +1716,6 @@ export function attachWsHub(httpServer: HttpServer, sessionSecret: string) {
       offlineMs,
       unreadMs,
       sliceMs,
-      speakersMs,
     };
   }
 

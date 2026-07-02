@@ -384,4 +384,24 @@ describe('shell unseeded lifecycle', () => {
     });
     expect(store.byKey('1::#a')!.unseeded).toBe(false);
   });
+
+  it('seeds speakers from the history reply so autocomplete works on open, not just after live messages', () => {
+    const store = useBuffersStore();
+    shellFrame(store, '#a');
+    store.activate(1, '#a');
+    const token = store.byKey('1::#a')!.pendingHistoryToken;
+    // The connect snapshot no longer ships speakers, so opening the buffer (this
+    // reply) is where they must load — otherwise nick autocomplete is empty until
+    // someone talks. applyLatestReplace previously dropped payload.speakers.
+    store.applyLatestReplace(1, '#a', {
+      token,
+      events: [live('#a', 5000)],
+      hasMoreOlder: true,
+      speakers: [
+        { nick: 'Alice', lastTime: 1000 },
+        { nick: 'Bob', lastTime: 2000 },
+      ],
+    });
+    expect(Object.keys(store.byKey('1::#a')!.speakers).sort()).toEqual(['alice', 'bob']);
+  });
 });

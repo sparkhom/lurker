@@ -666,6 +666,11 @@ export const useBuffersStore = defineStore('buffers', {
       // Fully hydrated now (this reply is the shell's real backlog) — clear the
       // shell flag so activate() stops trying to refetch it.
       buf.unseeded = false;
+      // Seed the recent-speaker map from the reply so nick autocomplete works the
+      // moment you open a channel — not only after someone speaks. This is the
+      // primary place speakers load now (the connect snapshot no longer ships
+      // them); seedSpeakers merges, so it composes with recordSpeaker's live map.
+      if (payload.speakers !== undefined) this.seedSpeakers(networkId, target, payload.speakers);
       // We're back on live: advance the read pointer to the new tail in the
       // same way activate() does on focus-in. Server clamps with MAX(), so
       // sending mark-read against the latest known id is idempotent.
