@@ -348,16 +348,45 @@ export function countOlder(networkId: number, target: string, beforeId: number):
 export const COUNTABLE_TYPES = new Set(['message', 'action', 'notice']);
 const COUNTABLE_TYPES_SQL = `('${[...COUNTABLE_TYPES].join("','")}')`;
 
-export function countNewer(networkId: number, target: string, afterId: number): number {
+// Unread badges cap their display at ">999" (client BufferList.unreadLabel), so
+// the exact count past that is never shown — yet an unbounded COUNT scans the
+// buffer's ENTIRE unread range (every row with id > the read pointer), which is
+// the dominant per-buffer cost of a connect snapshot on a deep buffer with a low
+// read pointer. Cap the count at UNREAD_COUNT_CAP: the inner ORDER BY id DESC +
+// LIMIT lets SQLite walk idx_messages_buffer(network_id, target, id DESC) and
+// stop once that many countable rows are found. Any value >= the cap renders
+// identically (">999"); below the cap it's still exact.
+//
+// NOTE: computeUnreadFor treats a DM's unread AS its highlight count (DMs are
+// inherently mentions), so a DM with >cap unread has its highlight count — and
+// thus its contribution to the PWA app-icon badge total — capped here too. That
+// is intended and invisible: both the sidebar badge and the OS app badge collapse
+// past ~999 anyway, and keeping DM highlights exact would mean reintroducing the
+// unbounded scan for DMs. Channel highlights are exact (their own indexed count).
+export const UNREAD_COUNT_CAP = 1000;
+export function countNewer(
+  networkId: number,
+  target: string,
+  afterId: number,
+  cap = UNREAD_COUNT_CAP,
+): number {
+  // Guard: a non-positive / non-integer cap would become SQLite's `LIMIT -1`
+  // (= no limit) and silently reintroduce the unbounded scan — fall back to the
+  // default instead.
+  const lim = Number.isInteger(cap) && cap > 0 ? cap : UNREAD_COUNT_CAP;
   return (
     db
       .prepare(
-        `SELECT COUNT(*) AS n FROM messages
-     WHERE network_id = ? AND target = ? AND id > ?
-       AND type IN ${COUNTABLE_TYPES_SQL}
-       AND from_ignored = 0`,
+        `SELECT COUNT(*) AS n FROM (
+           SELECT 1 FROM messages
+           WHERE network_id = ? AND target = ? AND id > ?
+             AND type IN ${COUNTABLE_TYPES_SQL}
+             AND from_ignored = 0
+           ORDER BY id DESC
+           LIMIT ?
+         )`,
       )
-      .get(networkId, target, afterId || 0) as { n: number }
+      .get(networkId, target, afterId || 0, lim) as { n: number }
   ).n;
 }
 

@@ -745,6 +745,27 @@ describe('from_ignored excludes ignored senders from unread/highlight counts', (
     expect(countNewer(net.id, '#ig', 0)).toBe(2);
   });
 
+  it('countNewer stops at the cap (exact below it) so a deep unread range is not scanned', () => {
+    const user = createUser('cap-count');
+    const net = createNetwork(user.id, {
+      name: 'n',
+      host: 'h',
+      port: 6697,
+      tls: true,
+      nick: 'me',
+    })!;
+    for (let i = 0; i < 5; i++) chat(net.id, '#cap', 'alice', `m${i}`);
+    // Below the cap → exact.
+    expect(countNewer(net.id, '#cap', 0)).toBe(5);
+    // At/over the cap → returns the cap, not the true count (the client renders
+    // both as ">999", so it's invisible; the point is the scan stops early).
+    expect(countNewer(net.id, '#cap', 0, 3)).toBe(3);
+    // Guard: a non-positive cap must NOT become SQLite's `LIMIT -1` (unbounded) —
+    // it falls back to the default, so the count is still bounded (here, all 5).
+    expect(countNewer(net.id, '#cap', 0, -1)).toBe(5);
+    expect(countNewer(net.id, '#cap', 0, 0)).toBe(5);
+  });
+
   it('countHighlightsNewer excludes from_ignored rows even when they matched a rule', () => {
     const user = createUser('ig-hl-count');
     const net = createNetwork(user.id, {
