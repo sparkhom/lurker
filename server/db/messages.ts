@@ -584,22 +584,20 @@ export function searchMessages(
   }));
 }
 
-// Autocomplete speakers, derived from message history. Grouping over a buffer's
-// ENTIRE history is O(stored messages) per buffer — the dominant cost of a
-// resume/reconnect snapshot on a deep buffer (a fresh connect ships shells that
-// omit speakers, which is why reload stays cheap). So bound the work to the most
-// recent SPEAKER_SCAN_WINDOW *chat* rows, THEN group. The filters live INSIDE the
-// windowed subquery (not outside it) on purpose: SQLite walks the tail of
-// idx_messages_buffer(network_id, target, id DESC) applying them, so a burst of
-// non-chat rows (a netsplit's join/quit flood) is skipped rather than eating the
-// window and starving the speaker set. Steady-state cost is fixed regardless of
-// history depth; only a channel that is currently almost all events walks
-// further, and that's still far cheaper than the old whole-history group. Output
-// is (near-)equivalent to the old query for autocomplete's purposes — it already
-// returned only the most-recent speakers by last-spoken time, which is what nick
-// completion wants. (Backfilled CHATHISTORY isn't a concern: those batches are
-// dropped, not inserted, so id order tracks time order — see ircConnection.ts.)
-const SPEAKER_SCAN_WINDOW = 2000;
+// Autocomplete speakers, derived from message history. This is now called when
+// the user OPENS a buffer (the 'history' latest reply seeds nick completion) — the
+// connect snapshot no longer ships speakers — so it's one buffer at a time, not
+// every buffer at once. Still, bound the work to the most recent
+// SPEAKER_SCAN_WINDOW *chat* rows, THEN group, so it's O(window) regardless of how
+// deep the buffer is. The window is small: autocomplete only cares about the last
+// handful of speakers, and the client keeps building the list live via
+// recordSpeaker as the conversation continues. The filters live INSIDE the
+// windowed subquery on purpose: SQLite walks the tail of idx_messages_buffer(
+// network_id, target, id DESC) applying them, so a burst of non-chat rows (a
+// netsplit's join/quit flood) is skipped rather than eating the window and
+// starving the speaker set. (Backfilled CHATHISTORY isn't a concern: those batches
+// are dropped, not inserted, so id order tracks time order — see ircConnection.ts.)
+const SPEAKER_SCAN_WINDOW = 300;
 const listSpeakersStmt = db.prepare(`
   -- Exactly one MAX() aggregate, so SQLite takes the bare (non-grouped) \`nick\`
   -- from the same row that supplied MAX(time) — i.e. the most-recent casing,
