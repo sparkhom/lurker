@@ -111,6 +111,9 @@ function migrate() {
       FOREIGN KEY (network_id) REFERENCES networks(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_messages_buffer ON messages(network_id, target, id DESC);
+    -- Supports the retention sweeper's batched delete (WHERE time < cutoff)
+    -- in messageRetentionSweeper.ts, which scans across every network/target.
+    CREATE INDEX IF NOT EXISTS idx_messages_time ON messages(time);
 
     -- network_id is nullable: NULL keys the app-scoped system buffer (#355),
     -- which has no network. The composite PK stays (network buffers dedupe on it,

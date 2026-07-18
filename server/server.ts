@@ -41,6 +41,11 @@ import {
   shutdownExportJobs,
 } from './services/exportJobs.js';
 import { startIgnoreSweeper, stopIgnoreSweeper } from './services/ignoreSweeper.js';
+import {
+  sweepExpiredMessages,
+  startMessageRetentionSweeper,
+  stopMessageRetentionSweeper,
+} from './services/messageRetentionSweeper.js';
 import { sweepTempUploads } from './routes/uploads.js';
 import { startEventLoopMonitor, stopEventLoopMonitor } from './services/eventLoopMonitor.js';
 
@@ -145,6 +150,11 @@ startExportSweeper();
 // Prune expired -time ignore rules on an interval (#301).
 startIgnoreSweeper();
 
+// Prune chat history past the operator's configured retention window, if any
+// (default: keep forever). Once at boot, then on an interval.
+sweepExpiredMessages();
+startMessageRetentionSweeper();
+
 // In node edition, start reporting to the orchestrator (register on boot +
 // heartbeat on an interval). No-op in standalone or when unconfigured.
 startOrchestratorClient();
@@ -174,6 +184,7 @@ function shutdown(signal: string): void {
   stopBouncer();
   shutdownExportJobs();
   stopIgnoreSweeper();
+  stopMessageRetentionSweeper();
   stopEventLoopMonitor();
   ircManager.shutdown();
   server.close(() => process.exit(0));

@@ -56,6 +56,9 @@ export const useAdminStore = defineStore('admin', {
     networkPresets: [] as AdminNetworkPreset[],
     allowUserDefinedNetworks: true,
     networksLoaded: false,
+    // Chat-history retention (days), null = keep forever.
+    messageRetentionDays: null as number | null,
+    retentionLoaded: false,
     usersLoaded: false,
     invitesLoaded: false,
     uploadersLoaded: false,
@@ -196,6 +199,26 @@ export const useAdminStore = defineStore('admin', {
       // Refetch rather than assign: the server 409s this when no presets exist,
       // and the throw must leave the checkbox showing the truth, not the attempt.
       await this.fetchNetworkPresets();
+    },
+
+    // ─── chat-history retention ──────────────────────────────────────────────
+    async fetchRetention() {
+      this.error = '';
+      try {
+        const data = await api('/api/admin/retention');
+        this.messageRetentionDays = data.retentionDays ?? null;
+        this.retentionLoaded = true;
+      } catch (e: any) {
+        this.error = e.message || 'failed to load retention settings';
+        throw e;
+      }
+    },
+    async setMessageRetentionDays(days: number | null) {
+      const data = await api('/api/admin/retention', {
+        method: 'PUT',
+        body: { retentionDays: days },
+      });
+      this.messageRetentionDays = data.retentionDays ?? null;
     },
   },
 });

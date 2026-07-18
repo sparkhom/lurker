@@ -760,6 +760,25 @@ const listSpeakersStmt = db.prepare(`
   LIMIT ?
 `);
 
+// Delete every row older than `cutoffIso` (an ISO `time` string), for the
+// retention sweeper (services/messageRetentionSweeper). Batched rather than one
+// statement: better-sqlite3 is synchronous on the single shared connection, so
+// an unbounded DELETE across a large table would stall every other request
+// (IRC inserts, API reads) for however long it took. Loops until a batch comes
+// back short, which is the signal nothing older than the cutoff remains.
+export function deleteOlderThan(cutoffIso: string, batchSize = 2000): number {
+  const stmt = db.prepare(
+    `DELETE FROM messages WHERE id IN (SELECT id FROM messages WHERE time < ? LIMIT ?)`,
+  );
+  let total = 0;
+  for (;;) {
+    const info = stmt.run(cutoffIso, batchSize);
+    total += info.changes;
+    if (info.changes < batchSize) break;
+  }
+  return total;
+}
+
 export function listSpeakers(
   networkId: number,
   target: string,

@@ -22,6 +22,10 @@ export function setInstanceSetting(key: string, value: string): void {
   ).run(key, value);
 }
 
+export function deleteInstanceSetting(key: string): void {
+  db.prepare('DELETE FROM instance_settings WHERE key = ?').run(key);
+}
+
 // Keep this literal in sync with the one the seed migration writes
 // (db/uploaderConfigSeed.ts) — the seed can't import this module (import cycle),
 // so the string lives in both places by necessity.
@@ -60,4 +64,27 @@ export function allowUserDefinedNetworks(): boolean {
 
 export function setAllowUserDefinedNetworks(allow: boolean): void {
   setInstanceSetting(ALLOW_USER_DEFINED_NETWORKS_KEY, allow ? '1' : '0');
+}
+
+export const MESSAGE_RETENTION_DAYS_KEY = 'messages.retention_days';
+
+/**
+ * How many days of chat history (the `messages` table) the retention sweeper
+ * keeps before deleting a row, or null to keep everything forever. Default
+ * when unset: forever — an upgrade must never silently start deleting a
+ * self-hoster's existing history.
+ */
+export function getMessageRetentionDays(): number | null {
+  const v = getInstanceSetting(MESSAGE_RETENTION_DAYS_KEY);
+  if (v === null) return null;
+  const days = Number(v);
+  return Number.isInteger(days) && days > 0 ? days : null;
+}
+
+export function setMessageRetentionDays(days: number | null): void {
+  if (days == null) {
+    deleteInstanceSetting(MESSAGE_RETENTION_DAYS_KEY);
+    return;
+  }
+  setInstanceSetting(MESSAGE_RETENTION_DAYS_KEY, String(days));
 }
